@@ -17,7 +17,7 @@
 package org.gradle.play.integtest.fixtures
 
 import org.gradle.api.tasks.compile.AbstractCompilerContinuousIntegrationTest
-
+import static org.gradle.play.integtest.fixtures.Repositories.*
 
 abstract class AbstractPlayCompilerContinuousIntegrationTest extends AbstractCompilerContinuousIntegrationTest {
     String getPlugins() {
@@ -31,18 +31,7 @@ abstract class AbstractPlayCompilerContinuousIntegrationTest extends AbstractCom
                 $plugins
             }
 
-            repositories {
-                jcenter()
-                maven {
-                    name "typesafe-maven-release"
-                    url "https://repo.typesafe.com/typesafe/maven-releases"
-                }
-                ivy {
-                    name "typesafe-ivy-release"
-                    url "https://repo.typesafe.com/typesafe/ivy-releases"
-                    layout "ivy"
-                }
-            }
+            ${PLAY_REPOSITORES}
         """
     }
 }

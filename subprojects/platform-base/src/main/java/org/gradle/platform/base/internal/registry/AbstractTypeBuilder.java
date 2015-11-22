@@ -16,15 +16,20 @@
 
 package org.gradle.platform.base.internal.registry;
 
-import org.gradle.model.internal.manage.schema.ManagedImplModelSchema;
+import com.google.common.collect.Sets;
+import org.gradle.model.internal.manage.schema.ManagedImplSchema;
 import org.gradle.model.internal.manage.schema.ModelSchema;
 import org.gradle.platform.base.InvalidModelException;
+import org.gradle.platform.base.TypeBuilder;
 import org.gradle.platform.base.internal.builder.TypeBuilderInternal;
+
+import java.util.Set;
 
 public abstract class AbstractTypeBuilder<T> implements TypeBuilderInternal<T> {
     private final Class<?> markerAnnotation;
     private final ModelSchema<? extends T> schema;
     private Class<? extends T> implementation;
+    private Set<Class<?>> internalViews = Sets.newLinkedHashSet();
 
     public AbstractTypeBuilder(Class<?> markerAnnotation, ModelSchema<? extends T> schema) {
         this.markerAnnotation = markerAnnotation;
@@ -33,7 +38,7 @@ public abstract class AbstractTypeBuilder<T> implements TypeBuilderInternal<T> {
 
     @Override
     public TypeBuilderInternal<T> defaultImplementation(Class<? extends T> implementation) {
-        if (this.schema instanceof ManagedImplModelSchema) {
+        if (this.schema instanceof ManagedImplSchema) {
             throw new InvalidModelException(String.format("Method annotated with @%s cannot set default implementation for managed type %s.", markerAnnotation.getSimpleName(), schema.getType().getName()));
         }
         if (this.implementation != null) {
@@ -46,5 +51,19 @@ public abstract class AbstractTypeBuilder<T> implements TypeBuilderInternal<T> {
     @Override
     public Class<? extends T> getDefaultImplementation() {
         return this.implementation;
+    }
+
+    @Override
+    public TypeBuilder<T> internalView(Class<?> internalView) {
+        if (internalViews.contains(internalView)) {
+            throw new InvalidModelException(String.format("Internal view '%s' must not be specified multiple times.", internalView.getName()));
+        }
+        internalViews.add(internalView);
+        return this;
+    }
+
+    @Override
+    public Set<Class<?>> getInternalViews() {
+        return internalViews;
     }
 }

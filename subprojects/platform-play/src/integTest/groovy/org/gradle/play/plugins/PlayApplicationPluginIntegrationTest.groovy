@@ -19,8 +19,9 @@ package org.gradle.play.plugins
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.TestResources
 import org.gradle.test.fixtures.archive.JarTestFixture
-import org.gradle.util.TextUtil
 import org.junit.Rule
+
+import static org.gradle.play.integtest.fixtures.Repositories.PLAY_REPOSITORES
 
 class PlayApplicationPluginIntegrationTest extends AbstractIntegrationSpec {
 
@@ -30,23 +31,12 @@ class PlayApplicationPluginIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
         settingsFile << """ rootProject.name = 'play-app' """
         buildFile << """
-        plugins {
-            id 'play-application'
-        }
+            plugins {
+                id 'play-application'
+            }
 
-        repositories {
-            jcenter()
-            maven {
-                name "typesafe-maven-release"
-                url "https://repo.typesafe.com/typesafe/maven-releases"
-            }
-            ivy {
-                name "typesafe-ivy-release"
-                url "https://repo.typesafe.com/typesafe/ivy-releases"
-                layout "ivy"
-            }
-        }
-"""
+            ${PLAY_REPOSITORES}
+        """
     }
 
     def "cannot register multiple PlayApplicationSpec components"() {
@@ -117,14 +107,14 @@ class PlayApplicationPluginIntegrationTest extends AbstractIntegrationSpec {
         succeeds("components")
 
         then:
-        output.contains(TextUtil.toPlatformLineSeparators("""
+        output.contains """
     Java source 'play:extraJava'
         srcDir: src${File.separator}extraJava
-"""))
-        output.contains(TextUtil.toPlatformLineSeparators("""
+"""
+        output.contains """
     Scala source 'play:extraScala'
         srcDir: src${File.separator}extraScala
-"""))
+"""
 
         when:
         succeeds("assemble")

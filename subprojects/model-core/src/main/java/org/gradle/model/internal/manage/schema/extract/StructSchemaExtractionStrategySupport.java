@@ -19,14 +19,14 @@ package org.gradle.model.internal.manage.schema.extract;
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
 import com.google.common.base.Joiner;
+import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import org.apache.commons.lang.StringUtils;
 import org.gradle.api.Action;
 import org.gradle.api.Nullable;
+import org.gradle.model.Unmanaged;
 import org.gradle.model.internal.manage.schema.ModelProperty;
 import org.gradle.model.internal.manage.schema.ModelSchema;
-import org.gradle.model.internal.manage.schema.ModelSchemaStore;
-import org.gradle.model.internal.manage.schema.cache.ModelSchemaCache;
 import org.gradle.model.internal.method.WeaklyTypeReferencingMethod;
 import org.gradle.model.internal.type.ModelType;
 
@@ -36,7 +36,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import static com.google.common.base.Predicates.in;
+import static com.google.common.base.Predicates.not;
 import static org.gradle.model.internal.manage.schema.extract.ModelSchemaUtils.getOverloadedMethods;
+import static org.gradle.model.internal.manage.schema.extract.ModelSchemaUtils.getOverriddenMethods;
 
 public abstract class StructSchemaExtractionStrategySupport implements ModelSchemaExtractionStrategy {
 
@@ -48,10 +51,10 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
 
     protected abstract boolean isTarget(ModelType<?> type);
 
-    public <R> ModelSchemaExtractionResult<R> extract(final ModelSchemaExtractionContext<R> extractionContext, ModelSchemaStore store, final ModelSchemaCache cache) {
+    public <R> void extract(final ModelSchemaExtractionContext<R> extractionContext) {
         ModelType<R> type = extractionContext.getType();
         if (!isTarget(type)) {
-            return null;
+            return;
         }
 
         validateTypeHierarchy(extractionContext, type);
@@ -59,19 +62,27 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
         List<ModelPropertyExtractionResult<?>> propertyExtractionResults = extractPropertySchemas(extractionContext, ModelSchemaUtils.getCandidateMethods(type.getRawClass()));
         List<ModelSchemaAspect> aspects = aspectExtractor.extract(extractionContext, propertyExtractionResults);
 
-        ModelSchema<R> schema = createSchema(extractionContext, propertyExtractionResults, aspects, store);
-        Iterable<ModelSchemaExtractionContext<?>> propertyDependencies = Iterables.transform(propertyExtractionResults, new Function<ModelPropertyExtractionResult<?>, ModelSchemaExtractionContext<?>>() {
-            public ModelSchemaExtractionContext<?> apply(ModelPropertyExtractionResult<?> propertyResult) {
-                return toPropertyExtractionContext(extractionContext, propertyResult, cache);
-            }
-        });
+        ModelSchema<R> schema = createSchema(extractionContext, propertyExtractionResults, aspects);
+        for (ModelPropertyExtractionResult<?> propertyResult : propertyExtractionResults) {
+            toPropertyExtractionContext(extractionContext, propertyResult);
+        }
 
-        return new ModelSchemaExtractionResult<R>(schema, propertyDependencies);
+        extractionContext.found(schema);
     }
 
-    private <R, P> ModelSchemaExtractionContext<P> toPropertyExtractionContext(ModelSchemaExtractionContext<R> parentContext, ModelPropertyExtractionResult<P> propertyResult, ModelSchemaCache modelSchemaCache) {
+    private <R, P> void toPropertyExtractionContext(ModelSchemaExtractionContext<R> parentContext, ModelPropertyExtractionResult<P> propertyResult) {
         ModelProperty<P> property = propertyResult.getProperty();
-        return parentContext.child(property.getType(), propertyDescription(parentContext, property), createPropertyValidator(propertyResult, modelSchemaCache));
+        parentContext.child(property.getType(), propertyDescription(parentContext, property), attachSchema(property, createPropertyValidator(parentContext, propertyResult)));
+    }
+
+    private <P> Action<? super ModelSchema<P>> attachSchema(final ModelProperty<P> property, final Action<ModelSchema<P>> propertyValidator) {
+        return new Action<ModelSchema<P>>() {
+            @Override
+            public void execute(ModelSchema<P> propertySchema) {
+                property.setSchema(propertySchema);
+                propertyValidator.execute(propertySchema);
+            }
+        };
     }
 
     private <R> List<ModelPropertyExtractionResult<?>> extractPropertySchemas(ModelSchemaExtractionContext<R> extractionContext, Multimap<String, Method> methodsByName) {
@@ -88,24 +99,41 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
 
             Collection<Method> methods = methodsByName.get(methodName);
 
+            List<List<Method>> overriddenMethods = getOverriddenMethods(methods);
+            if (!getterOrSetter(methodName) && overriddenMethods != null) {
+                handleOverriddenMethods(extractionContext, overriddenMethods);
+                List<Method> flattenedOverridden = Lists.newArrayList(Iterables.concat(overriddenMethods));
+                methods = Lists.newArrayList(Iterables.filter(methods, not(in(flattenedOverridden))));
+                // TODO:PM mark non get/setters overridden methods accepted by child strategies as handled because they should be by default implementations, not enough context to validate this here
+                handledMethods.addAll(flattenedOverridden);
+                if (methods.isEmpty()) {
+                    continue;
+                }
+            }
+
             List<Method> overloadedMethods = getOverloadedMethods(methods);
             if (overloadedMethods != null) {
                 handleOverloadedMethods(extractionContext, overloadedMethods);
-                continue;
+                methods = filterGetterMethods(methods);
+                if (methods.isEmpty()) {
+                    continue;
+                }
             }
 
             int getterPrefixLen = getterPrefixLength(methodName);
             if (getterPrefixLen >= 0) {
                 Method mostSpecificGetter = ModelSchemaUtils.findMostSpecificMethod(methods);
 
+                String propertyNameCapitalized = methodName.substring(getterPrefixLen);
                 char getterPropertyNameFirstChar = methodName.charAt(getterPrefixLen);
                 if (!Character.isUpperCase(getterPropertyNameFirstChar)) {
-                    handleInvalidGetter(extractionContext, mostSpecificGetter,
-                        String.format("the %s character of the getter method name must be an uppercase character", getterPrefixLen == 2 ? "3rd" : "4th"));
-                    continue;
+                    if (propertyNameCapitalized.length() == 1 || (!Character.isUpperCase(methodName.charAt(getterPrefixLen + 1)))) {
+                        handleInvalidGetter(extractionContext, mostSpecificGetter,
+                            String.format("the %s character of the getter method name must be an uppercase character", getterPrefixLen == 2 ? "3rd" : "4th"));
+                        continue;
+                    }
                 }
 
-                String propertyNameCapitalized = methodName.substring(getterPrefixLen);
                 String propertyName = StringUtils.uncapitalize(propertyNameCapitalized);
                 String setterName = "set" + propertyNameCapitalized;
                 Collection<Method> setterMethods = methodsByName.get(setterName);
@@ -120,18 +148,20 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
                         List<Method> overloadedIsGetterMethods = getOverloadedMethods(isGetterMethods);
                         if (overloadedIsGetterMethods != null) {
                             handleOverloadedMethods(extractionContext, overloadedIsGetterMethods);
-                            continue;
+                            isGetterMethods = filterGetterMethods(isGetterMethods);
                         }
 
-                        Method mostSpecificIsGetter = ModelSchemaUtils.findMostSpecificMethod(isGetterMethods);
-                        if (mostSpecificGetter.getReturnType() != boolean.class || mostSpecificIsGetter.getReturnType() != boolean.class) {
-                            handleInvalidGetter(extractionContext, mostSpecificIsGetter,
-                                String.format("property '%s' has both '%s()' and '%s()' getters, but they don't both return a boolean",
-                                    propertyName, isGetterName, methodName));
-                            continue;
+                        if (!isGetterMethods.isEmpty()) {
+                            Method mostSpecificIsGetter = ModelSchemaUtils.findMostSpecificMethod(isGetterMethods);
+                            if (mostSpecificGetter.getReturnType() != boolean.class || mostSpecificIsGetter.getReturnType() != boolean.class) {
+                                handleInvalidGetter(extractionContext, mostSpecificIsGetter,
+                                    String.format("property '%s' has both '%s()' and '%s()' getters, but they don't both return a boolean",
+                                        propertyName, isGetterName, methodName));
+                                continue;
+                            }
+                            getterMethods = Iterables.concat(getterMethods, isGetterMethods);
+                            skippedMethodNames.add(isGetterName);
                         }
-                        getterMethods = Iterables.concat(getterMethods, isGetterMethods);
-                        skippedMethodNames.add(isGetterName);
                     }
                 }
 
@@ -150,6 +180,22 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
 
         validateAllNecessaryMethodsHandled(extractionContext, methodsByName.values(), handledMethods);
         return results;
+    }
+
+    private static boolean getterOrSetter(String methodName) {
+        if (getterPrefixLength(methodName) > 0) {
+            return true;
+        }
+        return methodName.startsWith("set") && !"set".equals(methodName);
+    }
+
+    private static Collection<Method> filterGetterMethods(Collection<Method> methods) {
+        return Lists.newArrayList(Iterables.filter(methods, new Predicate<Method>() {
+            @Override
+            public boolean apply(Method method) {
+                return method.getParameterTypes().length == 0;
+            }
+        }));
     }
 
     private static int getterPrefixLength(String methodName) {
@@ -179,9 +225,13 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
         ModelProperty.StateManagementType stateManagementType = determineStateManagementType(extractionContext, getterContext);
         final ModelType<R> returnType = ModelType.returnType(mostSpecificGetter);
 
-        boolean writable = setterContext != null;
-        if (writable) {
+        WeaklyTypeReferencingMethod<?, Void> setterRef;
+        if (setterContext != null) {
             validateSetter(extractionContext, returnType, getterContext, setterContext);
+            Method mostSpecificDeclaration = setterContext.getMostSpecificDeclaration();
+            setterRef = WeaklyTypeReferencingMethod.of(ModelType.of(mostSpecificDeclaration.getDeclaringClass()), ModelType.of(void.class), mostSpecificDeclaration);
+        } else {
+            setterRef = null;
         }
 
         ImmutableSet<ModelType<?>> declaringClasses = ImmutableSet.copyOf(Iterables.transform(getterContext.getDeclaringMethods(), new Function<Method, ModelType<?>>() {
@@ -192,12 +242,14 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
 
         List<WeaklyTypeReferencingMethod<?, R>> getterRefs = Lists.newArrayList(Iterables.transform(getterContext.getGetters(), new Function<Method, WeaklyTypeReferencingMethod<?, R>>() {
             @Override
-            public WeaklyTypeReferencingMethod<?, R> apply(@Nullable Method getter) {
-                return WeaklyTypeReferencingMethod.of(extractionContext.getType(), returnType, getter);
+            public WeaklyTypeReferencingMethod<?, R> apply(Method getter) {
+                return WeaklyTypeReferencingMethod.of(ModelType.of(getter.getDeclaringClass()), returnType, getter);
             }
         }));
+
+        boolean declaredAsHavingUnmanagedType = getterContext.getAnnotation(Unmanaged.class) != null;
         return new ModelPropertyExtractionResult<R>(
-            ModelProperty.of(returnType, propertyName, stateManagementType, writable, declaringClasses, getterRefs),
+            new ModelProperty<R>(returnType, propertyName, stateManagementType, declaringClasses, getterRefs, setterRef, declaredAsHavingUnmanagedType),
             getterContext,
             setterContext
         );
@@ -209,13 +261,15 @@ public abstract class StructSchemaExtractionStrategySupport implements ModelSche
 
     protected abstract void handleInvalidGetter(ModelSchemaExtractionContext<?> extractionContext, Method getter, String message);
 
+    protected abstract void handleOverriddenMethods(ModelSchemaExtractionContext<?> extractionContext, List<List<Method>> overriddenMethods);
+
     protected abstract void handleOverloadedMethods(ModelSchemaExtractionContext<?> extractionContext, Collection<Method> overloadedMethods);
 
     protected abstract ModelProperty.StateManagementType determineStateManagementType(ModelSchemaExtractionContext<?> extractionContext, PropertyAccessorExtractionContext getterContext);
 
-    protected abstract <R> ModelSchema<R> createSchema(ModelSchemaExtractionContext<R> extractionContext, Iterable<ModelPropertyExtractionResult<?>> propertyResults, Iterable<ModelSchemaAspect> aspects, ModelSchemaStore store);
+    protected abstract <R> ModelSchema<R> createSchema(ModelSchemaExtractionContext<R> extractionContext, Iterable<ModelPropertyExtractionResult<?>> propertyResults, Iterable<ModelSchemaAspect> aspects);
 
-    protected abstract <P> Action<ModelSchemaExtractionContext<P>> createPropertyValidator(ModelPropertyExtractionResult<P> propertyResult, ModelSchemaCache modelSchemaCache);
+    protected abstract <P> Action<ModelSchema<P>> createPropertyValidator(ModelSchemaExtractionContext<?> extractionContext, ModelPropertyExtractionResult<P> propertyResult);
 
     private String propertyDescription(ModelSchemaExtractionContext<?> parentContext, ModelProperty<?> property) {
         if (property.getDeclaredBy().size() == 1 && property.getDeclaredBy().contains(parentContext.getType())) {

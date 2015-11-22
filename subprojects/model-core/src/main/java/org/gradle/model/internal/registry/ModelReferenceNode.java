@@ -34,8 +34,8 @@ class ModelReferenceNode extends ModelNodeInternal {
     private ModelNodeInternal target;
     private final MutableModelNode parent;
 
-    public ModelReferenceNode(CreatorRuleBinder creatorBinder, MutableModelNode parent) {
-        super(creatorBinder);
+    public ModelReferenceNode(ModelRegistration registration, MutableModelNode parent) {
+        super(registration);
         this.parent = parent;
     }
 
@@ -52,20 +52,25 @@ class ModelReferenceNode extends ModelNodeInternal {
     }
 
     @Override
-    public <T> ModelView<? extends T> asWritable(final ModelType<T> type, ModelRuleDescriptor ruleDescriptor, List<ModelView<?>> implicitDependencies) {
+    public boolean canBeViewedAs(ModelType<?> type) {
+        return target != null && target.canBeViewedAs(type);
+    }
+
+    @Override
+    public <T> ModelView<? extends T> asMutable(final ModelType<T> type, ModelRuleDescriptor ruleDescriptor, List<ModelView<?>> implicitDependencies) {
         if (target == null) {
             return InstanceModelView.of(getPath(), type, null);
         } else {
-            return new ModelViewWrapper<T>(getPath(), target.asWritable(type, ruleDescriptor, implicitDependencies));
+            return new ModelViewWrapper<T>(getPath(), target.asMutable(type, ruleDescriptor, implicitDependencies));
         }
     }
 
     @Override
-    public <T> ModelView<? extends T> asReadOnly(ModelType<T> type, @Nullable ModelRuleDescriptor ruleDescriptor) {
+    public <T> ModelView<? extends T> asImmutable(ModelType<T> type, @Nullable ModelRuleDescriptor ruleDescriptor) {
         if (target == null) {
             return InstanceModelView.of(getPath(), type, null);
         } else {
-            return new ModelViewWrapper<T>(getPath(), target.asReadOnly(type, ruleDescriptor));
+            return new ModelViewWrapper<T>(getPath(), target.asImmutable(type, ruleDescriptor));
         }
     }
 
@@ -80,12 +85,12 @@ class ModelReferenceNode extends ModelNodeInternal {
     }
 
     @Override
-    public void addLink(ModelCreator creator) {
+    public void addLink(ModelRegistration registration) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void addReference(ModelCreator creator) {
+    public void addReference(ModelRegistration registration) {
         throw new UnsupportedOperationException();
     }
 
@@ -95,22 +100,22 @@ class ModelReferenceNode extends ModelNodeInternal {
     }
 
     @Override
-    public <T> void applyToSelf(ModelActionRole type, ModelAction<T> action) {
+    public void applyToSelf(ModelActionRole type, ModelAction action) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public <T> void applyToAllLinks(ModelActionRole type, ModelAction<T> action) {
+    public void applyToAllLinks(ModelActionRole type, ModelAction action) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public <T> void applyToAllLinksTransitive(ModelActionRole type, ModelAction<T> action) {
+    public void applyToAllLinksTransitive(ModelActionRole type, ModelAction action) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public <T> void applyToLink(ModelActionRole type, ModelAction<T> action) {
+    public void applyToLink(ModelActionRole type, ModelAction action) {
         throw new UnsupportedOperationException();
     }
 
@@ -201,9 +206,20 @@ class ModelReferenceNode extends ModelNodeInternal {
     }
 
     @Override
+    protected void resetPrivateData() {
+    }
+
+    @Override
     public void ensureUsable() {
         if (target != null) {
             target.ensureUsable();
+        }
+    }
+
+    @Override
+    public void ensureAtLeast(State state) {
+        if (target != null) {
+            target.ensureAtLeast(state);
         }
     }
 

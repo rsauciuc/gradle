@@ -17,24 +17,25 @@
 package org.gradle.model.internal.manage.projection
 import org.gradle.api.internal.ClosureBackedAction
 import org.gradle.model.ModelViewClosedException
-import org.gradle.model.internal.core.ModelCreators
-import org.gradle.model.internal.core.ModelPath
-import org.gradle.model.internal.core.ModelReference
-import org.gradle.model.internal.core.ModelRuleExecutionException
+import org.gradle.model.internal.core.*
 import org.gradle.model.internal.fixture.ModelRegistryHelper
+import org.gradle.model.internal.fixture.TestNodeInitializerRegistry
+import org.gradle.model.internal.manage.schema.ManagedImplSchema
+import org.gradle.model.internal.manage.schema.StructSchema
 import org.gradle.model.internal.manage.schema.extract.DefaultModelSchemaStore
+import org.gradle.model.internal.type.ModelType
 import spock.lang.Specification
 
 abstract class AbstractCollectionModelProjectionTest<T, C extends Collection<T>> extends Specification {
 
     def schemaStore = DefaultModelSchemaStore.instance
+    def nodeInitializerRegistry = TestNodeInitializerRegistry.INSTANCE
     def collectionPath = ModelPath.path("collection")
     def registry = new ModelRegistryHelper()
     def internalType
     def internalTypeSchema
     def collectionProperty
-    def collectionType
-    def collectionSchema
+    ModelType<C> collectionType
     private ModelReference<C> reference
 
     abstract Class<?> holderType()
@@ -46,12 +47,15 @@ abstract class AbstractCollectionModelProjectionTest<T, C extends Collection<T>>
     def setup() {
         internalType = holderType()
         internalTypeSchema = schemaStore.getSchema(internalType)
+        assert internalTypeSchema instanceof StructSchema
         collectionProperty = internalTypeSchema.getProperty('items')
-        collectionType = collectionProperty.type
-        collectionSchema = schemaStore.getSchema(collectionType)
+        collectionType = collectionProperty.type as ModelType<C>
+        def collectionSchema = schemaStore.getSchema(collectionType)
+        assert collectionSchema instanceof ManagedImplSchema
+        def nodeInitializer = nodeInitializerRegistry.getNodeInitializer(NodeInitializerContext.forType(collectionSchema.getType()))
         reference = ModelReference.of(collectionPath, collectionType)
-        registry.create(
-            ModelCreators.of(collectionPath, collectionSchema.nodeInitializer)
+        registry.register(
+            ModelRegistrations.of(collectionPath, nodeInitializer)
                 .descriptor("define collection")
                 .build()
         )

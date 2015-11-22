@@ -17,9 +17,6 @@
 package org.gradle.language.base.internal.model;
 
 import org.gradle.api.Action;
-import org.gradle.api.NamedDomainObjectFactory;
-import org.gradle.language.base.LanguageSourceSet;
-import org.gradle.language.base.internal.registry.LanguageRegistration;
 import org.gradle.language.base.internal.registry.LanguageRegistry;
 import org.gradle.model.Defaults;
 import org.gradle.model.RuleSource;
@@ -35,22 +32,12 @@ import org.gradle.platform.base.internal.BinarySpecInternal;
  */
 @SuppressWarnings("unused")
 public class ComponentBinaryRules extends RuleSource {
-
     @Defaults
     void initializeBinarySourceSets(final ComponentSpec component, final LanguageRegistry languageRegistry) {
-        component.getBinaries().beforeEach(new Action<BinarySpec>() {
+        component.getBinaries().withType(BinarySpecInternal.class).beforeEach(new Action<BinarySpecInternal>() {
             @Override
-            public void execute(BinarySpec binary) {
-                for (LanguageRegistration<?> languageRegistration : languageRegistry) {
-                    // TODO - allow view as internal type and remove the cast
-                    registerLanguageSourceSets((BinarySpecInternal) binary, component.getName(), languageRegistration);
-                }
+            public void execute(BinarySpecInternal binary) {
                 addComponentSourceSetsToBinaryInputs(binary, component);
-            }
-
-            private <U extends LanguageSourceSet> void registerLanguageSourceSets(BinarySpecInternal binary, String componentName, LanguageRegistration<U> languageRegistration) {
-                NamedDomainObjectFactory<? extends U> sourceSetFactory = languageRegistration.getSourceSetFactory(componentName);
-                binary.getEntityInstantiator().registerFactory(languageRegistration.getSourceSetType(), sourceSetFactory);
             }
 
             private void addComponentSourceSetsToBinaryInputs(BinarySpec binary, ComponentSpec component) {

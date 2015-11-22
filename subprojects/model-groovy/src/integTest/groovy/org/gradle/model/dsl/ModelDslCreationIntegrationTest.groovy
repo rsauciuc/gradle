@@ -16,21 +16,13 @@
 
 package org.gradle.model.dsl
 
-import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
-
-import static org.gradle.util.Matchers.containsText
 
 class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
 
-    def setup() {
-        EnableModelDsl.enable(executer)
-    }
-
     def "can create and initialize elements"() {
         when:
-        buildScript """
+        buildScript '''
             @Managed
             interface Thing {
                 String getName()
@@ -44,12 +36,12 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
                 tasks {
                     create("echo") {
                         doLast {
-                            println "thing1.name: " + \$("thing1.name")
+                            println "thing1.name: " + $.thing1.name
                         }
                     }
                 }
             }
-        """
+        '''
 
         then:
         succeeds "echo"
@@ -58,7 +50,7 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
 
     def "creator closure can reference inputs"() {
         when:
-        buildScript """
+        buildScript '''
             @Managed
             interface Thing {
                 String getName()
@@ -70,27 +62,26 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
                     name = "foo"
                 }
                 thing2(Thing) {
-                    name = \$("thing1.name") + " bar"
+                    name = $.thing1.name + " bar"
                 }
                 tasks {
                     create("echo") {
                         doLast {
-                            println "thing2.name: " + \$("thing2.name")
+                            println "thing2.name: " + $.thing2.name
                         }
                     }
                 }
             }
-        """
+        '''
 
         then:
         succeeds "echo"
         output.contains "thing2.name: foo bar"
     }
 
-    @NotYetImplemented
-    def "creator closure can reference inputs using relative property reference"() {
+    def "reports failure in initialization closure"() {
         when:
-        buildScript """
+        buildScript '''
             @Managed
             interface Thing {
                 String getName()
@@ -99,29 +90,27 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
 
             model {
                 thing1(Thing) {
-                    name = "foo"
-                }
-                thing2(Thing) {
-                    name = "\${thing1.name} bar" // reference in a gstring
+                    unknown = 12
                 }
                 tasks {
                     create("echo") {
                         doLast {
-                            println "thing2.name: " + thing2.name
+                            println "thing1.name: " + $.thing1.name
                         }
                     }
                 }
             }
-        """
+        '''
 
         then:
-        succeeds "echo"
-        output.contains "thing2.name: foo bar"
+        fails "echo"
+        failure.assertHasCause('Exception thrown while executing model rule: thing1(Thing) { ... } @ build.gradle line 9, column 17')
+        failure.assertHasCause('No such property: unknown for class: Thing')
     }
 
     def "can create elements without mutating"() {
         when:
-        buildScript """
+        buildScript '''
             @Managed
             interface Thing {
                 String getName()
@@ -133,12 +122,12 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
                 tasks {
                     create("echo") {
                         doLast {
-                            println "thing1.name: " + \$("thing1.name")
+                            println "thing1.name: " + $.thing1.name
                         }
                     }
                 }
             }
-        """
+        '''
 
         then:
         succeeds "echo"
@@ -147,7 +136,7 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
 
     def "can apply defaults before creator closure is invoked"() {
         when:
-        buildScript """
+        buildScript '''
             @Managed
             interface Thing {
                 String getName()
@@ -165,17 +154,17 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
 
             model {
                 thing1(Thing) {
-                    name = "\$name foo"
+                    name = "$name foo"
                 }
                 tasks {
                     create("echo") {
                         doLast {
-                            println "thing1.name: " + \$("thing1.name")
+                            println "thing1.name: " + $.thing1.name
                         }
                     }
                 }
             }
-        """
+        '''
 
         then:
         succeeds "echo"
@@ -184,7 +173,37 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
 
     def "cannot create non managed types"() {
         when:
-        buildScript """
+        buildScript '''
+            apply plugin: 'language-base'
+            interface Thing {
+                String getName()
+                void setName(String name)
+            }
+
+            model {
+                thing1(Thing)
+                tasks {
+                    create("echo") {
+                        doLast {
+                            println "thing1.name: " + $.thing1.name
+                        }
+                    }
+                }
+            }
+        '''
+
+        then:
+        fails "dependencies" // something that doesn't actually require thing1 to be built
+        failure.assertHasCause("Declaration of model rule thing1(Thing) @ build.gradle line 9, column 17 is invalid.")
+        failureCauseContains("""A model element of type: 'Thing' can not be constructed.
+It must be one of:
+    - A managed type (annotated with @Managed)""")
+    }
+
+    def "cannot create non managed types and provide an initialization closure"() {
+        when:
+        buildScript '''
+            apply plugin: 'language-base'
             interface Thing {
                 String getName()
                 void setName(String name)
@@ -197,16 +216,19 @@ class ModelDslCreationIntegrationTest extends AbstractIntegrationSpec {
                 tasks {
                     create("echo") {
                         doLast {
-                            println "thing1.name: " + \$("thing1.name")
+                            println "thing1.name: " + $.thing1.name
                         }
                     }
                 }
             }
-        """
+        '''
 
         then:
         fails "dependencies" // something that doesn't actually require thing1 to be built
-        failure.assertThatCause(containsText("model.thing1 @ build.gradle"))
-        failure.assertThatCause(containsText("Cannot create an element of type Thing as it is not a managed type"))
+        failure.assertHasCause("Declaration of model rule thing1(Thing) { ... } @ build.gradle line 9, column 17 is invalid.")
+        failureCauseContains("""A model element of type: 'Thing' can not be constructed.
+It must be one of:
+    - A managed type (annotated with @Managed""")
     }
 }
+

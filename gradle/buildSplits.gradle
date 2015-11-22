@@ -1,5 +1,3 @@
-import org.gradle.build.BuildTypes
-
 /*
  * Copyright 2015 the original author or authors.
  *
@@ -17,44 +15,77 @@ import org.gradle.build.BuildTypes
  */
 
 def buckets = [
-    '1': [':modelCore', ':announce', ':antlr', ':internalIntegTesting', ':internalTesting', ':maven', ':messaging',
-          ':performance', ':platformBase', ':platformJvm', ':buildComparison', ':buildInit', ':cli', ':codeQuality', ':testKit',
-          ':docs', ':ear', ':ide', ':ideNative', ':ivy', ':jacoco', ':javascript', ':jetty', ':languageGroovy', ':languageJvm',
-          ':launcher', ':languageNative', ':platformNative', ':testingNative', ':native'
-    ],
+    "1": [":platformPlay", ":scala", ":languageScala", ":buildComparison",
+        ":ivy", ":platformBase", ":jacoco", ":announce", ":internalIntegTesting",
+        ":diagnostics", ":jetty", ":cli", ":reporting", ":toolingApiBuilders", ":openApi"],
 
-    '2': [':platformPlay', ':dependencyManagement', ':core', ':toolingApi',
-          ':modelGroovy', ':pluginDevelopment', ':pluginUse', ':publish', ':scala', ':signing', ':sonar',
-          ':openApi', ':osgi', ':toolingApiBuilders', ':ui', ':wrapper', ':languageScala', ':diagnostics',
-          ':plugins', ':integTest',
-          ':baseServices', ':baseServicesGroovy', ':reporting', ':resources', ':resourcesHttp', ':resourcesS3', ':resourcesSftp',
-          ':distributions', ':languageJava'
-    ]
+    "2": [":toolingApi", ":dependencyManagement", ":testKit", ":distributions",
+        ":pluginUse",  ":buildInit", ":languageGroovy", ":internalTesting",
+        ":languageJvm", ":performance", ":publish", ":resources", ":baseServicesGroovy", ":resourcesHttp",
+        ":pluginDevelopment", ":osgi"],
+
+    "3": [":launcher", ":plugins", ":codeQuality", ":languageJava",
+        ":ui", ":javascript", ":antlr", ":messaging", ":ear",
+        ":resourcesS3", ":wrapper", ":resourcesSftp", ":signing", ":modelGroovy", ":baseServices"],
+
+    "4": [":docs", ":integTest", ":core", ":languageNative", ":ide", ":platformJvm", ":platformNative",
+          ":modelCore", ":sonar", ":maven", ":testingNative", ":ideNative", ":native"]
 ]
 
 //Make sure all projects are accounted for
 def coveredProjects = (buckets.collect { it.value }).flatten()
-assert coveredProjects.size() == subprojects.size(): "The following projects should be added to a bucket: ${subprojects.collect { ":${it.name}" } - coveredProjects}"
+def uncoveredProjects = subprojects.collect { ":${it.name}" } - coveredProjects
+assert uncoveredProjects == [] : "The following projects should be added to a bucket: ${uncoveredProjects}"
 
+ext.runtimeProjectPaths = runtimeProjects.collect { it.path }
 
-buckets.each { String bucketName, List<String> projects ->
-    buildTypeList.each { BuildTypes.BuildType buildType ->
-        def tasks = tasksForProjects(buildType, projects)
-        project.getExtensions().buildTypes."${buildType.name + bucketName}"(tasks, buildType.projectProperties)
+//Make sure there are no duplicates between buckets
+for (int bucket : buckets.keySet().collect{it as int}) {
+    for (int other=bucket+1; other<=buckets.size(); other++) {
+        def duplicates = buckets["${bucket}"].intersect(buckets["${other}"])
+        assert duplicates == [] : "Duplicates were found between bucket ${bucket} and ${other}: ${duplicates}"
     }
-
 }
 
-def tasksForProjects(BuildTypes.BuildType buildType, List<String> projects) {
-    Set tasks = []
-    projects.each {
-        buildType.tasks.each { String task ->
-            if (!task.contains(':')) {
-                tasks << ["$project:${task}"]
-            } else {
-                tasks << task
+//Create appropriate build types for each bucket
+buildTypes.toArray().each { buildType ->
+    buckets.each { String bucketName, List<String> projects ->
+        def projectTasks = tasksForProjects(buildType, projects)
+        buildTypes.create("${buildType.name + bucketName}") {
+            tasks projectTasks as String[]
+            projectProperties buildType.projectProperties
+        }
+    }
+}
+
+def tasksForProjects(buildType, List<String> projects) {
+    List tasks = []
+    projects.each { String p ->
+        buildType.tasks.each { String t ->
+            String task = resolveTask(p, t)
+            if (task) {
+                if (!task.contains(':')) {
+                    tasks << "$p:${task}"
+                } else {
+                    // Add the task if the project is in this bucket
+                    if (task.startsWith("${p}:") || ":${task}".startsWith("${p}:")) {
+                        tasks << task
+                    }
+                }
             }
         }
     }
     return tasks
+}
+
+def String resolveTask(String projectPath, String task) {
+    if (testGroupings.containsKey(task)) {
+        if (projectPath in runtimeProjectPaths) {
+            return testGroupings[task]
+        } else {
+            return null
+        }
+    } else {
+        return task
+    }
 }

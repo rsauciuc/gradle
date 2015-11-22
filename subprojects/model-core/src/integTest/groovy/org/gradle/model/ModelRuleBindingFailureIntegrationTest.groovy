@@ -17,7 +17,6 @@
 package org.gradle.model
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
 
 /**
  * Tests the information provided when a model rule fails to bind.
@@ -25,10 +24,6 @@ import org.gradle.integtests.fixtures.EnableModelDsl
  * @see ModelRuleBindingValidationIntegrationTest
  */
 class ModelRuleBindingFailureIntegrationTest extends AbstractIntegrationSpec {
-
-    def setup() {
-        EnableModelDsl.enable(executer)
-    }
 
     def "unbound rule by-type subject and inputs are reported"() {
         given:
@@ -124,7 +119,7 @@ class ModelRuleBindingFailureIntegrationTest extends AbstractIntegrationSpec {
 
     def "unbound dsl rule by-path subject and inputs are reported"() {
         given:
-        buildScript """
+        buildScript '''
             @Managed interface Thing { }
 
             model {
@@ -132,14 +127,14 @@ class ModelRuleBindingFailureIntegrationTest extends AbstractIntegrationSpec {
                     // Subject only
                 }
                 foo.bla {
-                    println \$('unknown.thing')
-                    println \$('unknown.thing2')
+                    println $.unknown.thing
+                    println $.unknown.thing2
                 }
                 thing1(Thing) {
-                    println \$('unknown.thing')
+                    println $.unknown.thing
                 }
             }
-        """
+        '''
 
         when:
         fails "tasks"
@@ -147,11 +142,11 @@ class ModelRuleBindingFailureIntegrationTest extends AbstractIntegrationSpec {
         then:
         // TODO - should report unknown inputs as well
         failureCauseContains """
-  model.foo.bar @ build.gradle line 5, column 17
+  foo.bar { ... } @ build.gradle line 5, column 17
     subject:
       - foo.bar Object [*]
 
-  model.foo.bla @ build.gradle line 8, column 17
+  foo.bla { ... } @ build.gradle line 8, column 17
     subject:
       - foo.bla Object [*]
 """
@@ -183,7 +178,7 @@ class ModelRuleBindingFailureIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         failureCauseContains '''
-  model.tasks.foonar @ build.gradle line 15, column 17
+  tasks.foonar { ... } @ build.gradle line 15, column 17
     subject:
       - tasks.foonar Object [*]
           suggestions: tasks.foobar
@@ -229,7 +224,7 @@ class ModelRuleBindingFailureIntegrationTest extends AbstractIntegrationSpec {
         fails "tasks"
 
         then:
-        failure.assertHasDescription("A problem occurred evaluating root project")
+        failure.assertHasDescription("A problem occurred configuring root project")
         failure.assertHasCause("There is a problem with model rule Plugin3.Rules#m.")
         failure.assertHasCause("""Type-only model reference of type java.lang.String (parameter 1) is ambiguous as multiple model elements are available for this type:
   - s1 (created by: Plugin1.Rules#s1)
@@ -314,11 +309,11 @@ model {
       - person.parent.parent Person (parameter 1) [*]
       - person.parent.parent.parent.parent Person (parameter 2) [*]
 
-  model.person.parent.name @ build.gradle line 25, column 5
+  person.parent.name { ... } @ build.gradle line 25, column 5
     subject:
       - person.parent.name Object [*]
 
-  model.person.parent.parent.parent.parent.parent.name @ build.gradle line 28, column 5
+  person.parent.parent.parent.parent.parent.name { ... } @ build.gradle line 28, column 5
     subject:
       - person.parent.parent.parent.parent.parent.name Object [*]
 """

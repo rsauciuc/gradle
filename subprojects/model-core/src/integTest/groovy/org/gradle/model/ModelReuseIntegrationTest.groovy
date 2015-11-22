@@ -15,7 +15,7 @@
  */
 
 package org.gradle.model
-import org.gradle.integtests.fixtures.EnableModelDsl
+
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.model.internal.persist.ReusingModelRegistryStore
 
@@ -23,8 +23,6 @@ import org.gradle.model.internal.persist.ReusingModelRegistryStore
 class ModelReuseIntegrationTest extends DaemonIntegrationSpec {
 
     def setup() {
-        EnableModelDsl.enable(executer)
-
         executer.beforeExecute {
             withArgument("-D$ReusingModelRegistryStore.TOGGLE=true")
         }
@@ -50,7 +48,7 @@ class ModelReuseIntegrationTest extends DaemonIntegrationSpec {
                 tasks {
                     create("show") {
                         doLast {
-                            println "vals: " + System.identityHashCode(\$("vals"))
+                            println "vals: " + System.identityHashCode(\$.vals)
                             println "task: " + System.identityHashCode(it)
                         }
                     }

@@ -15,16 +15,17 @@
  */
 
 package org.gradle.api.internal.resolve
+
 import org.gradle.api.Named
-import org.gradle.language.base.internal.model.DefaultVariantDimensionSelectorFactory
+import org.gradle.language.base.internal.model.DefaultVariantAxisCompatibilityFactory
 import org.gradle.language.base.internal.model.DefaultVariantsMetaData
-import org.gradle.language.base.internal.model.VariantDimensionSelector
+import org.gradle.language.base.internal.model.VariantAxisCompatibility
 import org.gradle.model.internal.manage.schema.extract.DefaultModelSchemaStore
 import org.gradle.model.internal.manage.schema.extract.ModelSchemaAspectExtractor
 import org.gradle.model.internal.manage.schema.extract.ModelSchemaExtractor
-import org.gradle.platform.base.BinarySpec
 import org.gradle.platform.base.Platform
 import org.gradle.platform.base.Variant
+import org.gradle.platform.base.internal.BinarySpecInternal
 import org.gradle.platform.base.internal.VariantAspectExtractionStrategy
 import spock.lang.Specification
 import spock.lang.Unroll
@@ -36,7 +37,7 @@ class VariantsMatcherTest extends Specification {
     def "should filter binaries based on requirements"() {
         given: "a library binary with some requirements"
 
-        def factories = [DefaultVariantDimensionSelectorFactory.of(MyPlatform, new MySelector())]
+        def factories = [DefaultVariantAxisCompatibilityFactory.of(MyPlatform, new MySelector())]
         def matcher = new VariantsMatcher(factories, CustomSpecBase, schemaStore)
         def reference = DefaultVariantsMetaData.extractFrom(spec, schemaStore)
 
@@ -49,7 +50,7 @@ class VariantsMatcherTest extends Specification {
         where:
         spec                                | binaries                                                                                                                                      | expected
         refSpec()                           | []                                                                                                                                            | []
-        refSpec()                           | [Mock(CustomSpecBase)]                                                                                                                         | []
+        refSpec()                           | [nullPlatform()]                                                                                                                        | []
         refSpec()                           | [refSpec()]                                                                                                                                   | [refSpec()]
         refSpec('1.7')                      | [refSpec('1.6')]                                                                                                                              | [refSpec('1.6')]
         refSpec('1.6')                      | [refSpec('1.7')]                                                                                                                              | []
@@ -81,8 +82,8 @@ class VariantsMatcherTest extends Specification {
     @Unroll
     def "can use a custom variant comparator"() {
         def factories = [
-            DefaultVariantDimensionSelectorFactory.of(MyPlatform, new MySelector()),
-            DefaultVariantDimensionSelectorFactory.of(BuildType, new VariantDimensionSelector<BuildType>() {
+            DefaultVariantAxisCompatibilityFactory.of(MyPlatform, new MySelector()),
+            DefaultVariantAxisCompatibilityFactory.of(BuildType, new VariantAxisCompatibility<BuildType>() {
                 @Override
                 boolean isCompatibleWithRequirement(BuildType requirement, BuildType value) {
                     requirement.name.length() == value.name.length()
@@ -116,8 +117,15 @@ class VariantsMatcherTest extends Specification {
 
     }
 
+    private CustomSpecBase nullPlatform() {
+        def spec = Mock(CustomSpecBase)
+        spec.publicType >> CustomSpecBase
+        spec
+    }
+
     private CustomSpecBase refSpec(String version = '1.7') {
         def spec = Mock(CustomSpecBase)
+        spec.publicType >> CustomSpecBase
         spec.targetPlatform >> new MyPlatform(name:version)
         spec.displayName >> { "CustomBinarySpec ($spec.targetPlatform)" }
         spec.equals(_) >> { args -> spec.displayName == args[0].displayName }
@@ -128,6 +136,7 @@ class VariantsMatcherTest extends Specification {
 
     private CustomSpec1 customSpec1(String version = '1.7', String flavor = 'free') {
         def spec = Mock(CustomSpec1)
+        spec.publicType >> CustomSpec1
         spec.targetPlatform >> new MyPlatform(name:version)
         spec.flavor >> flavor
         spec.displayName >> { "CustomSpec1 ($version, $flavor)" }
@@ -139,6 +148,7 @@ class VariantsMatcherTest extends Specification {
 
     private CustomSpec2 customSpec2(String version = '1.7', String flavor = 'free', String buildType = 'release') {
         def spec = Mock(CustomSpec2)
+        spec.publicType >> CustomSpec2
         spec.targetPlatform >> new MyPlatform(name:version)
         spec.flavor >> flavor
         spec.buildType >> { buildType ? new BuildType(name: buildType) : null }
@@ -151,6 +161,7 @@ class VariantsMatcherTest extends Specification {
 
     private CustomSpec3 customSpec3(String version = '1.7', String flavor = 'free', String buildType = 'release', String customValue = 'foo') {
         def spec = Mock(CustomSpec3)
+        spec.publicType >> CustomSpec3
         spec.targetPlatform >> new MyPlatform(name:version)
         spec.flavor >> flavor
         spec.buildType >> { buildType ? new BuildType2(name: buildType, customValue: customValue) : null }
@@ -161,7 +172,7 @@ class VariantsMatcherTest extends Specification {
         spec
     }
 
-    static interface CustomSpecBase extends BinarySpec {
+    static interface CustomSpecBase extends BinarySpecInternal {
         @Variant
         Platform getTargetPlatform()
     }
@@ -215,7 +226,7 @@ class VariantsMatcherTest extends Specification {
         }
     }
 
-    static class MySelector implements VariantDimensionSelector<MyPlatform> {
+    static class MySelector implements VariantAxisCompatibility<MyPlatform> {
         private static int v(MyPlatform platform) {
             Integer.valueOf(platform.name.replaceAll(/\./,''))
         }

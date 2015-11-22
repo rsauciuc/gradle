@@ -19,7 +19,7 @@ package org.gradle.play.integtest.advanced
 import org.gradle.play.integtest.PlayBinaryApplicationIntegrationTest
 import org.gradle.play.integtest.fixtures.AdvancedRunningPlayApp
 import org.gradle.play.integtest.fixtures.app.AdvancedPlayApp
-import org.gradle.play.integtest.fixtures.app.PlayApp
+import org.gradle.play.integtest.fixtures.PlayApp
 
 class PlayBinaryAdvancedAppIntegrationTest extends PlayBinaryApplicationIntegrationTest {
     def setup() {
@@ -41,7 +41,8 @@ class PlayBinaryAdvancedAppIntegrationTest extends PlayBinaryApplicationIntegrat
                 "models/DataType.class",
                 "models/ScalaClass.class",
                 "controllers/scala/MixedJava.class",
-                "controllers/jva/PureJava.class"
+                "controllers/jva/PureJava.class",
+                "evolutions/default/1.sql"
         )
 
         jar("build/playBinary/lib/${playApp.name}-assets.jar").containsDescendants(

@@ -16,7 +16,6 @@
 package org.gradle.nativeplatform
 
 import groovy.transform.NotYetImplemented
-import org.gradle.integtests.fixtures.EnableModelDsl
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.CppHelloWorldApp
@@ -30,9 +29,6 @@ import spock.lang.Issue
 import spock.lang.Unroll
 
 class BinaryConfigurationIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
-    def setup() {
-        EnableModelDsl.enable(executer)
-    }
 
     @LeaksFileHandles
     def "can configure the binaries of a C++ application"() {
@@ -182,9 +178,9 @@ model {
         main(NativeExecutableSpec)
     }
     tasks { t ->
-        $("components.main").binaries { binaries ->
+        $.components.main.binaries { binaries ->
             binaries.values().each { binary ->
-                def preLinkTask = binary.name + "PreLink"
+                def preLinkTask = binary.tasks.taskName("preLink")
                 t.create(preLinkTask) {
                     dependsOn binary.tasks.withType(CppCompile)
                     doLast {
@@ -193,7 +189,7 @@ model {
                 }
                 binary.tasks.link.dependsOn preLinkTask
 
-                def postLinkTask = binary.name + "PostLink"
+                def postLinkTask = binary.tasks.taskName("postLink")
                 t.create(postLinkTask) {
                     dependsOn binary.tasks.link
                     doLast {
@@ -214,7 +210,7 @@ model {
         succeeds "mainExecutable"
 
         then:
-        executedTasks == [":compileMainExecutableMainCpp", ":mainExecutablePreLink", ":linkMainExecutable", ":mainExecutablePostLink", ":mainExecutable"]
+        executedTasks == [":compileMainExecutableMainCpp", ":preLinkMainExecutable", ":linkMainExecutable", ":postLinkMainExecutable", ":mainExecutable"]
     }
 
     @Issue("GRADLE-2973")
@@ -261,7 +257,7 @@ model {
         def modPath = { File original -> new File(original.parent + "/new_output/_" + original.name) }
         main(NativeExecutableSpec) {
             binaries.all {
-                executableFile = modPath(executableFile)
+                executable.file = modPath(executableFile)
             }
         }
         hello(NativeLibrarySpec) {

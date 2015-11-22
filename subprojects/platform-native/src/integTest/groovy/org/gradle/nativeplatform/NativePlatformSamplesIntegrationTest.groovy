@@ -15,7 +15,6 @@
  */
 package org.gradle.nativeplatform
 
-import org.gradle.integtests.fixtures.EnableModelDsl
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
@@ -56,7 +55,6 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         sample cppExe
 
         when:
-        EnableModelDsl.enable(executer)
         run "installMain"
 
         then:
@@ -95,13 +93,15 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
     }
 
     def flavors() {
-        when:
+        given:
         sample flavors
+
+        when:
         run "installEnglishMainExecutable"
 
         then:
-        executedAndNotSkipped ":compileEnglishHelloSharedLibraryHelloCpp", ":linkEnglishHelloSharedLibrary", ":englishHelloSharedLibrary"
-        executedAndNotSkipped ":compileEnglishMainExecutableMainCpp", ":linkEnglishMainExecutable", ":englishMainExecutable"
+        executedAndNotSkipped ":compileHelloEnglishSharedLibraryHelloCpp", ":linkEnglishHelloSharedLibrary", ":helloEnglishSharedLibrary"
+        executedAndNotSkipped ":compileMainEnglishExecutableMainCpp", ":linkEnglishMainExecutable", ":mainEnglishExecutable"
 
         and:
         executable(flavors.dir.file("build/binaries/mainExecutable/english/main")).assertExists()
@@ -115,8 +115,8 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         run "installFrenchMainExecutable"
 
         then:
-        executedAndNotSkipped ":compileFrenchHelloSharedLibraryHelloCpp", ":linkFrenchHelloSharedLibrary", ":frenchHelloSharedLibrary"
-        executedAndNotSkipped ":compileFrenchMainExecutableMainCpp", ":linkFrenchMainExecutable", ":frenchMainExecutable"
+        executedAndNotSkipped ":compileHelloFrenchSharedLibraryHelloCpp", ":linkFrenchHelloSharedLibrary", ":helloFrenchSharedLibrary"
+        executedAndNotSkipped ":compileMainFrenchExecutableMainCpp", ":linkFrenchMainExecutable", ":mainFrenchExecutable"
 
         and:
         executable(flavors.dir.file("build/binaries/mainExecutable/french/main")).assertExists()
@@ -127,8 +127,10 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
     }
 
     def variants() {
-        when:
+        given:
         sample variants
+
+        when:
         run "assemble"
 
         then:
@@ -192,6 +194,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
     def "target platforms"() {
         given:
         sample targetPlatforms
+
         and:
         targetPlatforms.dir.file("build.gradle") << """
 model {

@@ -16,48 +16,76 @@
 
 package org.gradle.model.internal.manage.schema.extract;
 
-import org.gradle.api.Nullable;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import org.gradle.api.Action;
+import org.gradle.internal.UncheckedException;
 import org.gradle.model.ModelMap;
-import org.gradle.model.internal.core.ModelMapGroovyDecorator;
-import org.gradle.model.internal.manage.schema.ModelSchemaStore;
+import org.gradle.model.internal.core.NodeBackedModelMap;
+import org.gradle.model.internal.manage.schema.ModelSchema;
 import org.gradle.model.internal.manage.schema.SpecializedMapSchema;
-import org.gradle.model.internal.manage.schema.cache.ModelSchemaCache;
 import org.gradle.model.internal.type.ModelType;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Currently only handles interfaces with no type parameters that directly extend ModelMap.
  */
 public class SpecializedMapStrategy implements ModelSchemaExtractionStrategy {
     private final ManagedCollectionProxyClassGenerator generator = new ManagedCollectionProxyClassGenerator();
+    private final LoadingCache<ModelType<?>, Class<?>> generatedImplementationTypes = CacheBuilder.newBuilder()
+        .weakValues()
+        .build(new CacheLoader<ModelType<?>, Class<?>>() {
+            @Override
+            public Class<?> load(ModelType<?> contractType) throws Exception {
+                return generator.generate(NodeBackedModelMap.class, contractType.getConcreteClass());
+            }
+        });
 
-    @Nullable
     @Override
-    public <T> ModelSchemaExtractionResult<T> extract(ModelSchemaExtractionContext<T> extractionContext, ModelSchemaStore store, ModelSchemaCache cache) {
-        Type type = extractionContext.getType().getType();
+    public <T> void extract(ModelSchemaExtractionContext<T> extractionContext) {
+        ModelType<T> modelType = extractionContext.getType();
+        Type type = modelType.getType();
         if (!(type instanceof Class)) {
-            return null;
+            return;
         }
         Class<?> contractType = (Class<?>) type;
         if (!contractType.isInterface()) {
-            return null;
+            return;
         }
         if (contractType.getGenericInterfaces().length != 1) {
-            return null;
+            return;
         }
         Type superType = contractType.getGenericInterfaces()[0];
         if (!(superType instanceof ParameterizedType)) {
-            return null;
+            return;
         }
         ParameterizedType parameterizedSuperType = (ParameterizedType) superType;
         if (!parameterizedSuperType.getRawType().equals(ModelMap.class)) {
-            return null;
+            return;
         }
         ModelType<?> elementType = ModelType.of(parameterizedSuperType.getActualTypeArguments()[0]);
-        Class<?> proxyImpl = generator.generate(ModelMapGroovyDecorator.class, contractType);
-        return new ModelSchemaExtractionResult<T>(new SpecializedMapSchema<T>(extractionContext.getType(), elementType, proxyImpl));
+        Class<?> proxyImpl;
+        try {
+            proxyImpl = generatedImplementationTypes.get(modelType);
+        } catch (ExecutionException e) {
+            throw UncheckedException.throwAsUncheckedException(e);
+        }
+        extractionContext.found(getModelSchema(extractionContext, elementType, proxyImpl));
+    }
+
+    private <T, E> SpecializedMapSchema<T, E> getModelSchema(ModelSchemaExtractionContext<T> extractionContext, ModelType<E> elementType, Class<?> implementationType) {
+        final SpecializedMapSchema<T, E> schema = new SpecializedMapSchema<T, E>(extractionContext.getType(), elementType, implementationType);
+        extractionContext.child(elementType, "element type", new Action<ModelSchema<E>>() {
+            @Override
+            public void execute(ModelSchema<E> elementTypeSchema) {
+                schema.setElementTypeSchema(elementTypeSchema);
+            }
+        });
+        return schema;
     }
 
 }

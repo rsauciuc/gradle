@@ -17,21 +17,22 @@
 package org.gradle.model.internal.manage.schema.extract
 
 import org.gradle.api.artifacts.Configuration
-import spock.lang.Shared
-import spock.lang.Specification
+import org.gradle.model.internal.core.ModelRegistrations
+import org.gradle.model.internal.core.ModelRuleExecutionException
+import org.gradle.model.internal.fixture.ProjectRegistrySpec
 import spock.lang.Unroll
 
-class ScalarTypesInManagedModelTest extends Specification {
+import java.util.regex.Pattern
 
-    @Shared
-    def store = DefaultModelSchemaStore.getInstance()
+class ScalarTypesInManagedModelTest extends ProjectRegistrySpec {
 
-    def classloader = new GroovyClassLoader(this.class.classLoader)
+    def classLoader = new GroovyClassLoader(this.class.classLoader)
 
     @Unroll
     def "cannot have read only property of scalar type #someType.simpleName"() {
-        given:
-        def clazz = classloader.parseClass """
+
+        when:
+        def clazz = classLoader.parseClass """
             import org.gradle.api.artifacts.Configuration.State
             import org.gradle.model.Managed
 
@@ -42,13 +43,8 @@ class ScalarTypesInManagedModelTest extends Specification {
 
         """
 
-        when:
-        store.getSchema(clazz)
-
         then:
-        def ex = thrown(InvalidManagedModelElementTypeException)
-        String expectedMessage = "Invalid managed model type ManagedType: read only property 'managedProperty' has non managed type ${someType.name}, only managed types can be used"
-        ex.message == expectedMessage
+        failWhenRealized(clazz, Pattern.quote("Invalid managed model type 'ManagedType': read only property 'managedProperty' has non managed type ${someType.name}, only managed types can be used"))
 
         where:
         someType << [
@@ -65,5 +61,46 @@ class ScalarTypesInManagedModelTest extends Specification {
             BigInteger,
             Configuration.State,
             File]
+    }
+
+    @Unroll
+    def "can have a #type as an @Unmanaged property"() {
+        when:
+        def clazz = classLoader.parseClass """
+            import org.gradle.api.artifacts.Configuration.State
+            import org.gradle.model.Managed
+            import org.gradle.model.Unmanaged
+
+            @Managed
+            interface ManagedType {
+                @Unmanaged
+                $type getUnmanagedReadWriteProperty()
+
+                void setUnmanagedReadWriteProperty($type type)
+            }
+
+        """
+
+        then:
+        realize(clazz)
+
+        where:
+        type << ['List<Date>', 'Set<Date>']
+
+    }
+
+    private void failWhenRealized(Class type, String expected) {
+        try {
+            realize(type)
+            throw new AssertionError("node realisation of type ${type.name} should have failed with a cause of:\n$expected\n")
+        }
+        catch (ModelRuleExecutionException e) {
+            assert e.cause.message =~ expected
+        }
+    }
+
+    private void realize(Class type) {
+        registry.register(ModelRegistrations.of(registry.path("bar"), nodeInitializerRegistry.getNodeInitializer(type)).descriptor(registry.desc("bar")).build())
+        registry.realize("bar", type)
     }
 }

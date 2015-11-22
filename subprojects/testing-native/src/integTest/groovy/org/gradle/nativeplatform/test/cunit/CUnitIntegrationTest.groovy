@@ -29,8 +29,6 @@ import org.gradle.util.TestPrecondition
 import org.gradle.util.TextUtil
 import spock.lang.Issue
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
-
 @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
 @LeaksFileHandles
 class CUnitIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
@@ -71,9 +69,11 @@ model {
             targetPlatform "x86"
         }
     }
-}
-binaries.withType(CUnitTestSuiteBinarySpec) {
-    lib library: "cunit", linkage: "static"
+    binaries {
+        withType(CUnitTestSuiteBinarySpec) {
+            lib library: "cunit", linkage: "static"
+        }
+    }
 }
 """
     }
@@ -201,8 +201,8 @@ model {
                     binaries {
                         nativeComponentOneTestCUnitExe {
                             tasks()
+                            sources()
                         }
-
                     }
                     sources {
                         c()
@@ -214,6 +214,7 @@ model {
                     binaries {
                         nativeComponentTwoTestCUnitExe {
                             tasks()
+                            sources()
                         }
                     }
                     sources {
@@ -233,8 +234,12 @@ model {
 
         when:
         buildFile << """
-binaries.withType(CUnitTestSuiteBinarySpec) {
-    cCompiler.define "ONE_TEST"
+model {
+    binaries {
+        withType(CUnitTestSuiteBinarySpec) {
+            cCompiler.define "ONE_TEST"
+        }
+    }
 }
 """
         and:
@@ -307,21 +312,23 @@ model {
         buildFile << """
 model {
     components {
-        hello(NativeLibrarySpec) {
+        hello(NativeLibrarySpec) { l ->
             targetPlatform "x86"
             binaries.all {
                 sources {
                     variant(CSourceSet) {
                         source.srcDir "src/variant/c"
-                        lib hello.sources.c
+                        lib l.sources.c
                     }
                 }
             }
         }
     }
-}
-binaries.withType(CUnitTestSuiteBinarySpec) {
-    lib library: "cunit", linkage: "static"
+    binaries {
+        withType(CUnitTestSuiteBinarySpec) {
+            lib library: "cunit", linkage: "static"
+        }
+    }
 }
 """
 
@@ -340,13 +347,13 @@ binaries.withType(CUnitTestSuiteBinarySpec) {
         buildFile << """
 model {
     testSuites {
-        helloTest {
+        helloTest { t ->
             binaries.all {
                 sources {
                     variant(CSourceSet) {
                         source.srcDir "src/variantTest/c"
-                        lib helloTest.sources.c
-                        lib helloTest.sources.cunitLauncher
+                        lib t.sources.c
+                        lib t.sources.cunitLauncher
                     }
                 }
             }
@@ -475,6 +482,6 @@ tasks.withType(RunTestExecutable) {
     }
 
     boolean contains(String content) {
-        return getOutput().contains(toPlatformLineSeparators(content))
+        return getOutput().contains(content)
     }
 }

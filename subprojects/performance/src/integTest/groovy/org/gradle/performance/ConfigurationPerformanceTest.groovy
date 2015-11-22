@@ -16,10 +16,13 @@
 
 package org.gradle.performance
 
+import org.gradle.performance.categories.BasicPerformanceTest
+import org.junit.experimental.categories.Category
 import spock.lang.Unroll
 
 import static org.gradle.performance.measure.Duration.millis
 
+@Category(BasicPerformanceTest)
 class ConfigurationPerformanceTest extends AbstractCrossVersionPerformanceTest {
     @Unroll("Project '#testProject' configuration")
     def "configuration"() {
@@ -28,7 +31,7 @@ class ConfigurationPerformanceTest extends AbstractCrossVersionPerformanceTest {
         runner.testProject = testProject
         runner.tasksToRun = ['help']
         runner.maxExecutionTimeRegression = maxExecutionTimeRegression
-        runner.targetVersions = ['1.0', '1.1', '2.0', '2.2.1', '2.4', 'last']
+        runner.targetVersions = ['1.0', '1.1', '2.0', '2.2.1', '2.4', '2.8', 'last']
 
         when:
         def result = runner.run()

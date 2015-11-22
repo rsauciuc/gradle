@@ -20,15 +20,12 @@ import org.gradle.api.Action;
 import org.gradle.api.NamedDomainObjectCollection;
 import org.gradle.api.Namer;
 import org.gradle.api.Transformer;
-import org.gradle.internal.BiAction;
-import org.gradle.model.internal.DynamicObjectAwareTypeUtils;
+import org.gradle.api.internal.plugins.DslObject;
 import org.gradle.model.internal.core.*;
 import org.gradle.model.internal.core.rule.describe.StandardDescriptorFactory;
 import org.gradle.model.internal.type.ModelType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.List;
 
 public abstract class BridgedCollections {
 
@@ -37,7 +34,7 @@ public abstract class BridgedCollections {
     private BridgedCollections() {
     }
 
-    public static <I, C extends NamedDomainObjectCollection<I>> ModelCreators.Builder creator(
+    public static <I, C extends NamedDomainObjectCollection<I>> ModelRegistrations.Builder registration(
         final ModelReference<C> containerReference,
         final Transformer<? extends C, ? super MutableModelNode> containerFactory,
         final Namer<? super I> namer,
@@ -48,10 +45,10 @@ public abstract class BridgedCollections {
         final ModelType<C> containerType = containerReference.getType();
         assert containerPath != null : "container reference path cannot be null";
 
-        return ModelCreators.of(
+        return ModelRegistrations.of(
             containerPath,
-            new BiAction<MutableModelNode, List<ModelView<?>>>() {
-                public void execute(final MutableModelNode containerNode, List<ModelView<?>> inputs) {
+            new Action<MutableModelNode>() {
+                public void execute(final MutableModelNode containerNode) {
                     final C container = containerFactory.transform(containerNode);
                     containerNode.setPrivateData(containerType, container);
                     container.all(new Action<I>() {
@@ -65,14 +62,14 @@ public abstract class BridgedCollections {
                             }
 
                             if (!containerNode.hasLink(name)) {
-                                ModelCreator itemCreator = ModelCreators
+                                ModelRegistration itemRegistration = ModelRegistrations
                                     .unmanagedInstanceOf(
-                                        ModelReference.of(containerPath.child(name), DynamicObjectAwareTypeUtils.extractModelTypeFromInstance(item)),
+                                        ModelReference.of(containerPath.child(name), new DslObject(item).getDeclaredType()),
                                         new ExtractFromParentContainer<I, C>(name, containerType)
                                     )
                                     .descriptor(itemDescriptorGenerator.transform(name))
                                     .build();
-                                containerNode.addLink(itemCreator);
+                                containerNode.addLink(itemRegistration);
                             }
                         }
                     });

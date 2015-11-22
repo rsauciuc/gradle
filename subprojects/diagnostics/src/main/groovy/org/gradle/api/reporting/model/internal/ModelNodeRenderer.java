@@ -37,19 +37,22 @@ import static org.gradle.logging.StyledTextOutput.Style.*;
 public class ModelNodeRenderer extends ReportRenderer<ModelNode, TextReportBuilder> {
 
     private static final int LABEL_LENGTH = 7;
+    
+    private final boolean showHidden;
+
+    public ModelNodeRenderer(boolean showHidden) {
+        this.showHidden = showHidden;
+    }
 
     @Override
     public void render(ModelNode model, TextReportBuilder output) {
-        if (model.isHidden()) {
+        if (model.isHidden() && !showHidden) {
             return;
         }
 
         StyledTextOutput styledTextoutput = output.getOutput();
 
-        if (model.getPath().equals(ModelPath.ROOT)) {
-            styledTextoutput.withStyle(Identifier).format("+ %s", "model");
-            styledTextoutput.println();
-        } else {
+        if (!model.getPath().equals(ModelPath.ROOT)) {
             printNodeName(model, styledTextoutput);
             maybePrintType(model, styledTextoutput);
             maybePrintValue(model, styledTextoutput);

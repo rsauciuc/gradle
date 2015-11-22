@@ -18,7 +18,7 @@ package org.gradle.testkit.runner
 
 import org.gradle.util.TextUtil
 
-import static TaskOutcome.*
+import static org.gradle.testkit.runner.TaskOutcome.*
 
 class GradleRunnerBuildFailureIntegrationTest extends AbstractGradleRunnerIntegrationTest {
 
@@ -38,9 +38,9 @@ class GradleRunnerBuildFailureIntegrationTest extends AbstractGradleRunnerIntegr
 
         then:
         noExceptionThrown()
-        result.standardOutput.contains(':helloWorld FAILED')
-        result.standardError.contains("Execution failed for task ':helloWorld'")
-        result.standardError.contains('Expected exception')
+        result.output.contains(':helloWorld FAILED')
+        result.output.contains("Execution failed for task ':helloWorld'")
+        result.output.contains('Expected exception')
         result.tasks.collect { it.path } == [':helloWorld']
         result.taskPaths(SUCCESS).empty
         result.taskPaths(SKIPPED).empty
@@ -57,7 +57,7 @@ class GradleRunnerBuildFailureIntegrationTest extends AbstractGradleRunnerIntegr
         gradleRunner.buildAndFail()
 
         then:
-        Throwable t = thrown(UnexpectedBuildSuccess)
+        UnexpectedBuildSuccess t = thrown(UnexpectedBuildSuccess)
         String expectedMessage = """Unexpected build execution success in ${TextUtil.escapeString(gradleRunner.projectDir.canonicalPath)} with arguments \\u005BhelloWorld\\u005D
 
 Output:
@@ -67,12 +67,16 @@ Hello world!
 BUILD SUCCESSFUL
 
 Total time: .+ secs
-
------
-Error:
-
------"""
+"""
         TextUtil.normaliseLineSeparators(t.message) ==~ expectedMessage
+        BuildResult result = t.buildResult
+        result.output.contains(':helloWorld')
+        result.output.contains('Hello world!')
+        result.tasks.collect { it.path } == [':helloWorld']
+        result.taskPaths(SUCCESS) == [':helloWorld']
+        result.taskPaths(SKIPPED).empty
+        result.taskPaths(UP_TO_DATE).empty
+        result.taskPaths(FAILED).empty
     }
 
     def "execute build for expected success but fails"() {
@@ -90,18 +94,11 @@ Error:
         gradleRunner.build()
 
         then:
-        Throwable t = thrown(UnexpectedBuildFailure)
+        UnexpectedBuildFailure t = thrown(UnexpectedBuildFailure)
         String expectedMessage = """Unexpected build execution failure in ${TextUtil.escapeString(gradleRunner.projectDir.canonicalPath)} with arguments \\u005BhelloWorld\\u005D
 
 Output:
 :helloWorld FAILED
-
-BUILD FAILED
-
-Total time: .+ secs
-
------
-Error:
 
 FAILURE: Build failed with an exception.
 
@@ -115,11 +112,19 @@ Execution failed for task ':helloWorld'.
 \\u002A Try:
 Run with --stacktrace option to get the stack trace. Run with --info or --debug option to get more log output.
 
------
-Reason:
-Unexpected exception
------"""
+BUILD FAILED
+
+Total time: .+ secs
+"""
         TextUtil.normaliseLineSeparators(t.message) ==~ expectedMessage
+        BuildResult result = t.buildResult
+        result.output.contains(':helloWorld FAILED')
+        result.output.contains('Unexpected exception')
+        result.tasks.collect { it.path } == [':helloWorld']
+        result.taskPaths(SUCCESS).empty
+        result.taskPaths(SKIPPED).empty
+        result.taskPaths(UP_TO_DATE).empty
+        result.taskPaths(FAILED) == [':helloWorld']
     }
 
     def "execute build without assigning a project directory"() {
@@ -154,8 +159,8 @@ Unexpected exception
 
         then:
         noExceptionThrown()
-        result.standardOutput.contains('BUILD FAILED')
-        result.standardError.contains("Task 'doesNotExist' not found in root project")
+        result.output.contains('BUILD FAILED')
+        result.output.contains("Task 'doesNotExist' not found in root project")
         result.tasks.empty
         result.taskPaths(SUCCESS).empty
         result.taskPaths(SKIPPED).empty

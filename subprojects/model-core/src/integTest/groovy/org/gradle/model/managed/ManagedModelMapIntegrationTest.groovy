@@ -17,13 +17,8 @@
 package org.gradle.model.managed
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
 
 class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
-
-    def setup() {
-        EnableModelDsl.enable(executer)
-    }
 
     def "rule can create a map interface backed managed model elements"() {
         when:
@@ -60,8 +55,8 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
               tasks {
                 create("print") {
                   doLast {
-                    println "containerThings: ${$("container.things").values().collect { it.name + ":" + it.value }.sort().join(",")}"
-                    println "things: ${$("things").values().collect { it.name + ":" + it.value }.sort().join(",")}"
+                    println "containerThings: ${$.container.things.collect { it.name + ":" + it.value }.sort().join(",")}"
+                    println "things: ${$.things.collect { it.name + ":" + it.value }.sort().join(",")}"
                   }
                 }
               }
@@ -112,8 +107,8 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
               tasks {
                 create("print") {
                   doLast {
-                    println "containerThings: ${$("container.things").values().collect { it.name + ":" + it.value }.sort().join(",")}"
-                    println "things: ${$("things").values().collect { it.name + ":" + it.value }.sort().join(",")}"
+                    println "containerThings: ${$.container.things.collect { it.name + ":" + it.value }.sort().join(",")}"
+                    println "things: ${$.things.collect { it.name + ":" + it.value }.sort().join(",")}"
                   }
                 }
               }
@@ -316,7 +311,7 @@ parent
               tasks {
                 create("print") {
                   doLast {
-                    println "things: ${$("things").values().collect { it.name }.join(',')}"
+                    println "things: ${$.things.collect { it.name }.join(',')}"
                   }
                 }
               }

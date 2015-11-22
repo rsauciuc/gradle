@@ -26,6 +26,7 @@ import org.gradle.model.ModelMap;
 import org.gradle.model.collection.CollectionBuilder;
 import org.gradle.model.internal.core.*;
 import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
+import org.gradle.model.internal.manage.instance.ManagedInstance;
 import org.gradle.model.internal.type.ModelType;
 import org.gradle.model.internal.type.ModelTypes;
 import org.gradle.util.CollectionUtils;
@@ -41,34 +42,33 @@ public class ModelMapModelProjection<I> implements ModelProjection {
 
     @SuppressWarnings("deprecation")
     private final static Set<Class<?>> SUPPORTED_CONTAINER_TYPES = ImmutableSet.<Class<?>>of(ModelMap.class, CollectionBuilder.class);
+    private static final ModelType<ManagedInstance> MANAGED_INSTANCE_TYPE = ModelType.of(ManagedInstance.class);
 
-    public static <T> ModelProjection unmanaged(ModelType<T> itemType, ChildNodeInitializerStrategy<? super T> creatorStrategy) {
-        return new ModelMapModelProjection<T>(itemType, false, false, creatorStrategy);
+    public static <T> ModelProjection unmanaged(ModelType<T> itemType, ChildNodeInitializerStrategyAccessor<? super T> creatorStrategyAccessor) {
+        return new ModelMapModelProjection<T>(itemType, false, creatorStrategyAccessor);
     }
 
-    public static <T> ModelProjection unmanaged(Class<T> itemType, ChildNodeInitializerStrategy<? super T> creatorStrategy) {
-        return unmanaged(ModelType.of(itemType), creatorStrategy);
+    public static <T> ModelProjection unmanaged(Class<T> itemType, ChildNodeInitializerStrategyAccessor<? super T> creatorStrategyAccessor) {
+        return unmanaged(ModelType.of(itemType), creatorStrategyAccessor);
     }
 
-    public static <T> ModelProjection managed(ModelType<T> itemType, ChildNodeInitializerStrategy<? super T> creatorStrategy) {
-        return new ModelMapModelProjection<T>(itemType, false, true, creatorStrategy);
+    public static <T> ModelProjection managed(ModelType<T> itemType, ChildNodeInitializerStrategyAccessor<? super T> creatorStrategyAccessor) {
+        return new ModelMapModelProjection<T>(itemType, true, creatorStrategyAccessor);
     }
 
     protected final Class<I> baseItemType;
     protected final ModelType<I> baseItemModelType;
-    private final boolean eager;
-    private final ChildNodeInitializerStrategy<? super I> creatorStrategy;
+    private final ChildNodeInitializerStrategyAccessor<? super I> creatorStrategyAccessor;
     private final boolean managed;
 
-    protected ModelMapModelProjection(ModelType<I> baseItemModelType, boolean eager, boolean managed, ChildNodeInitializerStrategy<? super I> creatorStrategy) {
+    private ModelMapModelProjection(ModelType<I> baseItemModelType, boolean managed, ChildNodeInitializerStrategyAccessor<? super I> creatorStrategyAccessor) {
         this.baseItemModelType = baseItemModelType;
-        this.eager = eager;
         this.managed = managed;
         this.baseItemType = baseItemModelType.getConcreteClass();
-        this.creatorStrategy = creatorStrategy;
+        this.creatorStrategyAccessor = creatorStrategyAccessor;
     }
 
-    protected Collection<? extends Class<?>> getCreatableTypes(MutableModelNode node) {
+    private Collection<? extends Class<?>> getCreatableTypes() {
         return Collections.singleton(baseItemType);
     }
 
@@ -94,7 +94,7 @@ public class ModelMapModelProjection<I> implements ModelProjection {
         return getWritableTypeDescriptions(node);
     }
 
-    protected Class<? extends I> itemType(ModelType<?> targetType) {
+    private Class<? extends I> itemType(ModelType<?> targetType) {
         Class<?> targetClass = targetType.getRawClass();
         if (SUPPORTED_CONTAINER_TYPES.contains(targetClass)) {
             Class<?> targetItemClass = targetType.getTypeVariables().get(0).getRawClass();
@@ -112,19 +112,19 @@ public class ModelMapModelProjection<I> implements ModelProjection {
         return null;
     }
 
-    public <T> boolean canBeViewedAsWritable(ModelType<T> targetType) {
-        return itemType(targetType) != null;
+    public <T> boolean canBeViewedAsMutable(ModelType<T> targetType) {
+        return itemType(targetType) != null || targetType.equals(MANAGED_INSTANCE_TYPE);
     }
 
-    public <T> boolean canBeViewedAsReadOnly(ModelType<T> type) {
-        return canBeViewedAsWritable(type);
+    public <T> boolean canBeViewedAsImmutable(ModelType<T> type) {
+        return canBeViewedAsMutable(type);
     }
 
-    public <T> ModelView<? extends T> asReadOnly(ModelType<T> type, MutableModelNode modelNode, @Nullable ModelRuleDescriptor ruleDescriptor) {
+    public <T> ModelView<? extends T> asImmutable(ModelType<T> type, MutableModelNode modelNode, @Nullable ModelRuleDescriptor ruleDescriptor) {
         return doAs(type, modelNode, ruleDescriptor, false);
     }
 
-    public <T> ModelView<? extends T> asWritable(ModelType<T> targetType, MutableModelNode node, ModelRuleDescriptor ruleDescriptor, List<ModelView<?>> inputs) {
+    public <T> ModelView<? extends T> asMutable(ModelType<T> targetType, MutableModelNode node, ModelRuleDescriptor ruleDescriptor, List<ModelView<?>> inputs) {
         return doAs(targetType, node, ruleDescriptor, true);
     }
 
@@ -138,21 +138,22 @@ public class ModelMapModelProjection<I> implements ModelProjection {
     }
 
     private <T, S extends I> ModelView<ModelMap<S>> toView(ModelType<T> targetType, ModelRuleDescriptor sourceDescriptor, MutableModelNode node, Class<S> itemClass, boolean mutable, boolean canReadChildren) {
+        ChildNodeInitializerStrategy<? super I> creatorStrategy = creatorStrategyAccessor.getStrategy(node);
         DefaultModelViewState state = new DefaultModelViewState(targetType, sourceDescriptor, mutable, canReadChildren);
         ModelType<S> itemType = ModelType.of(itemClass);
-        ModelMap<I> builder = new NodeBackedModelMap<I>(baseItemModelType, sourceDescriptor, node, eager, state, creatorStrategy);
+        ModelMap<I> builder = new NodeBackedModelMap<I>(baseItemModelType, sourceDescriptor, node, false, state, creatorStrategy);
 
         return InstanceModelView.of(
             node.getPath(),
             ModelTypes.modelMap(itemType),
-            ModelMapGroovyDecorator.wrap(builder.withType(itemClass)),
+            builder.withType(itemClass),
             state.closer()
         );
     }
 
     @Override
     public Iterable<String> getWritableTypeDescriptions(final MutableModelNode node) {
-        final Collection<? extends Class<?>> creatableTypes = getCreatableTypes(node);
+        final Collection<? extends Class<?>> creatableTypes = getCreatableTypes();
         return Iterables.transform(SUPPORTED_CONTAINER_TYPES, new Function<Class<?>, String>() {
             public String apply(Class<?> containerType) {
                 return getContainerTypeDescription(containerType, creatableTypes);

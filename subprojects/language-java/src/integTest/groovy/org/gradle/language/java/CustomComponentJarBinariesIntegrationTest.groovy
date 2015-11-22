@@ -46,23 +46,19 @@ plugins {
     id 'java-lang'
 }
 
+@Managed
 interface SampleLibrarySpec extends ComponentSpec {}
-
-class DefaultSampleLibrarySpec extends BaseComponentSpec implements SampleLibrarySpec {}
 
 class SampleLibraryRules extends RuleSource {
     @ComponentType
-    void register(ComponentTypeBuilder<SampleLibrarySpec> builder) {
-        builder.defaultImplementation(DefaultSampleLibrarySpec)
-    }
+    void registerSampleLibrarySpecType(ComponentTypeBuilder<SampleLibrarySpec> builder) {}
 
     @ComponentBinaries
     public void createBinaries(ModelMap<JarBinarySpec> binaries, SampleLibrarySpec library,
                                BinaryNamingSchemeBuilder namingSchemeBuilder,
                                @Path("buildDir") File buildDir) {
         def platform = DefaultJavaPlatform.current()
-        def binaryName = namingSchemeBuilder.withComponentName(library.name).withTypeString("jar").build().lifecycleTaskName
-        binaries.create(binaryName) { binary ->
+        binaries.create("jar") { binary ->
             binary.targetPlatform = platform
         }
     }
@@ -85,7 +81,7 @@ model {
                 libResources(JvmResourceSet) {}
             }
             binaries {
-                sampleLibJar {
+                jar {
                     sources {
                         bin(JavaSourceSet) {
                             source.srcDir "src/sampleLib/bin"

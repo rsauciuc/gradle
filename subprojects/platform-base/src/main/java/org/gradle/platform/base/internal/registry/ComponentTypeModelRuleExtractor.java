@@ -17,11 +17,7 @@
 package org.gradle.platform.base.internal.registry;
 
 import com.google.common.collect.ImmutableList;
-import org.gradle.api.internal.project.ProjectIdentifier;
-import org.gradle.internal.reflect.Instantiator;
-import org.gradle.internal.service.ServiceRegistry;
-import org.gradle.internal.util.BiFunction;
-import org.gradle.language.base.ProjectSourceSet;
+import org.gradle.api.Action;
 import org.gradle.language.base.plugins.ComponentModelBasePlugin;
 import org.gradle.model.internal.core.*;
 import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
@@ -30,17 +26,15 @@ import org.gradle.model.internal.manage.schema.ModelSchema;
 import org.gradle.model.internal.manage.schema.ModelSchemaStore;
 import org.gradle.model.internal.type.ModelType;
 import org.gradle.platform.base.ComponentSpec;
-import org.gradle.platform.base.ComponentSpecIdentifier;
 import org.gradle.platform.base.ComponentType;
 import org.gradle.platform.base.ComponentTypeBuilder;
 import org.gradle.platform.base.component.BaseComponentSpec;
-import org.gradle.platform.base.internal.ComponentSpecFactory;
-import org.gradle.platform.base.internal.DefaultComponentSpecIdentifier;
+import org.gradle.platform.base.component.internal.ComponentSpecFactory;
 import org.gradle.platform.base.internal.builder.TypeBuilderFactory;
 import org.gradle.platform.base.internal.builder.TypeBuilderInternal;
 
-import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 public class ComponentTypeModelRuleExtractor extends TypeModelRuleExtractor<ComponentType, ComponentSpec, BaseComponentSpec> {
     public ComponentTypeModelRuleExtractor(ModelSchemaStore schemaStore) {
@@ -56,11 +50,8 @@ public class ComponentTypeModelRuleExtractor extends TypeModelRuleExtractor<Comp
     protected <R, S> ExtractedModelRule createRegistration(MethodRuleDefinition<R, S> ruleDefinition, ModelType<? extends ComponentSpec> type, TypeBuilderInternal<ComponentSpec> builder) {
         List<Class<?>> dependencies = ImmutableList.<Class<?>>of(ComponentModelBasePlugin.class);
         ModelType<? extends BaseComponentSpec> implementation = determineImplementationType(type, builder);
-        if (implementation != null) {
-            ModelAction<?> mutator = new RegistrationAction(type, implementation, ruleDefinition.getDescriptor());
-            return new ExtractedModelAction(ModelActionRole.Defaults, dependencies, mutator);
-        }
-        return new DependencyOnlyExtractedModelRule(dependencies);
+        ModelAction registrationAction = createRegistrationAction(type, implementation, builder.getInternalViews(), ruleDefinition.getDescriptor());
+        return new ExtractedModelAction(ModelActionRole.Defaults, dependencies, registrationAction);
     }
 
     public static class DefaultComponentTypeBuilder extends AbstractTypeBuilder<ComponentSpec> implements ComponentTypeBuilder<ComponentSpec> {
@@ -69,50 +60,13 @@ public class ComponentTypeModelRuleExtractor extends TypeModelRuleExtractor<Comp
         }
     }
 
-    private static class RegistrationAction implements ModelAction<ComponentSpecFactory> {
-        private final ModelType<? extends ComponentSpec> publicType;
-        private final ModelType<? extends BaseComponentSpec> implementationType;
-        private final ModelRuleDescriptor descriptor;
-        private final List<ModelReference<?>> inputs;
-
-        public RegistrationAction(ModelType<? extends ComponentSpec> publicType, ModelType<? extends BaseComponentSpec> implementationType, ModelRuleDescriptor descriptor) {
-            this.publicType = publicType;
-            this.implementationType = implementationType;
-            this.descriptor = descriptor;
-            this.inputs = Arrays.<ModelReference<?>>asList(ModelReference.of(ServiceRegistry.class), ModelReference.of(ProjectIdentifier.class), ModelReference.of(ProjectSourceSet.class));
-        }
-
-        @Override
-        public ModelReference<ComponentSpecFactory> getSubject() {
-            return ModelReference.of(ComponentSpecFactory.class);
-        }
-
-        @Override
-        public ModelRuleDescriptor getDescriptor() {
-            return descriptor;
-        }
-
-        @Override
-        public List<ModelReference<?>> getInputs() {
-            return inputs;
-        }
-
-        @Override
-        public void execute(MutableModelNode modelNode, ComponentSpecFactory components, List<ModelView<?>> inputs) {
-            ServiceRegistry serviceRegistry = ModelViews.assertType(inputs.get(0), ModelType.of(ServiceRegistry.class)).getInstance();
-            final Instantiator instantiator = serviceRegistry.get(Instantiator.class);
-            final ProjectIdentifier projectIdentifier = ModelViews.assertType(inputs.get(1), ModelType.of(ProjectIdentifier.class)).getInstance();
-            final ProjectSourceSet projectSourceSet = ModelViews.assertType(inputs.get(2), ModelType.of(ProjectSourceSet.class)).getInstance();
-            final ModelSchemaStore schemaStore =  serviceRegistry.get(ModelSchemaStore.class);
-            @SuppressWarnings("unchecked")
-            Class<ComponentSpec> publicClass = (Class<ComponentSpec>) publicType.getConcreteClass();
-            components.register(publicClass, descriptor, new BiFunction<ComponentSpec, String, MutableModelNode>() {
-                @Override
-                public ComponentSpec apply(String name, MutableModelNode modelNode) {
-                    ComponentSpecIdentifier id = new DefaultComponentSpecIdentifier(projectIdentifier.getPath(), name);
-                    return BaseComponentSpec.create(implementationType.getConcreteClass(), id, modelNode, projectSourceSet, instantiator, schemaStore);
-                }
-            });
-        }
+    private <S extends ComponentSpec> ModelAction createRegistrationAction(final ModelType<S> publicType, final ModelType<? extends BaseComponentSpec> implementationType,
+                                                                           final Set<Class<?>> internalViews, final ModelRuleDescriptor descriptor) {
+        return NoInputsModelAction.of(ModelReference.of(ComponentSpecFactory.class), descriptor, new Action<ComponentSpecFactory>() {
+            @Override
+            public void execute(ComponentSpecFactory components) {
+                components.register(publicType, implementationType, internalViews, descriptor);
+            }
+        });
     }
 }

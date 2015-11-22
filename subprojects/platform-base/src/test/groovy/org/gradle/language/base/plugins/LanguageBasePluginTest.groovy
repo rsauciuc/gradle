@@ -20,14 +20,15 @@ import org.gradle.api.Task
 import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.internal.project.taskfactory.ITaskFactory
 import org.gradle.api.tasks.TaskContainer
-import org.gradle.internal.reflect.DirectInstantiator
 import org.gradle.language.base.ProjectSourceSet
-import org.gradle.platform.base.BinaryContainer
+import org.gradle.model.ModelMap
+import org.gradle.platform.base.BinarySpec
 import org.gradle.platform.base.internal.BinarySpecInternal
-import org.gradle.platform.base.internal.DefaultBinaryContainer
 import org.gradle.platform.base.internal.DefaultBinaryTasksCollection
 import org.gradle.util.TestUtil
 import spock.lang.Specification
+
+import static org.gradle.model.internal.type.ModelTypes.modelMap
 
 class LanguageBasePluginTest extends Specification {
     DefaultProject project = TestUtil.createRootProject()
@@ -36,19 +37,19 @@ class LanguageBasePluginTest extends Specification {
         project.pluginManager.apply(LanguageBasePlugin)
     }
 
-    def "adds a 'binaries' container to the project"() {
+    def "adds a 'binaries' container to the project model"() {
         expect:
-        project.extensions.findByName("binaries") instanceof BinaryContainer
+        project.modelRegistry.find("binaries", modelMap(BinarySpec)) != null
     }
 
-    def "adds a 'sources' container to the project"() {
+    def "adds a 'sources' container to the project model"() {
         expect:
-        project.extensions.findByName("sources") instanceof ProjectSourceSet
+        project.modelRegistry.find("sources", ProjectSourceSet) != null
     }
 
     def "copies binary tasks into task container"() {
         def tasks = Mock(TaskContainer)
-        def binaries = new DefaultBinaryContainer(DirectInstantiator.INSTANCE)
+        def binaries = Mock(ModelMap)
         def binary = Mock(BinarySpecInternal)
         def binaryTasks = new DefaultBinaryTasksCollection(binary, Mock(ITaskFactory))
         def someTask = Mock(Task) { getName() >> "someTask" }
@@ -56,11 +57,11 @@ class LanguageBasePluginTest extends Specification {
         binaryTasks.add(someTask)
 
         when:
-        binaries.add(binary)
         def rules = new LanguageBasePlugin.Rules()
         rules.copyBinaryTasksToTaskContainer(tasks, binaries)
 
         then:
+        binaries.iterator() >> [binary].iterator()
         binary.name >> "binaryName"
         binary.toString() >> "binary foo"
         binary.getTasks() >> binaryTasks

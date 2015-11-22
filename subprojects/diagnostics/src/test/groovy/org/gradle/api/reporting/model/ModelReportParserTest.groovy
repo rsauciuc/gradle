@@ -53,22 +53,6 @@ BUILD SUCCESSFUsL
         ex.message.startsWith "Expected to find an end of report marker '${ModelReportParser.END_OF_REPORT_MARKER}'"
     }
 
-    def "fails when missing a root node"() {
-        when:
-        ModelReportParser.parse("""1
-2
-3
-4
-5
-6
-+ incorrect
-BUILD SUCCESSFUL
-""")
-        then:
-        def ex = thrown(AssertionError)
-        ex.message.startsWith "Expected to find the root node '${ModelReportParser.ROOT_NODE_MARKER}'"
-    }
-
     def "should parse a report with no children"() {
         def modelReport = ModelReportParser.parse(""":model
 
@@ -76,7 +60,6 @@ BUILD SUCCESSFUL
 My Report
 
 
-+ model
 BUILD SUCCESSFUL
 """)
         expect:
@@ -93,29 +76,28 @@ BUILD SUCCESSFUL
 My Report
 
 
-+ model
-    + nullCredentials
-          | Type: \t PasswordCredentials
-        + password
-              | Type: \t java.lang.String
-        + username
-              | Type: \t java.lang.String
-    + numbers
-          | Type: \t Numbers
-        + value
-              | Value: \t 5
-              | Type: \t java.lang.Integer
-    + primaryCredentials
-          | Type: \t PasswordCredentials
-          | Rules:
-                ⤷ Rule1
-                ⤷ Rule2
-        + password
-              | Value: \t hunter2
-              | Type: \t java.lang.String
-        + username
-              | Value: \t uname
-              | Type: \t java.lang.String
++ nullCredentials
+      | Type: \t PasswordCredentials
+    + password
+          | Type: \t java.lang.String
+    + username
+          | Type: \t java.lang.String
++ numbers
+      | Type: \t Numbers
+    + value
+          | Value: \t 5
+          | Type: \t java.lang.Integer
++ primaryCredentials
+      | Type: \t PasswordCredentials
+      | Rules:
+            ⤷ Rule1
+            ⤷ Rule2
+    + password
+          | Value: \t hunter2
+          | Type: \t java.lang.String
+    + username
+          | Value: \t uname
+          | Type: \t java.lang.String
 
 BUILD SUCCESSFUL
 """)
@@ -123,8 +105,44 @@ BUILD SUCCESSFUL
         expect:
         modelReport.reportNode.'**'.primaryCredentials.username.@nodeValue[0] == 'uname'
         modelReport.reportNode.'**'.primaryCredentials.username.@type[0] == 'java.lang.String'
-        modelReport.reportNode.'**'.primaryCredentials.@rules[0][0]== 'Rule1'
-        modelReport.reportNode.'**'.primaryCredentials.@rules[0][1]== 'Rule2'
+        modelReport.reportNode.'**'.primaryCredentials.@rules[0][0] == 'Rule1'
+        modelReport.reportNode.'**'.primaryCredentials.@rules[0][1] == 'Rule2'
+    }
+
+    def "should parse model report nodes and values containing special chars"() {
+        setup:
+        def modelReport = ModelReportParser.parse(""":model
+
+
+My Report
+
+
+
++ lss
+    | Type:   	org.gradle.language.cpp.CppSourceSet
+    | Value:  	C++ source 'lss:lss'
+    | Creator: 	Rules#lss
+
+BUILD SUCCESSFUL
+""")
+
+        expect:
+        modelReport.reportNode.lss.@nodeValue[0] == "C++ source 'lss:lss'"
+        modelReport.reportNode.lss.@type[0] == 'org.gradle.language.cpp.CppSourceSet'
+        modelReport.reportNode.lss.@creator[0] == 'Rules#lss'
+    }
+
+    @Unroll
+    def "should identify node lines"() {
+        expect:
+        boolean result = ModelReportParser.lineIsANode(line)
+        result == expected
+
+        where:
+        line                                   | expected
+        '+ numbers'                            | true
+        '      + numbers'                      | true
+        "    | Value:  \tC++ source 'lss:lss'" | false
     }
 
     def "should find a node attributes"() {
@@ -135,8 +153,9 @@ BUILD SUCCESSFUL
         then:
         reportNode.attribute(expectedAttribute) == expectedValue
         where:
-        line                       | expectedAttribute | expectedValue
-        '| Value: \t some value' | 'nodeValue'       | 'some value'
-        '| Type: \t some type'   | 'type'            | 'some type'
+        line                               | expectedAttribute | expectedValue
+        '| Value: \t some value'           | 'nodeValue'       | 'some value'
+        '| Type: \t some type'             | 'type'            | 'some type'
+        "| Value:  \tC++ source 'lss:lss'" | 'nodeValue'       | "C++ source 'lss:lss'"
     }
 }

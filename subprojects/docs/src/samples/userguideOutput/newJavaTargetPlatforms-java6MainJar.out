@@ -1,8 +1,10 @@
-:core:compileJava6MainJarMainJava UP-TO-DATE
-:core:compileJava6MainJarMainJava6 UP-TO-DATE
-:core:processJava6MainJarMainResources UP-TO-DATE
-:core:createJava6MainJar UP-TO-DATE
-:core:java6MainJar UP-TO-DATE
+:core:clean
+:server:clean UP-TO-DATE
+:core:compileMainJava6JarMainJava
+:core:compileMainJava6JarMainJava6
+:core:processMainJava6JarMainResources
+:core:createMainJava6Jar
+:core:createMainJava6ApiJar
+:core:mainJava6Jar
 
 BUILD SUCCESSFUL
-

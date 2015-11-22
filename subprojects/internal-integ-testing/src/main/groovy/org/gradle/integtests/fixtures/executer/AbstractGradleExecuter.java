@@ -34,10 +34,8 @@ import org.gradle.test.fixtures.file.TestDirectoryProvider;
 import org.gradle.test.fixtures.file.TestFile;
 import org.gradle.util.CollectionUtils;
 import org.gradle.util.DeprecationLogger;
-import org.gradle.util.TextUtil;
 
 import java.io.*;
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.*;
 
@@ -110,7 +108,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter {
     private String profiler = System.getProperty(PROFILE_SYSPROP, "");
 
     protected boolean interactive;
-    protected List<URI> classpath = new ArrayList<URI>();
 
     protected AbstractGradleExecuter(GradleDistribution distribution, TestDirectoryProvider testDirectoryProvider) {
         this.distribution = distribution;
@@ -149,7 +146,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter {
         debug = Boolean.getBoolean(DEBUG_SYSPROP);
         profiler = System.getProperty(PROFILE_SYSPROP, "");
         interactive = false;
-        classpath.clear();
         return this;
     }
 
@@ -269,7 +265,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter {
         executer.withDebug(debug);
         executer.withProfiler(profiler);
         executer.withForceInteractive(interactive);
-        executer.withClasspath(classpath);
         return executer;
     }
 
@@ -605,6 +600,7 @@ public abstract class AbstractGradleExecuter implements GradleExecuter {
         if (isUseDaemon()) {
             allArgs.add("--daemon");
         }
+        allArgs.add("--stacktrace");
         if (taskList) {
             allArgs.add("tasks");
         }
@@ -774,7 +770,7 @@ public abstract class AbstractGradleExecuter implements GradleExecuter {
                     String error = executionResult.getError();
                     if (executionResult instanceof ExecutionFailure) {
                         // Axe everything after the expected exception
-                        int pos = error.indexOf("* Exception is:" + TextUtil.getPlatformLineSeparator());
+                        int pos = error.indexOf("* Exception is:\n");
                         if (pos >= 0) {
                             error = error.substring(0, pos);
                         }
@@ -868,12 +864,6 @@ public abstract class AbstractGradleExecuter implements GradleExecuter {
     @Override
     public GradleExecuter withForceInteractive(boolean flag) {
         interactive = flag;
-        return this;
-    }
-
-    @Override
-    public GradleExecuter withClasspath(List<URI> classpath) {
-        this.classpath = classpath;
         return this;
     }
 

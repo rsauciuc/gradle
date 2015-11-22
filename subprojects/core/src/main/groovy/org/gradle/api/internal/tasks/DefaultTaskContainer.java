@@ -24,6 +24,7 @@ import org.gradle.api.internal.NamedDomainObjectContainerConfigureDelegate;
 import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.taskfactory.ITaskFactory;
+import org.gradle.api.tasks.TaskCollection;
 import org.gradle.initialization.ProjectAccessListener;
 import org.gradle.internal.Transformers;
 import org.gradle.internal.graph.CachingDirectedGraphWalker;
@@ -233,7 +234,7 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
             final ModelType<T> taskModelType = ModelType.of(taskType);
             ModelPath path = MODEL_PATH.child(placeholderName);
             modelNode.addLink(
-                ModelCreators
+                ModelRegistrations
                     .of(path, new TaskCreator<T>(placeholderName, taskType, configure, taskModelType))
                     .withProjection(new UnmanagedModelProjection<T>(taskModelType, true, true))
                     .descriptor(new SimpleModelRuleDescriptor("tasks.addPlaceholderAction(" + placeholderName + ")"))
@@ -290,5 +291,10 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
             taskContainer.add(task);
             mutableModelNode.setPrivateData(taskModelType, task);
         }
+    }
+
+    @Override
+    public <S extends Task> TaskCollection<S> withType(Class<S> type) {
+        return new RealizableTaskCollection<S>(type, super.withType(type), modelNode);
     }
 }

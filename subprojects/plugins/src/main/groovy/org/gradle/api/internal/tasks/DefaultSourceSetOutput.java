@@ -37,7 +37,7 @@ public class DefaultSourceSetOutput extends CompositeFileCollection implements S
 
     public DefaultSourceSetOutput(String sourceSetDisplayName, FileResolver fileResolver, TaskResolver taskResolver) {
         this.fileResolver = fileResolver;
-        String displayName = String.format("%s output", sourceSetDisplayName);
+        String displayName = String.format("%s classes", sourceSetDisplayName);
         outputDirectories = new DefaultConfigurableFileCollection(displayName, fileResolver, taskResolver, new Callable() {
             public Object call() throws Exception {
                 return getClassesDir();
@@ -51,7 +51,7 @@ public class DefaultSourceSetOutput extends CompositeFileCollection implements S
     }
 
     @Override
-    public void resolve(FileCollectionResolveContext context) {
+    public void visitContents(FileCollectionResolveContext context) {
         context.add(outputDirectories);
     }
 

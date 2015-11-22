@@ -17,14 +17,10 @@
 package org.gradle.model
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
 
 class ConfigurationCycleIntegrationTest extends AbstractIntegrationSpec {
 
     def "configuration cycle error contains information useful for troubleshooting"() {
-        given:
-        EnableModelDsl.enable(executer)
-
         when:
         buildScript '''
             class Rules extends RuleSource {
@@ -52,7 +48,7 @@ class ConfigurationCycleIntegrationTest extends AbstractIntegrationSpec {
 
             model {
                 second {
-                    $("third")
+                    $.third
                 }
             }
         '''
@@ -65,16 +61,13 @@ class ConfigurationCycleIntegrationTest extends AbstractIntegrationSpec {
 first
 \\- Rules#first
    \\- second
-      \\- model.second @ build.gradle line 26, column 17
+      \\- second { ... } @ build.gradle line 26, column 17
          \\- third
             \\- Rules#third
                \\- first""")
     }
 
     def "cycles involving multiple rules of same phase are detected"() {
-        given:
-        EnableModelDsl.enable(executer)
-
         when:
         buildScript '''
             class Rules extends RuleSource {
@@ -112,9 +105,6 @@ m1
     }
 
     def "cycles involving multiple rules of different phase are detected"() {
-        given:
-        EnableModelDsl.enable(executer)
-
         when:
         buildScript '''
             class Rules extends RuleSource {

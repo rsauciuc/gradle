@@ -148,7 +148,7 @@ Add methods to `BuildResult` to query the result.
     * All successful, failed or skipped tasks can be retrieved as executed tasks from `GradleRunner`.
 * A build that has  `buildSrc` project does not list executed tasks from that project when retrieved from `GradleRunner`.
 
-## Story: Test daemons are isolated from the environment they are running in
+## Story: Test daemons are isolated from the environment they are running in (DONE)
 
 The previous stories set up the basic mechanics for the test-kit. Daemons started by test-kit should be isolated from the machine environment:
 
@@ -188,7 +188,7 @@ for debugging purposes. Should we potentially allow the user to set a Gradle use
 
 We'll support that scenario when we get to the corresponding story.
 
-## Story: Functional test defines classes under test to make visible to test builds
+## Story: Functional test defines classes under test to make visible to test builds (DONE)
 
 Provide an API for functional tests to define a classpath containing classes under test:
 
@@ -239,42 +239,214 @@ This diagram shows the intended ClassLoader hierarchy. The piece to be added is 
 
 # Milestone 2
 
-## Story: IDE user debugs test build
+## Story: IDE user debugs test build (DONE)
 
-The previous stories set up the basic mechanics for the test-kit. To make the test-kit production-ready these mechanics need to be fine-tuned.
+By default functional tests are executed in a forked daemon process. Debugging test execution in a different JVM other than the "main" Gradle process would require additional setup from the end user.
+This story improves the end user experience by allowing for conveniently step through code for debugging purposes from the IDE without the need for any complicated configuration.
 
 ### User visible changes
 
-The `GradleRunner` interface will be extended to provide additional methods.
+The `GradleRunner` abstract class will be extended to provide additional methods.
 
-    public interface GradleRunner {
-        boolean isDebug();
-        void setDebug(boolean debug);
+    public abstract class GradleRunner {
+        public abstract boolean isDebug();
+        public abstract GradleRunner withDebug(boolean debug);
     }
 
 ### Implementation
 
-* When debug is enabled, run the build in embedded mode.
-* Can enable debug via `GradleRunner.setDebug()`.
+* When debug is enabled, run the build in embedded mode by setting `DefaultGradleConnector.embedded(true)`.
+* Can enable debug via `GradleRunner.withDebug(boolean)`.
 * Debug is automatically enabled when `Test.debug` is true.
-* Debug is automatically enabled when test is being run or debugged from an IDE.
+* Debug is automatically enabled when test is being run or debugged from an IDE. In the IDE test execution run configuration, the system property `org.gradle.testkit.debug` has to be set to `true`. A
+later story dealing with the plugin development plugin can deal with the automatic setup of the system property by pre-configuring the `idea` and `eclipse` plugin.
 
 ### Test coverage
 
-* A user can start the `GradleRunner` with remote debugging JVM parameter for debugging purposes. By default the `GradleRunner` does not use the debugging JVM parameters.
+* The debug flag is properly passed to the tooling API.
 * All previous features work in debug mode. Potentially add a test runner to run each test in debug and non-debug mode.
 * Manually verify that when using an IDE, a breakpoint can be added in Gradle code (say in the Java plugin), the test run, and the breakpoint hit.
+* If the debug flag is not set explicitly through the API or run from the IDE, functional tests run in a forked daemon process.
 
 ### Open issues
 
-- Port number?
+- Port number? (Is this even an issue? Probably not because the tests are executed in the same JVM.)
+- Do we expect classloading issues between user-defined dependencies and Gradle core dependencies when running in embedded mode?
+- How do we reliably determine that the build is executed from an IDE?
+- Should the integration with `Test.debug` be moved to the story that addresses the plugin development plugin?
 
-## Story: Developer inspects build result of unexpected build failure
+## Story: Developer inspects build result of unexpected build failure (DONE)
 
 This story adds the ability to understand what happened with the test when it fails unexpectedly.
 
 - UnexpectedBuildFailure and Success should have-a BuildResult
 - Tooling API exceptions and infrastructure failures should be wrapped and provide build information (e.g. stdout)
+
+## Story: Test build code against different Gradle versions (DONE)
+
+Extend the capabilities of `GradleRunner` to allow for testing a build against more than one Gradle version. The typical use case is to check the runtime compatibility of build logic against a
+specific Gradle version. Example: Plugin X is built with 2.3, but check if it is also compatible with 2.2, 2.4 and 2.5.
+
+### User visible changes
+
+A user interacts with the following interfaces/classes:
+
+    package org.gradle.testkit.runner;
+
+    public interface GradleDistribution<T> {
+        T getHandle();
+    }
+
+    public final class VersionBasedGradleDistribution implements GradleDistribution<String> { /* ... */ }
+    public final class URILocatedGradleDistribution implements GradleDistribution<URI> { /* ... */ }
+    public final class InstalledGradleDistribution implements GradleDistribution<File> { /* ... */ }
+
+    package org.gradle.testkit.runner;
+
+    public abstract class GradleRunner {
+        public static GradleRunner create(GradleDistribution<?> gradleDistribution) { /* ... */ }
+    }
+
+A functional test using Spock could look as such:
+
+    class BuildLogicFunctionalTest extends Specification {
+        @Unroll
+        def "run build with Gradle version #gradleVersion"() {
+            given:
+            @Rule final TemporaryFolder testProjectDir = new TemporaryFolder()
+            File buildFile = testProjectDir.newFile('build.gradle')
+
+            buildFile << """
+                task helloWorld {
+                    doLast {
+                        println 'Hello world!'
+                    }
+                }
+            """
+
+            when:
+            def result = GradleRunner.create(new VersionBasedGradleDistribution(gradleVersion))
+                .withProjectDir(testProjectDir.root)
+                .withArguments('helloWorld')
+                .build()
+            }
+
+            then:
+            noExceptionThrown()
+            result.standardOutput.contains(':helloWorld')
+            result.standardOutput.contains('Hello world!')
+            !result.standardError
+            result.tasks.collect { it.path } == [':helloWorld']
+            result.taskPaths(SUCCESS) == [':helloWorld']
+            result.taskPaths(SKIPPED).empty
+            result.taskPaths(UP_TO_DATE).empty
+            result.taskPaths(FAILED).empty
+
+            where:
+            gradleVersion << ['2.6', '2.7']
+        }
+    }
+
+### Implementation
+
+* The tooling API uses the provided Gradle distribution. Any of the following locations is valid:
+    * Gradle version String e.g. `"2.4"`
+    * Gradle URI e.g. `new URI("http://services.gradle.org/distributions/gradle-2.4-bin.zip")`
+    * Gradle installation e.g. `new File("/Users/foo/bar/gradle-installation/gradle-2.4-bin")`
+
+### Test coverage
+
+* `GradleRunner` throws an exception if `GradleDistribution` is provided that doesn't match the supported types.
+* A test can be executed with Gradle distribution provided by the user. The version of the distribution can be a different from the Gradle version used to build the project.
+* A test can be executed with a series of Gradle distributions of the same type or different types.
+* Tests can be executed in parallel for multiple Gradle versions.
+* A test using a unknown or unsupported for a Gradle distribution fails the build.
+
+### Open issues
+
+* Should we provide a JUnit Runner implementation to simplify definition of Gradle distributions? The use case would be a matrix combination of multiple Gradle distributions and a list of `where`
+arguments.
+* Do we need to deal with TestKit runtime behavior backward compatibility e.g. no isolated daemon environment when executing test with a Gradle version that doesn't support it yet?
+
+## Story: Ability to provide Writers for capturing standard output and error (DONE)
+
+At the moment the standard output and error can only be resolved from the `BuildResult`. There's not direct output of these streams to the console. Users cannot provide their own OutputStreams
+for other debugging or processing purposes. This story allows for specifying a Writer to the `GradleRunner` API that output will be forwarded to (e.g. `System.out`).
+
+### Implementation
+
+The `GradleRunner` abstract class will be extended to provide additional methods.
+
+    public abstract class GradleRunner {
+        public abstract GradleRunner withStandardOutput(Writer standardOutput);
+        public abstract GradleRunner withStandardError(Writer standardError);
+    }
+
+* If no `Writer` is provided by the user, the Test Kit will not write the output to the console. Output from the test execution will be captured as part of the `BuildResult`.
+* A user can provide `Writer` instances for standard output and/or standard error. The relevant output from the test execution will be forwarded to the provided Writers.
+* If a user provides an `Writer`, then the corresponding standard output and/or error in the `BuildResult` provides the same information.
+
+### Test Coverage
+
+* If a user doesn't provide an `Writer`, then standard output and error are made available through the `BuildResult`.
+* Providing a null `Writer` results in an exception thrown.
+* A user can redirect the output to the console by providing `System.out` and `System.err` as input to a `Writer`. The standard output and error of the `BuildResult` provides the same information.
+* A user can provide other instances of `Writer`. The standard output and error of the `BuildResult` provides the same information.
+* `Writer` instances provided by the user capture output if an exception occurs during test execution.
+
+### Open issues
+
+* Using `System.out` and `System.err` as default? This might produce to much log output.
+
+## Story: Test kit does not require any of the Gradle runtime
+
+This story improves usability of the test kit by not imposing any dependencies beyond the `gradle-test-kit` and `gradle-tooling-api` jars (including no transitive dependencies).
+
+### Implementation
+
+- Push responsibility for finding a Gradle distribution based on a class (i.e. what GradleDistributionLocator) does into the tooling API
+- Remove the dependency on `gradle-core` in the test kit project
+
+### Test Coverage
+
+- User tests cannot access classes from `gradle-core` (or any other part of the Gradle runtime) in tests where `gradleTestKit()` was used
+- Configuration containing just `gradleTestKit()` contains no other files than `gradle-test-kit` and `gradle-tooling-api`
+
+## Story: GradleRunner functionality is verified to work with all "supported" Gradle versions
+
+The TestKit allows for executing functional tests with a Gradle distribution specified by the user. `GradleRunner` passes the provided
+distribution to the Tooling API to execute Gradle. For the most part the internal implementation of the Tooling API build execution
+uses a conservative set of features though there's no assurance that a Tooling API will work with older versions of Gradle
+in this context. This story aims for implementing appropriate test coverage to ensure backward compatibility or graceful handling of
+unsupported functionality for other versions of the Tooling API.
+
+### Implementation
+
+* The goal is to discover which version of the Gradle runtime can be used to execute a test. For each test verify the range from version 1.0 up
+to the latest version.
+* Based on the findings, introduce annotation(s) that indicate if a specific feature is supported for a test or not. The following scenarios are known
+potential issues for some versions of Gradle:
+    * Does it use the `GradleRunner.withPluginClasspath()` method? (introduced in 2.8)
+    * Does it require inspecting the build text output? (doesn’t work in debug mode prior to Gradle 2.9)
+    * Does it not work / not make sense in debug mode? (i.e. what we currently use `@NoDebug` to indicate).
+* The annotation(s) controlling the scenario automatically determine the Gradle version(s) used for executing the test. The Gradle version used for testing
+is injected via `GradleRunner.withGradleVersion(String)`. This logic should be implemented in the JUnit rule `GradleRunnerIntegTestRunner`.
+* The annotation(s) controlling the scenario need to be able to indicate if a scenario is supported or not e.g. `@PluginClasspathInjection(supported = false)`.
+* A TestKit feature that is not supported by the Gradle version used to execute the test should behave in a reasonable manner e.g. provide
+a human-readable error message that explains why this feature cannot be used.
+
+### Test Coverage
+
+* All TestKit integration tests in Gradle core are exercised.
+* Test passes for feature with Gradle versions supporting it.
+* Test is skipped for Gradle versions that do not support feature based on assigned annotation.
+* Assigned Gradle versions used for testing are properly evaluated and used for execution.
+
+### Open issues
+
+* Account for increased build time on CI (potentially requires re-sharding of jobs).
+
+# Milestone 3
 
 ## Story: Classes under test are visible to build scripts
 
@@ -298,85 +470,6 @@ When using the plugin development plugin, plugins under test are visible to buil
     * Classes originating from external libraries used by classes under tests are added to classpath of the tooling API execution.
 * IDEA and Eclipse projects are configured to run these tests. Manually verify that this works (in IDEA say).
 * Manually verify that when using an IDE, a breakpoint can be added in production classes, the test run, and the breakpoint hit.
-
-## Story: Test build code against different Gradle versions
-
-Extend the capabilities of `GradleRunner` to allow for testing a build against more than one Gradle version. The typical use case is to check the runtime compatibility of build logic against a
-specific Gradle version. Example: Plugin X is built with 2.3, but check if it is also compatible with 2.2, 2.4 and 2.5.
-
-### User visible changes
-
-A user interacts with the following interfaces/classes:
-
-    package org.gradle.testkit.functional.dist;
-
-    public interface GradleDistribution<T> {
-        T getHandle();
-    }
-
-    public final class VersionBasedGradleDistribution implements GradleDistribution<String> { /* ... */ }
-    public final class URILocatedGradleDistribution implements GradleDistribution<URI> { /* ... */ }
-    public final class InstalledGradleDistribution implements GradleDistribution<File> { /* ... */ }
-
-    package org.gradle.testkit.functional;
-
-    public class GradleRunnerFactory {
-        public static GradleRunner create(GradleDistribution gradleDistribution) { /* ... */ }
-    }
-
-A functional test using Spock could look as such:
-
-    class UserFunctionalTest extends Specification {
-        @Unroll
-        def "run build with #gradleDistribution"() {
-            given:
-            File testProjectDir = new File("${System.getProperty('user.home')}/tmp/gradle-build")
-            File buildFile = new File(testProjectDir, 'build.gradle')
-
-            buildFile << """
-                task helloWorld {
-                    doLast {
-                        println 'Hello world!'
-                    }
-                }
-            """
-
-            when:
-            def result = GradleRunnerFactory.create(gradleDistribution).with {
-                workingDir = testProjectDir
-                arguments << "helloWorld"
-                succeed()
-            }
-
-            then:
-            result.standardOutput.contains "Hello World!"
-
-            where:
-            gradleDistribution << [new VersionBasedGradleDistribution("2.4"), new VersionBasedGradleDistribution("2.5")]
-        }
-    }
-
-### Implementation
-
-* The tooling API uses the provided Gradle distribution. Any of the following locations is valid:
-    * Gradle version String e.g. `"2.4"`
-    * Gradle URI e.g. `new URI("http://services.gradle.org/distributions/gradle-2.4-bin.zip")`
-    * Gradle installation e.g. `new File("/Users/foo/bar/gradle-installation/gradle-2.4-bin")`
-* Each test executed with a specific Gradle version creates a unique temporary test directory.
-* Tests executed with the different Gradle versions run with an isolated daemon.
-
-### Test coverage
-
-* `GradleRunnerFactory` throws and exception if `GradleDistribution` is provided that doesn't match the supported types.
-* A test can be executed with Gradle distribution provided by the user. The version of the distribution can be a different from the Gradle version used to build the project.
-
-### Open issues
-
-* Execution of tests in parallel for multiple Gradle versions
-* JUnit Runner implementation to simplify definition of Gradle distributions
-
-
-# Milestone 3
 
 ## Story: Integration with plugin-development-plugin
 

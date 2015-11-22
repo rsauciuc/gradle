@@ -1,226 +1,272 @@
 
-This spec defines a number of features to improve the developer IDE experience with Gradle. It covers changes in Gradle to improve those features
+This spec defines a number of features to improve the developer experience using Gradle from the IDE. It covers changes in Gradle to improve those features
 that directly affect the IDE user experience. This includes the tooling API and tooling models, the Gradle daemon, and the Gradle IDE plugins
 (i.e. the plugins that run inside Gradle to provide the IDE models).
 
-This spec does not cover more general features such as improving dependency resolution or configuration performance.
+Tooling API stories that are not related directly to the IDE experience should go in the `tooling-api-improvements.md` spec.
 
 # Implementation plan
 
-Below is a list of stories, in approximate priority order:
+## Feature - Expose source and target platforms of JVM language projects
 
-## Feature -  Improve IDE project naming deduplication strategy
+### Story - Expose natures and builders for projects
 
-### Motivation
+The Motiviation here is to model java projects better within the EclipseProject model. Therefore we want to provide
+the Eclipse Model with information about natures and builders. A Java Project is identified
+by having an EclipseModel providing a java nature. IDEs should not guess which natures and builders to add but get the information
+from the TAPI.
 
-If we got a project structure like this:
+#### Estimate
 
-    :foo:app
-    :bar:app
-    :foobar:app
+- 3 days
 
-it currently results in the following eclipse project names:
+#### The API
 
-    app
-    bar-app
-    foobar-app
+    interface EclipseProject {
+        ...
+        ...
+        DomainObjectSet<? extends EclipseProjectNature> getProjectNatures();
 
-This behaviour can be quite confusing in the IDE. To make things clearer the deduplication strategy
-should be changed in a way that it results in:
+        DomainObjectSet<? extends BuildCommand> getBuildCommands()
+        ...
+    }
 
-    foo-app
-    bar-app
-    foobar-app
+    interface EclipseBuildCommand{
+        String getName()
+        Map<String,String> getArguments()
+    }
 
+    public interface EclipseProjectNature {
 
-# Implementation Plan
-
-The general algorithm will look like this:
-
-1. if no duplicate of project name is found in the hierarchy, use the original name as IDE project name
-2. root project name keeps the original name in IDE
-3. for all non unique project names
-
-    3.1 the IDE project name candidate is changed to be _deduplicated_ `project.parent.name` + `-` + `project.name`
-
-    3.2 duplicate words in the IDE project name candidate are removed.( eg `gradle-gradle-core` becomes `gradle-core`
-
-    3.3 skip 3.2 for identical parent and child project name
-
-    3.4 repeat starting from 3.1 with all projects with non unique names yet
-
-4. deprecate setting ide project name in whenMerged/beforeMerged hook.
-
-# Test Coverage
-
-* _gradle eclipse_ / _gradle idea_ on root of multiproject with given project layout containing duplicate names:
-
-```
-    root
-    \- foo
-       \- app
-    \- bar
-       \- app
-```
-
-results in IDE project names
-
-```
-    root
-    \- foo
-       \- foo-app
-    \- bar
-       \- bar-app
-```
-* _gradle eclipse_ / _gradle idea_ on root of multiproject with given project layout containing with no duplicate names:
-
-```
-    root
-    \- foo
-       \- bar
-    \- foobar
-       \- app
-```
-
-results in IDE project names
-
-```
-    root
-    \- foo
-       \- bar
-    \- foobar
-       \- app
-```
+        /**
+         * Returns the unique identifier of the project nature.
+         */
+        String getId();
+    }
 
 
-* explicit configured IDE project name take precedence over deduplication:
-    given
+#### Implementation
 
-```
-     root
-     \- foo
-        \- app
-           \-build.gradle // contains e.g. eclipse.project.name = "custom-app" / ideaModule.module.name = "custom-app"
-     \- bar
-        \- app
-```
+- Add `DomainObjectSet<? extends EclipseProjectNature> getProjectNatures()` to the EclipseProject interface.
+- Add `List<DefaultEclipseProjectNature> projectNatures` property (setter + getter) to `DefaultEclipseProject`
+- Change EclipseModelBuilder to
+    - Add `org.eclipse.jdt.core.javanature` nature for all java projects in the multiproject build to EclipseProject.
+    - Add all natures declared via `eclipse.project.natures` to EclipseProject model.
 
-results in
+- Add `DomainObjectSet<? extends BuildCommand> getBuildCommands()` to the EclipseProject interface.
+- Add `List<BuildCommand> buildCommands` property to `DefaultEclipseProject`
+- Change EclipseModelBuilder to
+    - Add build command with name `org.eclipse.jdt.core.javabuilder` and no arguments for all java projects in multiproject build
+    - Apply custom added build commands (via `eclipse.project.buildCommand`)
 
-```
-     root
-     \- foo
-        \- custom-app
-     \- bar
-        \- app
-```
+#### Test coverage
 
+- `EclipseProject#getProjectNatures()` of a Java project contains java nature (`org.eclipse.jdt.core.javanature`)
+- `EclipseProject#getProjectNatures()` respects custom added natures (via `eclipse.eclipse.project.natures`)
+- older Gradle versions throw decent error when calling `EclipseProject#getProjectNatures() `
 
-* given project layout
-
-```
-    app
-    \- app
-    \- util
-```
-
-results in
-
-```
-    app
-    \- app-app
-    \- util
-```
-
-* given project layout
-
-```
-    root
-    \- app
-    \- services
-       \- bar
-          \- app
-```
-
-results in
-
-```
-    root
-    \- root-app
-    \- services
-       \- bar
-          \- bar-app
-```
-
-* given project layout
-
-```
-    root
-    |- foo-bar
-    |- foo
-    |  \- bar
-    \- baz
-       \- bar
-```
-
-results in
-
-```
-    root
-    \- foo-bar
-    \- foo
-       \- root-foo-bar
-    \- baz
-       \- root-baz-bar
-
-```
+- `EclipseProject#getBuildCommands()` of a Java project contains java builder (`org.eclipse.jdt.core.javabuilder`)
+- `EclipseProject#getBuildCommands()` respects custom added build commands.
+- older Gradle versions throw decent error when calling `EclipseProject#getBuildCommands()`
 
 
-* given project layout
+### Story - Expose Java source level for Java projects to Eclipse
 
-```
-    myproject
-    \- myproject-app
-    \- myproject-bar
-       \- myproject-app
-```
+The IDE models should provide the java source compatibility level. To model java language specific information
+we want to have a dedicated model for eclipse specific java information and gradle specific java information.
 
-results in
+#### Estimate
 
-```
-    myproject
-    \- myproject-app (instead of myproject-myproject-app)
-    \- myproject-bar
-       \- myproject-bar-app (instead of myproject-bar-myproject-app)
-```
+- 3 days
 
-* deduplication logics works with deduplicated parent module name. given project layout:
+#### The API
 
-```
-   root
-    \- bar
-        \- services
-            \- rest
-    \- foo
-            \- services
-                \- rest
-```
+    interface JavaSourceSettings {
+        JavaVersion getSourceLanguageLevel()
+    }
 
-results in
+    interface JavaSourceAware {
+        JavaSourceSettings getJavaSourceSettings()
+    }
 
-```
-    root
-    \- bar
-        \- bar-serivces
-            \- bar-services-rest
-    \- foo
-        \- foo-serivces
-            \- foo-services-rest
-```
+    interface EclipseProject extends JavaSourceAware {
+    }
 
-* setting ide project name within `whenMerged` results in a deprecation warning.
-* setting ide project name within `beforeMerged` results in a deprecation warning.
-* tests work with IDE gradle plugins and with IDE model queried via tooling api
+- The `JavaSourceSettings` interface describes Java-specific details for a model.
+  It initially defines only one attribute, describing the `sourceLanguageLevel`.
+- The `getSourceLanguageLevel()` returns the `eclipse.jdt.sourceCompatibility` level that is configurable within the `build.gradle` or per default uses
+similar version as `JavaConvention.sourceCompatibility` configuration.
+- For a no Java Project `JavaSourceAware.getJavaSourceSettings()` returns null
+- For older Gradle version the `JavaSourceAware.getJavaSourceSettings()` throws `UnsupportedMethodException`.
+
+#### Implementation
+- Add a `JavaSourceSettings` implementation with `JavaVersion getSourceLanguageLevel()`.
+- Introduce `JavaSourceAware` interface abstracting a common `JavaSourceSettings getJavaSourceSettings()` method.
+- Update `EclipseProject` to extend `JavaSourceAware`.
+- Update DefaultEclipseProject to implement new `.getJavaSourceSettings()` method
+- Update `EclipseModelBuilder` to set values for the `JavaSourceSettings`
+    - return `null` if the project doesn't apply the `java-base` plug-in.
+    - otherwise `JavaSourceSettings.getSourceLanguageLevel()` returns the value of `eclipse.jdt.sourceCompatibility`.
+
+#### Test coverage
+
+- throws meaningful error for older Gradle provider versions when requesting EclipseProject.getJavaSourceSettings().getTargetLanguageLevel()
+- `EclipseProject.getJavaSourceSettings().getSourceLanguageLevel()` throws `UnsupportedMethodException`for older target Gradle version.
+- `EclipseProject.getJavaSourceSettings()` returns null if no java project.
+- Java project, with 'eclipse' plugin not defining custom source compatibility via `eclipse.jdt.sourceCompatibility`
+- Java project, with 'eclipse' plugin defining custom source compatibility via `eclipse.jdt.sourceCompatibility`
+- Multiproject java project build with different source levels per subproject
+
+### Story - Expose Java source level for Java projects to IDEA
+
+This is the IDEA-counterpart of the _Expose Java source level for Java projects to Eclipse_ story. The goal is to expose the source
+language levels for each module in a project.
+
+#### Estimate
+
+- 2 days
+
+#### The API
+
+    interface IdeaJavaSourceSettings extends JavaSourceSettings {
+        boolean isInherited()
+        JavaVersion getSourceLanguageLevel()
+    }
+
+    interface IdeaModule extends JavaSourceAware {
+        IdeaJavaSourceSettings getJavaSourceSettings()
+    }
+
+    interface IdeaProject extends JavaSourceAware {
+    }
+
+#### Implementation
+- Introduce `IdeaJavaLanguageLevel` extending `JavaLanguageLevel`
+- Introduce `IdeaJavaSourceSettings` extending `JavaSourceSettings`.
+- Let the `IdeaModule` model extend `JavaSourceAware` and expose specialized `IdeaJavaSourceSettings`.
+- Let the `IdeaProject` model extend `JavaSourceAware` to expose `JavaSourceSettings`
+- Update `DefaultIdeaProject` to implement new `getJavaSourceSettings()` method
+- Update `DefaultIdeaModule` to implement new `getJavaSourceSettings()` method
+- Update `IdeaModelBuilder` to set values for `getJavaSourceSettings()` for `IdeaProject` and `IdeaModule`
+    - return `null` if not a Java project
+    - otherwise configure it as follows
+        - `IdeaProject.getJavaSourceSettings().getSourceLanguageLevel()` is calculated from `org.gradle.plugins.ide.idea.model.IdeaProject.getLanguageLevel()`.
+        - `IdeaModule.getJavaSourceSettings().getSourceLanguageLevel()` returns same value as root `IdeaProject.getLanguageLevel().getLevel()`
+        - `IdeaModule.getSourceLanguageLevel().isInherited` returns true
+
+#### Test coverage
+- `IdeaModule.getJavaSourceSettings()` returns null for non java projects
+- `IdeaProject.getJavaSourceSettings()` returns null for non java projects
+- `IdeaModule.getJavaSourceSettings().isInherited()` returns true.
+- `IdeaProject.getJavaSourceSettings()` throws `UnsupportedMethodException`for older target Gradle version.
+- `IdeaModule.getJavaSourceSettings()` throws `UnsupportedMethodException`for older target Gradle version.
+- `IdeaProject.getJavaSourceSettings().getSourceLanguageLevel()` matches language level information obtained from `project.sourceCompatibility`.
+- `IdeaModule.getJavaSourceSettings().getSourceLanguageLevel()` matches custom `idea.project.languageLevel`.
+- Can handle multi project builds with different source levels per subproject.
+
+#### Open questions
+- configuring per-module source level is currently not supported Idea plugin?
+
+
+### Story - Expose target JDK for Java projects to Eclipse
+
+#### Estimate
+- 3 days
+
+
+#### The API
+
+    interface JavaRuntime {
+        JavaVersion getJavaVersion()
+        File getHomeDirectory()
+    }
+
+    interface JavaSourceSettings {
+        JavaRuntimeEnvironment getTargetRuntime()
+        JavaLanguageLevel getTargetLanguageLevel()
+    }
+
+    interface EclipseProject extends JavaSourceAware {
+        JavaSourceSettings getJavaSourceSettings()
+    }
+
+#### Implementation
+
+- Add `JavaRuntimeEnvironment getTargetRuntime()` to `JavaSourceSettings`.
+- `JavaRuntimeEnvironment` should expose
+    - `JavaVersion getJavaVersion()` - the version of the JRE
+    - `File getHomeDirectory()` - the directory of the JRE in use
+- Add `JavaLanguageLevel getTargetLanguageLevel()` to `JavaSourceSettings to expose the java target combatibility level.
+- Update `DefaultJavaSourceSettings` to expose JRE and target language level information based on current JVM in use
+- Update `EclipseModelBuilder` to set values for the target language level and target runtime
+    - return `null` if the project doesn't apply the `java-base` plug-in.
+    - otherwise `JavaSourceSettings.getTargetLanguageLevel()` returns the value of `eclipse.jdt.targetCompatibility`.
+
+#### Test coverage
+
+- `EclipseProject.getJavaSourceSettings().getTargetRuntime()` points to JVM in use
+    - `homeDirectory` pointing to the java home of the jvm in use
+    - `javaVersion` reflecting the java version of the jvm in use
+
+- Java project, with 'eclipse' plugin not defining custom target compatibility via `eclipse.jdt.targetCompatibility`
+- Java project, with 'eclipse' plugin defining custom target compatibility via `eclipse.jdt.targetCompatibility`
+- Multiproject java project build with different target levels per subproject.
+- throws meaningful error for older Gradle provider versions when requesting EclipseProject.getJavaSourceSettings().getTargetRuntime()
+- throws meaningful error for older Gradle provider versions when requesting EclipseProject.getJavaSourceSettings().getTargetLanguageLevel()
+
+### Story - Expose target JDK for Java projects to IDEA
+
+#### Estimate
+
+- 2 days
+
+#### Implementation
+
+- Update IdeaModelBuilder to
+
+### Story - Introduce JavaProject
+
+#### Estimate
+
+- 3.5 days
+
+#### Implementation
+
+- add new `JavaProject` to model IDE agnostic Java Projects
+- add details about Java Source level to the `JavaModel`
+    - should be based on projects `sourceCompatibility` level
+- add details about dependencies to the project
+    - project and external dependencies
+- add details about source folders to the `JavaProject` model
+- add details of the target JVM:
+    - should be based on projects `targetCompatibility` level
+    - Java version
+    - Install directory
+
+- TBD: Classpath
+- For older Gradle versions:
+    - TBD - reasonable defaults for Java language version
+
+#### Test Coverage
+
+- Query `JavaProject` for older Gradle providers throws meaningful error message
+- Query `JavaProject` for non java projects fails with meaningful error message
+- `JavaProject` model for multi project build contains information about
+    - source folders
+    - thirdparty dependencies
+    - project dependencies
+    - target sdk
+    - source compatibility
+- respects customizations of sourcesets
+    - additional sourcesets
+    - additional sourcefolders to sourcesets are respected
+
+- TBD: provide test and runtime classpath
+
+
+### Story - Expose Groovy components to the IDE
+
+TBD
 
 ## Feature - Tooling API parity with command-line for task visualisation and execution
 
@@ -246,23 +292,6 @@ model introduced by the new language plugins:
 #### Open issues
 
 - Split `gradle tasks` into 'what can I do with this build?' and a 'what are all the tasks in this project?'.
-
-### GRADLE-2434 - IDE visualises and runs task selectors (DONE)
-
-On the command-line I can run `gradle test` and this will find and execute all tasks with name `test` in the current project
-and all its subprojects.
-
-Expose some information to allow the IDE to visualise this and execute builds in a similar way.
-
-See [tooling-api-improvements.md](tooling-api-improvements.md#story-gradle-2434---expose-the-aggregate-tasks-for-a-project)
-
-### IDE hides implementation tasks (DONE)
-
-On the command-line I can run `gradle tasks` and see the public tasks for the build, and `gradle tasks --all` to see all the tasks.
-
-Expose some information to allow the IDE to visualise this.
-
-See [tooling-api-improvements.md](tooling-api-improvements.md#expose-information-about-the-visibility-of-a-task)
 
 ### Simplify task visibility logic
 
@@ -398,15 +427,6 @@ Once the new DSL is stabilised we will deprecate and remove the `scopes` map.
     - Include JvmLibrary main artifact in query results
     - Replace `IdeDependenciesExtractor.extractRepoFileDependencies` with single ArtifactResolutionQuery
 
-## Feature - Tooling API client cancels an operation (DONE)
-
-Add some way for a tooling API client to request that an operation be cancelled.
-
-The implementation will do the same thing as if the daemon client is disconnected, which is to drop the daemon process.
-Later stories incrementally add more graceful cancellation handling.
-
-See [tooling-api-improvements.md](tooling-api-improvements.md#story-tooling-api-client-cancels-a-long-running-operation)
-
 ## Feature - Expose dependency resolution problems
 
 - For the following kinds of failures:
@@ -421,55 +441,58 @@ See [tooling-api-improvements.md](tooling-api-improvements.md#story-tooling-api-
 - Change the existing IDE plugin int tests to verify the warning is produced in each of the above cases.
 - Add test coverage for the tooling API to cover the above cases.
 
-## Feature - Expose build script compilation details
+## Feature: Expose the compile details of a build script
 
-See [tooling-api-improvements.md](tooling-api-improvements.md#story-expose-the-compile-details-of-a-build-script):
+This feature exposes some information about how a build script will be compiled. This information can be used by an
+IDE to provide some basic content assistance for a build script.
 
-Expose some details to allow some basic content assistance for build scripts:
+## Story: Expose the Groovy version used for a build script
 
-- Expose the classpath each build script.
-- Expose the default imports for each build script.
-- Expose the Groovy version for each build script.
+Add a `groovyVersion` property to `GradleScript` to expose the Groovy version that is used.
 
-## Story - Tooling API stability tests
+### Test coverage
 
-Introduce some stress and stability tests for the tooling API and daemon to the performance test suite. Does not include
-fixing any leaks or stability problems exposed by these tests. Additional stories will be added to take care of such issues.
+## Story: Expose the default imports used for a build script
 
-## Feature - Daemon usability improvements
+Add a `defaultImports` property to `GradleScript` to expose the default imports applied to the script.
 
-### Story - Build script classpath can contain a changing jar
+### Test coverage
 
-Fix ClassLoader caching to detect when a build script classpath has changed.
+## Story: Expose the classpath used for a build script
 
-Fix the ClassLoading implementation to avoid locking these Jars on Windows.
+1. Introduce a new hierarchy to represent a classpath element. Retrofit the IDEA and Eclipse models to use this.
+    - Should expose a set of files, a set of source archives and a set of API docs.
+2. Add `compileClasspath` property to `GradleScript` to expose the build script classpath.
+3. Script classpath includes the Gradle API and core plugins
+    - Should include the source and Javadoc
+4. Script classpath includes the libraries declared in the `buildscript { }` block.
+5. Script classpath includes the plugins declared in the `plugins { }` block.
+6. Script classpath includes the libraries inherited from parent project.
 
-### Story - Can clean after compiling on Windows
+### Test coverage
 
-Fix GRADLE-2275.
+- Add a new `ToolingApiSpecification` integration test class that covers:
+    - Gradle API is included in the classpath.
+    - buildSrc output is included in the classpath, if present.
+    - Classpath declared in script is included in the classpath.
+    - Classpath declared in script of ancestor project is included in the classpath.
+    - Source and Javadoc artifacts for the above are included in the classpath.
+- Verify that a decent error message is received when using a Gradle version that does not expose the build script classpath.
 
-### Story - Prefer a single daemon instance
+### Open issues
 
-Improve daemon expiration algorithm so that when there are multiple daemon instances running, one instance is
-selected as the survivor and the others expire quickly (say, as soon as they become idle).
+- Need to flesh out the classpath types.
+- Will need to use Eclipse and IDEA specific classpath models
+
+## Story: Tooling API client requests build script details for a given file
+
+Add a way to take a file path and request a `BuildScript` model for it.
 
 ## Feature - Expose project components to the IDE
 
-### Story - Expose Java components to the IDE
+## Story: Expose the IDE output directories
 
-See [tooling-api-improvements.md](tooling-api-improvements.md):
-
-Expose Java language level and other details about a Java component.
-
-Expose the corresponding Eclipse and IDEA model.
-
-### Story - Expose Groovy components to the IDE
-
-See [tooling-api-improvements.md](tooling-api-improvements.md):
-
-Expose Groovy language level and other details about a Groovy component.
-
-Expose the corresponding Eclipse and IDEA model.
+Add the appropriate properties to the IDEA and Eclipse models.
 
 ### Story - Expose Scala components to the IDE
 
@@ -489,152 +512,14 @@ Expose Ear content, J2EE API versions, deployment descriptor and other details a
 
 Expose the corresponding Eclipse and IDEA model.
 
+## Story: Expose generated directories
+
+It is useful for IDEs to know which directories are generated by the build. An initial approximation can be to expose
+just the build directory and the `.gradle` directory. This can be improved later.
+
 ### Story - Expose artifacts to IDEA
 
 Expose details to allow IDEA to build various artifacts: http://www.jetbrains.com/idea/webhelp/configuring-artifacts.html
-
-## Feature - Daemon usability improvements
-
-### Story - Daemon handles additional immutable system properties
-
-Some system properties are immutable, and must be defined when the JVM is started. When these properties change,
-a new daemon instance must be started. Currently, only `file.encoding` is treated as an immutable system property.
-
-Add support for the following properties:
-
-- The jmxremote system properties (GRADLE-2629)
-- The SSL system properties (GRADLE-2367)
-- 'java.io.tmpdir' : this property is only read once at JVM startup
-
-### Story - Daemon process expires when a memory pool is exhausted
-
-Improve daemon expiration algorithm to expire more quickly a daemon whose memory is close to being exhausted.
-
-### Story - Cross-version daemon management
-
-Daemon management, such as `gradle --stop` and the daemon expiration algorithm should consider daemons across all Gradle versions.
-
-### Story - Reduce the default daemon maximum heap and permgen sizes
-
-Should be done in a backwards compatible way.
-
-## Feature - Tooling API client listens for changes to a tooling model
-
-Provide a subscription mechanism to allow a tooling API client to listen for changes to the model it is interested in.
-
-## Feature - Tooling API client receives test execution events
-
-Allow a tooling API client to be notified as tests are executed
-
-## Feature - Interactive builds
-
-### Story - Support interactive builds from the command-line
-
-Provide a mechanism that build logic can use to prompt the user, when running from the command-line.
-
-### Story - Support interactive builds from the IDE
-
-Extend the above mechanism to support prompting the user, when running via the tooling API.
-
-# More candidates
-
-Some more features to mix into the above plan:
-
-- `IdeaSingleEntryLibraryDependency` should expose multiple source or javadoc artifacts.
-- Honour same environment variables as command-line `gradle` invocation.
-- Richer events during execution:
-    - Task execution
-    - Custom events
-- Richer build results:
-    - Test results
-    - Custom results
-    - Compilation and other verification failures
-    - Task failures
-    - Build configuration failures
-- Expose unresolved dependencies.
-- Expose dependency graph.
-- Expose component graph.
-- Provide some way to search repositories, to offer content assistance with dependency notations.
-- Don't configure the projects when `GradleBuild` model is requested.
-- Configure projects as required when using configure-on-demand.
-- Don't configure tasks when they are not requested.
-- Deal with non-standard wrapper meta-data location.
-- More accurate content assistance.
-- User provides input to build execution.
-- User edits dependencies via some UI.
-- User upgrades Gradle version via some UI.
-- User creates a new build via some UI.
-- Provide some way to define additional JVM args and system properties (possibly via command-line args)
-- Provide some way to locate Gradle builds, eg to allow the user to select which build to import.
-
-### Story - Classpath export across projects in multi-project builds
-
-Project files generated by the Gradle Idea and Eclipse plugins are responsible for deriving the classpath from the declared list of dependencies in the build file. The current
- behavior is best explained by example. Let's assume project A and B. Both projects are part of a multi-project build. Project B declares a project dependency on project A. The generated classpath
- of project B is a union of the classpath of project A (the generated JAR file plus its dependencies) and its own declared top-level dependencies and transitive dependencies. Classpath
- ordering matters. In practice this means the following: given that project A and B depend on a specific library with different versions, the "exported" dependency versions win as they happens
- to be listed first in classpath of project B. This behavior might lead to compilation and runtime issues in the IDE as no conflict-resolution takes place across projects.
-
-[Concrete example](https://github.com/bmuschko/eclipse-export): Project B declares a project dependency on project A. Project A  declares a dependency in Guava 15.0, Project B declares a dependency on
-Guava 16.0.1. Project B depends on A. If you generate the project files with the Gradle Eclipse plugin, project A is exported to B and appears to be on the classpath as the first entry (exported project).
-As a result Guava 15 is found and not 16.0.1. Any code in B that relies on Guava's API from 16.0.1 will cause a compilation error.
-
-The other use case to consider is the generation of project files directly via the IDE's import capabilities. In this scenario the Gradle IDE plugins might be used or only partially depending on
-the product.
-
-- IntelliJ: To our knowledge depends on classes from Gradle's internal API to generate classpath (`org.gradle.plugins.ide.internal.resolver.DefaultIdeDependencyResolver`).
-- Eclipse: STS uses a custom model for the tooling API to generate the classpath. On top of the project/external classpath provided by the tooling API, the solution uses so called classpath containers
-which are built using [Eclipse APIs](https://github.com/spring-projects/eclipse-integration-gradle/blob/f40acf8033db935270225e6ff4b5989f2f45abb4/org.springsource.ide.eclipse.gradle.core/src/org/springsource/ide/eclipse/gradle/core/classpathcontainer/GradleDependencyComputer.java#L116).
-A classpath container is reflect in a single classpath entry in the generated `.classpath` file. The Gradle IDE plugins can be invoked optionally to derive additional customizations for the project files.
-- Buildship: See Eclipse. Is there any difference in behavior? How is the classpath generated right now?
-
-#### Implementation
-
-Expose the `exported` flag for `EclipseProjectDependency` and `ExternalDependency`.
-
-- Buildship should honor this flag when available, as later Gradle versions may use a different mapping and Buildship should not make assumptions regarding how the mapping works.
-
-Change the Eclipse classpath mapping to contain transitive closure of all dependencies:
-
-- All projects
-- All external libraries
-- All dependencies with `exported` set to `false`
-- Deprecate `EclipseClasspath.noExportConfigurations`. This would no longer be used.
-- Deprecate `AbstractLibrary.declaredConfigurationName`. This would no longer be used.
-- Currently `DefaultIdeDependencyResolver.getIdeProjectDependencies()` returns direct project dependencies, should locate all project dependencies in the graph (see `ResolutionResult.getAllComponents()`).
-- Currently `DefaultIdeDependencyResolver.getIdeRepoFileDependencies()` ignores anything reachable via a project dependency, should all external dependencies in the graph (as above).
-- Currently `DefaultIdeDependencyResolver.getIdeLocalFileDependencies()` returns direct dependencies, should locate all self-resolving dependencies in the graph.
-    - Implementation should simply iterate over the files of the configuration and remove anything that is associated with an artifact.
-- Should end up with much simpler implementations for the methods of `DefaultIdeDependencyResolver`.
-
-Change the IDEA classpath mapping to do something similar.
-
-- Should be applied on a per-scope basis.
-- Must continue to remove duplicates inherited from other scopes.
-- IDEA mapping shares `DefaultIdeDependencyResolver` with the Eclipse mapping, so IDEA mapping should just work.
-
-#### Test cases
-
-- Verify the `exported` flag is available for Tooling API `EclipseProject` model's project and external dependencies.
-- The classpath generated by the Gradle IDE plugins need to contain all dependencies of a project, including transitive dependencies:
-    - Project A depends on project B depends on project C => IDE model for project A should include dependencies on both project B and project C.
-    - Project A depends on project B depends on external library 'someLib' => IDE model for project A should include dependencies on both project B and 'someLib.
-    - Project A depends on project B depends on file dependency => IDE model for project A should include dependencies on both project B and the file dependency.
-    - No dependencies should be exported.
-- In a multi-project build have two projects with conflicting version on an external dependency.
-    - Project A depends on Guava 15.
-    - Project B depends on Guava 16.0.1. A class in this project depends on API of version 16.0.1.
-    - The generated project files for project B use Guava version 16.0.1 to allow for proper compilation.
-    - This behavior should be observed using the IDE plugins as well as the tooling API.
-    - *Manually* test that this scenario works with both Eclipse and IDEA, using the generated IDE project files.
-- Existing test cases for the Idea and Eclipse plugins and Tooling API need to be modified to reflect changed export behavior.
-
-#### Open issues
-
-- Should we consider the use a classpath container solution? Given that some users check in the project files into VCS (for good or bad - it does exist in reality), every regenerated project file
- would need to be checked back into version control. With frequent changes that could get cumbersome. The benefit of using a classpath container is that the `.classpath` file doesn't change over
- time. The downside of using a classpath container is that it requires the use of Eclipse APIs and additional dependencies to Gradle core. As a side note: This model is used for other Eclipse IDE
-  integrations like M2Eclipse and IvyDE so it's not uncommon. My guess is that it would require almost a rewrite of the existing code in the Gradle Eclipse plugin.
 
 ### Story - IntelliJ directory-based project metadata generation
 
@@ -681,3 +566,281 @@ per configuration file. The DSL of the old and new format may not conflict.
 might be confusing to users.
 - Is there any feature parity between the file-based and directory-based project formats?
 - There's no overarching, publicly-available documentation or specification on directory-based project files. It might be worth to contact JetBrains for a good resource.
+
+## Feature - Developer uses projects from multiple Gradle builds from IDE
+
+Projects might define a binary dependency on a library produced by another project. Usually, these projects are built separately from each other and live in distinct source code repositories.
+ The typical workflow for a developer that has to work on both projects would be to make a change to project A, publish its artifact and build project B with the changed dependency. If the
+ library version of project A changes, project B needs to depend on the new artifact version. For developers this workflow is cumbersome and time-consuming. This feature allows a developer to work
+ on multiple projects in a single IDE session that would normally be independent.
+
+### Story - Introduce the concept of a workspace to the Tooling API
+
+Introduce the concept of a "workspace" to the Tooling API. This is simply a collection of Gradle projects that the IDE user is working on. These projects may come from different Gradle builds.
+
+A Tooling API client will be able to define a workspace and query it as if it were a single, unified Gradle build containing all the projects in the workspace. Where possible, binary dependencies
+would be replaced with source dependencies between IDE modules.
+
+For example, application A and library B might normally be built separately, as part of different builds. In this instance, application A would have a binary dependency on library B,
+consuming it as a jar downloaded from a binary repository. When application A and library B are both imported in the same workspace, however, application A would have a source dependency on
+library B.
+
+#### Estimate
+
+-
+
+#### Implementation
+
+    package org.gradle.tooling
+
+    public interface ProjectWorkspace {
+        void addProject(BasicGradleProject gradleProject);
+        void removeProject(BasicGradleProject gradleProject);
+        DomainObjectSet<BasicGradleProject> getProjects();
+    }
+
+    public abstract class GradleConnector {
+        public static ProjectWorkspace newWorkspace() {
+            return ConnectorServices.createProjectWorkspace();
+        }
+    }
+
+- Introduce a `ProjectWorkspace` interface that describes the collection of independent projects as a whole.
+- Projects can be added or removed from the workspace. A workspace can return the list of projects that have been registered.
+- A workspace does not depend on the Eclipse or Idea models.
+- Expose a new method in `GradleConnector` for creating the workspace. The actual creation is done in `ConnectorServices`.
+
+#### Test cases
+
+- A new workspace can be created.
+- Two workspaces can be compared by the list of projects they contain.
+- If a project was added to the workspace, it can be retrieved from the list of projects.
+- If a project already exists in the workspace, adding it again doesn't add a duplicate.
+- If a project was removed from the workspace, the list of projects does not contain it anymore.
+- If a project is requested to be removed from the workspace and doesn't exist, the list of projects isn't modified.
+- The order of projects in the list is maintained.
+
+#### Open issues
+
+- We could potentially merge this story with the next one and just make it Eclipse-specific? Maybe we should just deal with the concrete IDE-specific `GradleProject` implementations
+ e.g. `EclipseProject`.
+- Should a workspace have a unique name that needs to be provided upcon creation?
+
+### Story - Expose workspace concept for Eclipse
+
+The generic workspace concept should be usable from the Eclipse Tooling model. Expose ways to match project coordinates to coordinates of a module
+dependency.
+
+#### Estimate
+
+-
+
+#### Implementation
+
+- Introduce the interface `ModelAware` that allows a consumer to ask for the model.
+- `ProjectConnection` and `ProjectWorkspace` share the same interface. Remove the methods `model(Class)`, `getModel(Class)` and getModel(Class, ResultHandler)` from `ProjectConnection`
+ as they have been pulled up into the common interface.
+- Document which models can be retrieved for each of the implementations of `ModelAware`.
+
+<!-- -->
+
+    public interface ModelAware {
+        <T> T getModel(Class<T> modelType) throws GradleConnectionException, IllegalStateException;
+        <T> void getModel(Class<T> modelType, ResultHandler<? super T> handler) throws IllegalStateException;
+        <T> ModelBuilder<T> model(Class<T> modelType);
+    }
+
+    public interface ProjectConnection extends ModelAware {
+        ...
+    }
+
+    public interface ProjectWorkspace extends ModelAware {
+        ...
+    }
+
+- To build a workspace a consumer would retrieve the model for at least two projects via the Tooling API.
+- The consumer matches based on the publication and classpath library GAVs for each project.
+- If at least one match is found, a workspace can be created via `GradleConnector.newWorkspace()`. The matching projects can be added to the workspace.
+
+The following code snippet shows some of the moving pieces in practice:
+
+<!-- -->
+
+    // create project connections
+    ProjectConnection connection1 = GradleConnector.newConnector().forProjectDirectory(new File("project1")).connect();
+    ProjectConnection connection2 = GradleConnector.newConnector().forProjectDirectory(new File("project2")).connect();
+
+    // match based on publication and classpath library GAVs for each project
+    EclipseProject eclipseProject1 = connection1.getModel(EclipseProject.class);
+    GradlePublication publication2 = connection2.getModel(GradlePublication.class);
+
+    for (ExternalDependency externalDependency : eclipseProject1.getClasspath()) {
+        if(externalDependency.getGradleModuleVersion().equals(publication2.getId())) {
+            ...
+        }
+    }
+
+    // add projects with a match
+    ProjectWorkspace projectWorkspace = GradleConnector.newWorkspace();
+    projectWorkspace.addProject(connection1.getModel(BasicGradleProject.class));
+    projectWorkspace.addProject(connection2.getModel(BasicGradleProject.class));
+
+#### Test cases
+
+- The `ProjectConnection` can be queried and resolve the requested model as usual.
+- The `ProjectWorkspace` can be queried for the `EclipseProject`
+- A project and an external dependency can be matched based on the module version.
+
+#### Open issues
+
+- Support for IDEA is out-of-scope.
+
+### Story - Eclipse model for a workspace does not include duplicate project names
+
+Selected projects in a workspace might have the same project name. This story implements a du-duping mechanism for the Eclipse model.
+
+#### Estimate
+
+-
+
+#### Implementation
+
+- If a workspace encounters two projects with the same project name, an algorithm will de-dedupe the project names. De-duped project names are only logic references to the
+original projects. The actual project name stays unchanged.
+- Gradle core implements a similar algorithm for the IDE plugins. Reuse it if possible.
+
+#### Test cases
+
+- If the names of all imported projects are unique, de-duping doesn't have to kick in.
+- If at least two imported projects have the same name, de-dupe the names. De-duped project names still reference the original project. The original and de-duped project names
+should be rendered in Eclipse's project view section.
+- De-duping may be required for more that one duplicate project name.
+- Multi-project builds can contain duplicate project names in any leaf of the project hierarchy.
+
+### Story - Define a "workspace" in Buildship
+
+From Buildship, a developer should be able to point to one or many projects in the local file system to form a workspace.
+If any of the module dependencies matches on the coordinates of one of the selected projects, they'll be able to form
+ a workspace. Buildship will treat the matching projects as source dependencies instead of binary dependencies.
+
+#### Estimate
+
+-
+
+#### Implementation
+
+- Expose a new dialog in Buildship (maybe some new type of import?) that allows for selecting projects that should form a workspace.
+    - At least two projects have to be selected.
+    - Projects can live in any directory on the local filesystem.
+    - The project has to be a valid Gradle project and define the properties `group`, `name` and `version`.
+- Buildship will indicate which projects are substitutable based on their coordinates (potentially with a preview).
+    - Iterate over all dependencies of a project accessible via `DefaultEclipseProject.getClasspath()`.
+    - Each dependency provides its coordinates through `DefaultEclipseExternalDependency.getGradleModuleVersion()`.
+    - Compare the dependency coordinates with the coordinates of the project through `DefaultEclipseProject.getGradleModuleVersion()`.
+    - If a match is determined, use the project path. If duplicate project paths are found, render a error message and disallow import.
+    - Give a visual indication (e.g. icon) that a substitution was performed for a project.
+- Allow for a context menu that brings up the original substitution dialog in case the user wants to modify the project selection.
+- After selecting the projects the exposed Tooling API is consumed to form the workspace.
+- Buildship renders the workspace in the project view as a multi-project build.
+- The developer can make changes to any project's build script. Newly established (and substitutable) dependencies between projects are resolved as project dependencies.
+- A workspace needs to be persistable.
+
+#### Test cases
+
+- Buildship doesn't allow creating a workspace if only 0 or 1 projects were selected.
+- Project that do not define the proper coordinates cannot be used to form a workspace.
+- If no substitutable module dependency can be determined, the dialog will render a error message.
+- Projects that are part of a workspace can be built together based on established project dependencies.
+- If the coordinates of a substituted module dependency is changed, Buildship needs to react properly.
+    - If coordinates don't match up anymore, Buildship will depend on the module dependency.
+    - If coordinates do match up, Buildship will re-establish the project dependency in the underlying model.
+    - Eclipse project synchronization is initiated.
+- Closing and re-opening Buildship will re-establish a workspace.
+
+#### Open issues
+
+- Out-of-scope for this feature would be the ability to run builds using the workspace definition from the IDE or from
+the command-line. This would be an additional feature.
+- De-duping of duplicate project names is out-of-scope for this story. It's going to be addressed in a separate story.
+- The [concept of workspace exists in Eclipse](http://help.eclipse.org/mars/topic/org.eclipse.platform.doc.user/concepts/cworkset.htm?cp=0_2_1_6)
+ which could be used to define a [custom extension point](http://help.eclipse.org/mars/topic/org.eclipse.platform.doc.isv/reference/extension-points/org_eclipse_ui_workingSets.html?cp=2_1_1_202).
+ However, investigation is needed if and how can we use them.
+
+## Feature - Developer uses subset of projects for a Gradle build from IDE
+
+Large multi-project builds may consist of hundreds of projects. If a developer only works on a subset of these projects (usually not more than 5), the developer pays a penalty
+in terms of build execution performance as project dependencies have to be rebuilt (even though up-to-date checks might kick in). Another factor that slows down development
+is the re-indexing of changed files in the IDE. This feature allows for selectively substituting project dependencies with binary dependencies in Buildship.
+
+For example, application A and library B might normally be built together as part of the same build. Application A would have a source dependency on library B. When application A is imported
+ in a workspace and library B is not, application A would have a binary dependency on library B, either using a jar downloaded from a repository or built locally.
+
+### Story - Select subset of project for a "workspace" in Buildship
+
+Build on the workspace concept from the previous feature, to replace source dependencies with binary dependencies.
+
+#### Estimate
+
+-
+
+#### Implementation
+
+- In the import screen of Buildship, allow the user to select projects that define project dependencies. For these projects try to resolve the binary dependency.
+    - The user can decide to substitute none or (any number of projects - 1). This assumes that the developer wants to work on the source code of at least on project.
+    - The project selected substitution has to define the properties `group`, `name` and `version` in order to build the module coordinates for external lookup.
+- Buildship will indicate which projects are substitutable based on their coordinates (potentially with a preview).
+    - Iterate over all project dependencies of a project accessible via `DefaultEclipseProject.getProjectDependencies()`.
+    - Each dependency provides its coordinates through `DefaultEclipseProjectDependency.getTarget().getGradleModuleVersion()`.
+    - Check for resolvable binary dependency available in any of the repositories defined for the coordinates.
+    - If a match is determined, use the module coordinates. Replace the source dependency with a binary dependency.
+    - Give a visual indication (e.g. icon) that a substitution was performed for a project.
+- Allow for a context menu that brings up the original substitution dialog in case the user wants to modify the project selection.
+- A workspace needs to be persistable.
+
+#### Test cases
+
+- A source dependency can only be replaced if the binary dependency exists in any of the declared binary repositories. Otherwise, don't allow substitution.
+- Substituted projects are not built as part of the multi-project build (e.g. no tasks are invoked to compile the code and create the JAR file).
+- The workspace as a whole is buildable. That means all dependencies can be resolved, no compilation issues occur.
+- If the list of repositories was changed in the build script (e.g. by editing the file), BuildShip will need to check if substituted dependencies are still valid.
+- If the coordinates of a substituted module dependency are changed, Buildship needs to react properly.
+    - If coordinates don't match up anymore, Buildship will depend on the project dependency.
+    - If coordinates do match up, Buildship will re-establish the binary dependency in the underlying model.
+    - Eclipse project synchronization is initiated.
+- Closing and re-opening Buildship will re-establish a workspace.
+
+#### Open issues
+
+- Out-of-scope for this feature would be the ability to run builds using the workspace definition from the IDE or the command-line.
+- The import screen is only one entry point for this functionality. Should we have other dialogs/screen to allow for substitution? What about changing a workspace after
+it has been created?
+
+# More candidates
+
+Some more features to mix into the above plan:
+
+- `IdeaSingleEntryLibraryDependency` should expose multiple source or javadoc artifacts.
+- Honour same environment variables as command-line `gradle` invocation.
+- Richer events during execution:
+    - Custom events
+- Richer build results:
+    - Test results
+    - Custom results
+    - Compilation and other verification failures
+    - Task failures
+    - Build configuration failures
+- Expose unresolved dependencies.
+- Expose dependency graph.
+- Expose component graph.
+- Provide some way to search repositories, to offer content assistance with dependency notations.
+- Don't configure the projects when `GradleBuild` model is requested.
+- Configure projects as required when using configure-on-demand.
+- Don't configure tasks when they are not requested.
+- Deal with non-standard wrapper meta-data location.
+- More accurate content assistance.
+- User provides input to build execution.
+- User edits dependencies via some UI.
+- User upgrades Gradle version via some UI.
+- User creates a new build via some UI.
+- Provide some way to define additional JVM args and system properties (possibly via command-line args)
+- Provide some way to locate Gradle builds, eg to allow the user to select which build to import.

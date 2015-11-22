@@ -15,12 +15,13 @@
  */
 
 package org.gradle.language.base.internal.model
+
 import org.gradle.api.Named
 import org.gradle.model.internal.manage.schema.extract.DefaultModelSchemaStore
 import org.gradle.model.internal.manage.schema.extract.ModelSchemaAspectExtractor
 import org.gradle.model.internal.manage.schema.extract.ModelSchemaExtractor
-import org.gradle.platform.base.BinarySpec
 import org.gradle.platform.base.Variant
+import org.gradle.platform.base.internal.BinarySpecInternal
 import org.gradle.platform.base.internal.VariantAspectExtractionStrategy
 import spock.lang.Specification
 
@@ -32,23 +33,24 @@ class DefaultVariantsMetaDataTest extends Specification {
         def spec = Mock(MyBinarySpec)
 
         when:
+        spec.publicType >> MyBinarySpec
         spec.platform >> platform
         spec.flavor >> flavor
         spec.buildType >> buildType
-        spec.notVariantDimension >> notVariantDimension
+        spec.notVariantAxis >> notVariantAxis
         def variants = DefaultVariantsMetaData.extractFrom(spec, schemaStore)
 
         then:
-        variants.nonNullDimensions == (nonNullDimensions as Set)
-        variants.allDimensions == (allDimensions as Set)
+        variants.nonNullVariantAxes == (nonNullVariantAxes as Set)
+        variants.declaredVariantAxes == (allVariantAxes as Set)
         variants.getValueAsString('platform') == platform
         variants.getValueAsString('flavor') == flavor
         variants.getValueAsString('buildType') == buildType?.name
         variants.getValueAsType(BuildType, 'buildType') == buildType
-        variants.getValueAsString('notVariantDimension') == null
+        variants.getValueAsString('notVariantAxis') == null
 
         where:
-        platform | flavor  | buildType       | notVariantDimension | nonNullDimensions                   | allDimensions
+        platform | flavor  | buildType       | notVariantAxis | nonNullVariantAxes                  | allVariantAxes
         'java6'  | null    | null            | null                | ['platform']                        | ['platform', 'flavor', 'buildType']
         'java6'  | null    | null            | 'foo'               | ['platform']                        | ['platform', 'flavor', 'buildType']
         'java6'  | 'debug' | null            | null                | ['platform', 'flavor']              | ['platform', 'flavor', 'buildType']
@@ -56,7 +58,7 @@ class DefaultVariantsMetaDataTest extends Specification {
 
     }
 
-    private static interface MyBinarySpec extends BinarySpec {
+    private static interface MyBinarySpec extends BinarySpecInternal {
         @Variant
         String getPlatform()
 
@@ -66,7 +68,7 @@ class DefaultVariantsMetaDataTest extends Specification {
         @Variant
         BuildType getBuildType()
 
-        String getNotVariantDimension()
+        String getNotVariantAxis()
     }
 
     private static interface BuildType extends Named {}

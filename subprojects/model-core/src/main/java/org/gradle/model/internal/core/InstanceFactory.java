@@ -16,14 +16,51 @@
 
 package org.gradle.model.internal.core;
 
-import org.gradle.api.Nullable;
-import org.gradle.internal.util.BiFunction;
 import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
+import org.gradle.model.internal.type.ModelType;
 
-public interface InstanceFactory<T, P> {
-    <S extends T> S create(Class<S> type, MutableModelNode modelNode, P payload);
+import java.util.Set;
 
-    String getSupportedTypeNames();
+public interface InstanceFactory<T> {
+    ModelType<T> getBaseInterface();
 
-    <S extends T> void register(Class<S> type, @Nullable ModelRuleDescriptor sourceRule, BiFunction<? extends S, ? super P, ? super MutableModelNode> factory);
+    Set<ModelType<? extends T>> getSupportedTypes();
+
+    <S extends T> TypeRegistrationBuilder<S> register(ModelType<S> publicType, ModelRuleDescriptor sourceRule);
+
+    <S extends T> Set<ModelType<?>> getInternalViews(ModelType<S> type);
+
+    /**
+     * Return information about the implementation of an unmanaged type.
+     */
+    <S extends T> ImplementationInfo<T> getImplementationInfo(ModelType<S> publicType);
+
+    /**
+     * Return information about the implementation of a managed type with an unmanaged super-type.
+     */
+    <S extends T> ImplementationInfo<T> getManagedSubtypeImplementationInfo(ModelType<S> publicType);
+
+    void validateRegistrations();
+
+    interface ImplementationFactory<T> {
+        T create(ModelType<? extends T> publicType, String name, MutableModelNode node);
+    }
+
+    interface TypeRegistrationBuilder<T> {
+        TypeRegistrationBuilder<T> withImplementation(ModelType<? extends T> implementationType, ImplementationFactory<T> factory);
+
+        TypeRegistrationBuilder<T> withInternalView(ModelType<?> internalView);
+    }
+
+    interface ImplementationInfo<T> {
+        /**
+         * Creates an instance of the delegate for the given node.
+         */
+        T create(MutableModelNode modelNode);
+
+        /**
+         * The default implementation type that can be used as a delegate for any managed subtypes of the public type.
+         */
+        ModelType<? extends T> getDelegateType();
+    }
 }

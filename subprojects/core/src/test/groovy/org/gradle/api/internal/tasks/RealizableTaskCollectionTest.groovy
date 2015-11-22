@@ -16,37 +16,31 @@
 
 package org.gradle.api.internal.tasks
 
-import org.gradle.api.Action
 import org.gradle.api.internal.AbstractTask
-import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.tasks.TaskCollection
-import org.gradle.api.tasks.TaskContainer
 import org.gradle.model.internal.core.ModelNode
-import org.gradle.model.internal.core.MutableModelNode
+import org.gradle.model.internal.core.ModelPath
 import org.gradle.model.internal.fixture.ModelRegistryHelper
-import org.gradle.model.internal.registry.ModelRegistry
 import spock.lang.Specification
 
 class RealizableTaskCollectionTest extends Specification {
 
     def "realizes a nodes link of a given type"() {
         given:
-        def project = Mock(ProjectInternal)
         ModelRegistryHelper registry = new ModelRegistryHelper()
-        project.getModelRegistry() >> registry
-
-        def events = []
-
-        Action mutatorAction = mutator(registry, events, Mock(taskType), taskPath)
-
-        registry.createInstance("tasks", Mock(TaskContainer))
-        registry.mutate { it.path "tasks" node mutatorAction }
+        ModelPath path = ModelPath.path("tasks")
+        registry.registerInstance("tasks", "foo tasks")
+            .mutate {
+            it.path "tasks" node {
+                it.addLink(registry.instanceRegistration(taskPath, Mock(realizableType)))
+            }
+        }
 
         when:
-        new RealizableTaskCollection(realizableType, Mock(DefaultTaskCollection), project).realizeRuleTaskTypes()
+        new RealizableTaskCollection(realizableType, Mock(DefaultTaskCollection), registry.node(path)).realizeRuleTaskTypes()
 
         then:
-        events == ["created task $taskPath"]
+        registry.state(taskPath) == ModelNode.State.GraphClosed
 
         where:
         realizableType | taskType  | taskPath
@@ -56,53 +50,44 @@ class RealizableTaskCollectionTest extends Specification {
 
     def "does not realise a node link for non-realisable types"() {
         given:
-        def project = Mock(ProjectInternal)
         ModelRegistryHelper registry = new ModelRegistryHelper()
-        project.getModelRegistry() >> registry
+        ModelPath path = ModelPath.path("tasks")
 
-        def events = []
-
-        Action basicAction = mutator(registry, events, Mock(BasicTask), "tasks.basic")
-        Action redundantAction = mutator(registry, events, Mock(RedundantTask), "tasks.redundant")
-
-        registry.createInstance("tasks", Mock(TaskContainer))
-        registry.mutate { it.path "tasks" node basicAction }
-        registry.mutate { it.path "tasks" node redundantAction }
-
-        when:
-        new RealizableTaskCollection(BasicTask, Mock(DefaultTaskCollection), project).realizeRuleTaskTypes()
-
-        then:
-        events == ['created task tasks.basic']
-    }
-
-    def "realizes tasks once only"() {
-        given:
-        def registry = Mock(ModelRegistry)
-        def project = Mock(ProjectInternal)
-        project.getModelRegistry() >> registry
-        def node = Mock(MutableModelNode)
-        node.getLinks(_) >> []
-
-
-        when:
-        RealizableTaskCollection collection = new RealizableTaskCollection(Class, Mock(TaskCollection), project)
-        collection.realizeRuleTaskTypes()
-        collection.realizeRuleTaskTypes()
-
-        then:
-        1 * registry.atStateOrLater(TaskContainerInternal.MODEL_PATH, ModelNode.State.SelfClosed) >> node
-    }
-
-    private Action mutator(ModelRegistryHelper registry, events, task, String path) {
-        Action mutatorAction = Mock(Action)
-        mutatorAction.execute(_) >> { MutableModelNode node ->
-            node.addLink(registry.creator(path) {
-                it.unmanaged(task, { events << "created task $path" })
+        registry.registerInstance("tasks", "foo tasks")
+            .mutate {
+            it.path "tasks" node {
+                it.addLink(registry.instanceRegistration("tasks.redundant", Mock(RedundantTask)))
             }
-            )
         }
-        return mutatorAction
+
+        when:
+        def collection = new RealizableTaskCollection(BasicTask, Mock(DefaultTaskCollection), registry.node(path))
+        collection.realizeRuleTaskTypes()
+
+        then:
+        registry.state("tasks.redundant") == ModelNode.State.Discovered
+    }
+
+    def "realize is idempotent"() {
+        given:
+        ModelRegistryHelper registry = new ModelRegistryHelper()
+        ModelPath path = ModelPath.path("tasks")
+
+        registry.registerInstance("tasks", "foo tasks")
+            .mutate {
+            it.path "tasks" node {
+                it.addLink(registry.instanceRegistration("tasks.redundant", Mock(RedundantTask)))
+            }
+        }
+
+
+        when:
+        RealizableTaskCollection collection = new RealizableTaskCollection(Class, Mock(TaskCollection), registry.node(path))
+        collection.realizeRuleTaskTypes()
+        collection.realizeRuleTaskTypes()
+
+        then:
+        noExceptionThrown()
     }
 }
 

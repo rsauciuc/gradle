@@ -38,11 +38,13 @@ public class CrossVersionPerformanceTestRunner extends PerformanceTestSpec {
 
     List<String> tasksToRun = []
     List<String> args = []
-    List<String> gradleOpts = []
+    List<String> gradleOpts = ['-Xms2g', '-Xmx2g', '-XX:MaxPermSize=256m']
 
     List<String> targetVersions = []
     Amount<Duration> maxExecutionTimeRegression = Duration.millis(0)
     Amount<DataAmount> maxMemoryRegression = DataAmount.bytes(0)
+
+    BuildExperimentListener buildExperimentListener
 
     CrossVersionPerformanceTestRunner(BuildExperimentRunner experimentRunner, DataReporter<CrossVersionPerformanceResults> reporter) {
         this.reporter = reporter
@@ -50,7 +52,6 @@ public class CrossVersionPerformanceTestRunner extends PerformanceTestSpec {
     }
 
     CrossVersionPerformanceResults run() {
-        assert !targetVersions.empty
         assert testId
 
         def results = new CrossVersionPerformanceResults(
@@ -74,8 +75,6 @@ public class CrossVersionPerformanceTestRunner extends PerformanceTestSpec {
 
         // A target version may be something that is yet unreleased, so filter that out
         allVersions.removeAll { !releasedVersions.contains(it) }
-
-        assert !allVersions.isEmpty()
 
         File projectDir = testProjectLocator.findProjectDir(testProject)
 
@@ -103,6 +102,7 @@ public class CrossVersionPerformanceTestRunner extends PerformanceTestSpec {
                 .displayName(dist.version.version)
                 .warmUpCount(warmUpRuns)
                 .invocationCount(runs)
+                .listener(buildExperimentListener)
                 .invocation {
             workingDirectory(projectDir)
             distribution(dist)

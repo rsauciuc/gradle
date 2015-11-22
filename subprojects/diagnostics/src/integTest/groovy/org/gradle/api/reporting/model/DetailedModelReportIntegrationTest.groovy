@@ -17,23 +17,15 @@
 package org.gradle.api.reporting.model
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
 import org.gradle.test.fixtures.server.http.HttpServer
 import org.junit.Rule
 
 import static org.gradle.util.TextUtil.normaliseFileSeparators
 
-/**
- * Tests for more detailed output i.e. with the `org.gradle.model.dsl` flag enabled.
- */
 class DetailedModelReportIntegrationTest extends AbstractIntegrationSpec {
 
     @Rule
     public final HttpServer server = new HttpServer()
-
-    void setup() {
-        EnableModelDsl.enable(executer)
-    }
 
     def "includes a relative path to the build script"() {
         given:
@@ -52,7 +44,7 @@ model {
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "model.numbers @ build.gradle line 9, column 5"
+        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "numbers(Numbers) { ... } @ build.gradle line 9, column 5"
     }
 
     def "can find the relative path to a custom named build script"() {
@@ -76,7 +68,7 @@ model {
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "model.numbers @ why.gradle line 9, column 5"
+        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "numbers(Numbers) { ... } @ why.gradle line 9, column 5"
     }
 
     def "can find the relative path when model configuration is applied from a local script inside the root dir"() {
@@ -98,7 +90,7 @@ model {
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "model.numbers @ ${inputFile} line 9, column 13"
+        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "numbers(Numbers) { ... } @ ${inputFile} line 9, column 13"
 
         where:
         inputFile << ["my-model.gradle", "level1/level2/my-model.gradle"]
@@ -124,7 +116,7 @@ model {
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "model.numbers @ ../my-model.gradle line 9, column 13"
+        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "numbers(Numbers) { ... } @ ../my-model.gradle line 9, column 13"
     }
 
     def "can find the relative path when model configuration is applied from a remote http url"() {
@@ -150,7 +142,7 @@ model {
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "model.numbers @ ${server.getAddress()}/stub/my-model.gradle line 9, column 13"
+        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "numbers(Numbers) { ... } @ ${server.getAddress()}/stub/my-model.gradle line 9, column 13"
     }
 
     def "can find the relative path to model rules defined in different scripts"() {
@@ -185,8 +177,8 @@ apply from: '${normaliseFileSeparators(model2File.absolutePath)}'
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "model.numbers @ model1.gradle line 8, column 13"
-        normaliseFileSeparators(modelNode.otherNumbers.@creator[0]) == "model.otherNumbers @ sub-dir/model2.gradle line 8, column 13"
+        normaliseFileSeparators(modelNode.numbers.@creator[0]) == "numbers(Numbers) { ... } @ model1.gradle line 8, column 13"
+        normaliseFileSeparators(modelNode.otherNumbers.@creator[0]) == "otherNumbers(Numbers) { ... } @ sub-dir/model2.gradle line 8, column 13"
     }
 
     private String managedNumbers() {

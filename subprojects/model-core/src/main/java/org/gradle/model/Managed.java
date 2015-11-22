@@ -46,8 +46,8 @@ import java.lang.annotation.Target;
  * A getter and setter must be declared for each property that is not of a managed type or of {@link ModelSet}.
  * For properties of managed types or of {@link ModelSet} the getter is mandatory and the setter is optional.
  * If no setter is provided the property is considered inherent and defaults to an "empty" instance of the type.
- * In addition to the traditional getter method, properties of type <pre>boolean</pre> (but not <pre>Boolean</pre>)
- * also support a getter method which name starts with <pre>is</pre>:
+ * In addition to the traditional getter method, properties of type {@code boolean} (but not {@code Boolean})
+ * also support a getter method which name starts with {@code is}, for example:
  *
  * <pre>
  * void setEnabled(boolean enabled);
@@ -76,7 +76,8 @@ import java.lang.annotation.Target;
  * <p>
  * Properties that are themselves of a managed type are also supported.
  * <p>
- * Currently, the only collection types that are supported are {@link ModelSet} and {@link ModelMap}.
+ * Currently, the only collection types that are supported are {@link ModelSet} and {@link ModelMap}, as well as {@link java.util.Set} or {@link java.util.List}
+ * of {@link org.gradle.model.internal.manage.schema.extract.ScalarTypes scalar types}, where scalar types is either one of the supported immutable JDK types above or an enumeration.
  * <p>
  * Properties of any other type must have their getter annotated with {@link Unmanaged}.
  * An unmanaged property is not transparent to the model infrastructure and is guaranteed to be immutable when realized.

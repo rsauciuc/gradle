@@ -16,6 +16,8 @@
 
 package org.gradle.model.internal.type;
 
+import com.google.common.collect.ImmutableList;
+
 import java.lang.ref.WeakReference;
 
 class ClassTypeWrapper implements TypeWrapper {
@@ -31,18 +33,31 @@ class ClassTypeWrapper implements TypeWrapper {
     }
 
     @Override
+    public void collectClasses(ImmutableList.Builder<Class<?>> builder) {
+        builder.add(unwrap());
+    }
+
+    @Override
     public String getRepresentation(boolean full) {
         if (full) {
             return unwrap().getName();
         } else {
-            StringBuffer sb = new StringBuffer();
             Class<?> clazz = unwrap();
-            sb.append(clazz.getSimpleName());
-            for (Class<?> c = clazz.getEnclosingClass(); c != null; c = c.getEnclosingClass()) {
-                sb.insert(0, '.');
-                sb.insert(0, c.getSimpleName());
+            try {
+                StringBuilder sb = new StringBuilder();
+                sb.append(clazz.getSimpleName());
+                for (Class<?> c = clazz.getEnclosingClass(); c != null; c = c.getEnclosingClass()) {
+                    sb.insert(0, '.');
+                    sb.insert(0, c.getSimpleName());
+                }
+                return sb.toString();
+            } catch (NoClassDefFoundError ignore) {
+                // This happens for IBM JDK 6 for nested interfaces -- see https://issues.apache.org/jira/browse/GROOVY-7010
+                // Let's try to return something as close as possible to the intended value
+                Package pkg = clazz.getPackage();
+                int pkgPrefixLength = pkg == null ? 0 : pkg.getName().length() + 1;
+                return clazz.getName().substring(pkgPrefixLength).replace('$', '.');
             }
-            return sb.toString();
         }
     }
 }

@@ -15,6 +15,7 @@
  */
 package org.gradle.api.internal.file.collections;
 
+import com.google.common.io.Files;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.Transformer;
@@ -28,48 +29,29 @@ import org.gradle.internal.Factory;
 import org.gradle.internal.nativeintegration.filesystem.Chmod;
 import org.gradle.util.CollectionUtils;
 
-import java.io.File;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
-import java.util.Set;
+import java.io.*;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A {@link MinimalFileTree} which is composed using a mapping from relative path to file source.
  */
 public class MapFileTree implements MinimalFileTree, FileSystemMirroringFileTree {
-    public enum FileCreationMode {
-        OVERWRITE,
-        KEEP_EXISTING
-    }
     private final Map<RelativePath, Action<OutputStream>> elements = new LinkedHashMap<RelativePath, Action<OutputStream>>();
     private final Factory<File> tmpDirSource;
     private final Chmod chmod;
-    private final FileCreationMode fileCreationMode;
 
     public MapFileTree(final File tmpDir, Chmod chmod) {
-        this(tmpDir, chmod, FileCreationMode.OVERWRITE);
-    }
-
-    public MapFileTree(final File tmpDir, Chmod chmod, FileCreationMode fileCreationMode) {
         this(new Factory<File>() {
                 public File create() {
                     return tmpDir;
                 }
-        }, chmod, fileCreationMode);
+        }, chmod);
     }
 
     public MapFileTree(Factory<File> tmpDirSource, Chmod chmod) {
-        this(tmpDirSource, chmod, FileCreationMode.OVERWRITE);
-    }
-
-    public MapFileTree(Factory<File> tmpDirSource, Chmod chmod, FileCreationMode fileCreationMode) {
         this.tmpDirSource = tmpDirSource;
         this.chmod = chmod;
-        this.fileCreationMode = fileCreationMode;
     }
 
     private File getTmpDir() {
@@ -160,6 +142,8 @@ public class MapFileTree implements MinimalFileTree, FileSystemMirroringFileTree
             this.path = path;
             this.generator = generator;
             this.stopFlag = stopFlag;
+            // round to nearest second
+            lastModified = System.currentTimeMillis() / 1000 * 1000;
         }
 
         public String getDisplayName() {
@@ -173,12 +157,36 @@ public class MapFileTree implements MinimalFileTree, FileSystemMirroringFileTree
         public File getFile() {
             if (file == null) {
                 file = createFileInstance(path);
-                if(fileCreationMode == FileCreationMode.OVERWRITE || !file.exists()) {
+                if (!file.exists()) {
                     copyTo(file);
-                } else {
-                    // round to nearest second
-                    lastModified = file.lastModified() / 1000 * 1000;
+                } else if (!isDirectory()) {
+                    ByteArrayOutputStream buffer = new ByteArrayOutputStream(Math.max(((int) file.length()) + 64, 256));
+                    copyTo(buffer);
+                    byte[] newContent = buffer.toByteArray();
+                    boolean changed = false;
+                    if (newContent.length == file.length()) {
+                        try {
+                            byte[] oldContent = Files.toByteArray(file);
+                            if (!Arrays.equals(newContent, oldContent)) {
+                                changed = true;
+                            }
+                        } catch (IOException e) {
+                            // attempt to write new file if reading old file fails
+                            changed = true;
+                        }
+                    } else {
+                        changed = true;
+                    }
+                    if (changed) {
+                        try {
+                            Files.write(newContent, file);
+                        } catch (IOException e) {
+                            throw new org.gradle.api.UncheckedIOException(e);
+                        }
+                    }
                 }
+                // round to nearest second
+                lastModified = file.lastModified() / 1000 * 1000;
             }
             return file;
         }
@@ -197,8 +205,6 @@ public class MapFileTree implements MinimalFileTree, FileSystemMirroringFileTree
         }
 
         public void copyTo(OutputStream outstr) {
-            // round to nearest second
-            lastModified = System.currentTimeMillis() / 1000 * 1000;
             generator.execute(outstr);
         }
 

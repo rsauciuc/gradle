@@ -22,17 +22,19 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.tasks.TaskDependencyMatchers
 import org.gradle.language.base.LanguageSourceSet
+import org.gradle.language.base.ProjectSourceSet
 import org.gradle.model.ModelMap
-import org.gradle.model.internal.core.ModelPath
-import org.gradle.model.internal.type.ModelTypes
 import org.gradle.nativeplatform.NativeBinary
 import org.gradle.nativeplatform.NativeExecutableBinarySpec
 import org.gradle.nativeplatform.NativeExecutableSpec
 import org.gradle.nativeplatform.NativeLibrarySpec
+import org.gradle.platform.base.BinarySpec
 import org.gradle.platform.base.ComponentSpec
 import org.gradle.util.GFileUtils
 import org.gradle.util.TestUtil
 import spock.lang.Specification
+
+import static org.gradle.model.internal.type.ModelTypes.modelMap
 
 abstract class AbstractNativeComponentPluginTest extends Specification {
     final def project = TestUtil.createRootProject()
@@ -46,7 +48,15 @@ abstract class AbstractNativeComponentPluginTest extends Specification {
     abstract String getPluginName();
 
     ModelMap<ComponentSpec> realizeComponents() {
-        project.modelRegistry.realize(ModelPath.path("components"), ModelTypes.modelMap(ComponentSpec))
+        project.modelRegistry.realize("components", modelMap(ComponentSpec))
+    }
+
+    ProjectSourceSet realizeSourceSets() {
+        project.modelRegistry.find("sources", ProjectSourceSet)
+    }
+
+    ModelMap<BinarySpec> realizeBinaries() {
+        project.modelRegistry.find("binaries", modelMap(BinarySpec))
     }
 
     def "creates source set with conventional locations for components"() {
@@ -82,7 +92,8 @@ abstract class AbstractNativeComponentPluginTest extends Specification {
         lib.sources."$pluginName".exportedHeaders.srcDirs == [project.file("src/lib/headers")] as Set
 
         and:
-        project.sources as Set == (lib.sources as Set) + (exe.sources as Set)
+        def sources = realizeSourceSets()
+        sources as Set == (lib.sources as Set) + (exe.sources as Set)
     }
 
     def "can configure source set locations"() {
@@ -160,7 +171,7 @@ abstract class AbstractNativeComponentPluginTest extends Specification {
         }
 
         then:
-        NativeExecutableBinarySpec binary = project.binaries.testExecutable
+        NativeExecutableBinarySpec binary = realizeBinaries().testExecutable
         binary.tasks.withType(compileTaskClass)*.name as Set == ["compileTestExecutableTestAnotherOne", "compileTestExecutableTest${StringUtils.capitalize(pluginName)}"] as Set
 
         and:

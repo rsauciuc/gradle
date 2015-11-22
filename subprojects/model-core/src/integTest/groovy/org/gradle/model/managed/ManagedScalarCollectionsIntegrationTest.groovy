@@ -17,15 +17,11 @@
 package org.gradle.model.managed
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
 import spock.lang.Unroll
 
 class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
     private final static List<String> MANAGED_SCALAR_COLLECTION_TYPES = ['List', 'Set']
-    def setup() {
-        EnableModelDsl.enable(executer)
-    }
 
     @Unroll
     def "rule can mutate a managed type with a #type of scalar read-only property"() {
@@ -164,6 +160,7 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
         class Rules extends RuleSource {
             static final $type<String> INITIAL = ['initial']
+            static final $type<String> REPLACEMENT = ['b', 'c']
 
             @Model
             void createContainer(Container c) {
@@ -172,13 +169,14 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
             }
 
             @Mutate
-            void nullify(Container c) {
+            void overwrite(Container c) {
                 c.items = ['b','c']
             }
 
             @Mutate
             void addCheckTask(ModelMap<Task> tasks, Container c) {
                 tasks.create('check') {
+                    assert !c.items.is(REPLACEMENT)
                     assert c.items == ['b','c'] as $type
                 }
             }
@@ -215,7 +213,7 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
             }
 
             @Mutate
-            void nullify(Container c) {
+            void replace(Container c) {
                 c.items = null
                 c.items = ['b','c']
             }

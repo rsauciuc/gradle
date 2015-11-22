@@ -96,6 +96,7 @@ public class DefaultFileCollectionResolveContext implements ResolvableFileCollec
         List<T> result = new ArrayList<T>();
         while (!queue.isEmpty()) {
             Object element = queue.remove(0);
+            // TODO - need to sync with BuildDependenciesOnlyFileCollectionResolveContext
             if (element instanceof DefaultFileCollectionResolveContext) {
                 DefaultFileCollectionResolveContext nestedContext = (DefaultFileCollectionResolveContext) element;
                 converter.convertInto(nestedContext, result, fileResolver);
@@ -143,7 +144,7 @@ public class DefaultFileCollectionResolveContext implements ResolvableFileCollec
     private void resolveNested(FileCollectionContainer fileCollection) {
         addTo = queue.subList(0, 0);
         try {
-            fileCollection.resolve(this);
+            fileCollection.visitContents(this);
         } finally {
             addTo = queue;
         }

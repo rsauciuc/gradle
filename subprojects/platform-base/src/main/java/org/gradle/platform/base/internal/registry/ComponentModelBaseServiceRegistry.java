@@ -22,7 +22,6 @@ import org.gradle.api.internal.resolve.DefaultProjectModelResolver;
 import org.gradle.api.internal.resolve.ProjectModelResolver;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.PluginServiceRegistry;
-import org.gradle.language.base.internal.resolve.DependentSourceSetLocalComponentConverter;
 import org.gradle.model.internal.inspect.MethodModelRuleExtractor;
 import org.gradle.model.internal.manage.schema.ModelSchemaStore;
 import org.gradle.model.internal.manage.schema.extract.ModelSchemaAspectExtractionStrategy;
@@ -38,7 +37,7 @@ public class ComponentModelBaseServiceRegistry implements PluginServiceRegistry 
 
     }
 
-    public void registerBuildServices(ServiceRegistration registration){
+    public void registerBuildServices(ServiceRegistration registration) {
         registration.addProvider(new BuildScopeServices());
     }
 
@@ -49,10 +48,6 @@ public class ComponentModelBaseServiceRegistry implements PluginServiceRegistry 
     }
 
     private static class BuildScopeServices {
-        DependentSourceSetLocalComponentConverter createLocalComponentFactory() {
-            return new DependentSourceSetLocalComponentConverter();
-        }
-
         ProjectModelResolver createProjectLocator(final ProjectRegistry<ProjectInternal> projectRegistry) {
             return new DefaultProjectModelResolver(projectRegistry);
         }
@@ -74,6 +69,7 @@ public class ComponentModelBaseServiceRegistry implements PluginServiceRegistry 
         MethodModelRuleExtractor createComponentBinariesPluginInspector() {
             return new ComponentBinariesModelRuleExtractor();
         }
+
         MethodModelRuleExtractor createBinaryTaskPluginInspector() {
             return new BinaryTasksModelRuleExtractor();
         }

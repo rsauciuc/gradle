@@ -16,8 +16,10 @@
 
 package org.gradle.model.internal.manage.schema.extract;
 
-import org.gradle.model.internal.manage.schema.ModelSchemaStore;
-import org.gradle.model.internal.manage.schema.cache.ModelSchemaCache;
+import org.gradle.api.Action;
+import org.gradle.model.internal.manage.schema.CollectionSchema;
+import org.gradle.model.internal.manage.schema.ModelSchema;
+import org.gradle.model.internal.manage.schema.ModelSetSchema;
 import org.gradle.model.internal.type.ModelType;
 
 public abstract class SetStrategy extends CollectionStrategy {
@@ -28,17 +30,29 @@ public abstract class SetStrategy extends CollectionStrategy {
         this.modelType = modelType;
     }
 
-    public <T> ModelSchemaExtractionResult<T> extract(ModelSchemaExtractionContext<T> extractionContext, ModelSchemaStore store, final ModelSchemaCache cache) {
+    public <T> void extract(ModelSchemaExtractionContext<T> extractionContext) {
         ModelType<T> type = extractionContext.getType();
         if (modelType.isAssignableFrom(type)) {
-           validateType(modelType, extractionContext, type);
+            validateType(modelType, extractionContext, type);
 
             ModelType<?> elementType = type.getTypeVariables().get(0);
 
-            return getModelSchemaExtractionResult(modelType, extractionContext, cache, elementType, store);
-        } else {
-            return null;
+            extractionContext.found(getModelSchema(modelType, extractionContext, elementType));
         }
     }
 
+    protected <T, E> ModelSchema<T> getModelSchema(ModelType<?> modelType, final ModelSchemaExtractionContext<T> extractionContext, final ModelType<E> elementType) {
+        if (modelType.isAssignableFrom(elementType)) {
+            throw new InvalidManagedModelElementTypeException(extractionContext, String.format("%1$s cannot be used as type parameter of %1$s", modelType.getConcreteClass().getName()));
+        }
+
+        final CollectionSchema<T, E> schema = new ModelSetSchema<T, E>(extractionContext.getType(), elementType);
+        extractionContext.child(elementType, "element type", new Action<ModelSchema<E>>() {
+            @Override
+            public void execute(ModelSchema<E> elementTypeSchema) {
+                schema.setElementTypeSchema(elementTypeSchema);
+            }
+        });
+        return schema;
+    }
 }

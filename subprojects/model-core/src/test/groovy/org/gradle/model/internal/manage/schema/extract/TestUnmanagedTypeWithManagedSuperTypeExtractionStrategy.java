@@ -16,21 +16,13 @@
 
 package org.gradle.model.internal.manage.schema.extract;
 
-import org.gradle.model.internal.core.NodeInitializer;
-import org.gradle.model.internal.manage.schema.ModelManagedImplStructSchema;
-import org.gradle.model.internal.manage.schema.ModelSchemaStore;
-
-public class TestUnmanagedTypeWithManagedSuperTypeExtractionStrategy extends ManagedImplStructSchemaExtractionStrategySupport {
+public class TestUnmanagedTypeWithManagedSuperTypeExtractionStrategy extends ManagedImplStructStrategy {
     public TestUnmanagedTypeWithManagedSuperTypeExtractionStrategy(Class<?> delegateType) {
         this(delegateType, new ModelSchemaAspectExtractor());
     }
 
     public TestUnmanagedTypeWithManagedSuperTypeExtractionStrategy(Class<?> delegateType, ModelSchemaAspectExtractor aspectExtractor) {
-        super(aspectExtractor, delegateType, delegateType);
+        super(aspectExtractor);
     }
 
-    @Override
-    protected <R> NodeInitializer createNodeInitializer(ModelManagedImplStructSchema<R> schema, ModelSchemaStore store) {
-        return null;
-    }
 }

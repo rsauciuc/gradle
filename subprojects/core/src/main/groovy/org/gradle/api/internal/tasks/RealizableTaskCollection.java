@@ -18,7 +18,6 @@ package org.gradle.api.internal.tasks;
 
 import groovy.lang.Closure;
 import org.gradle.api.*;
-import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskCollection;
 import org.gradle.model.internal.core.ModelNode;
@@ -29,37 +28,43 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RealizableTaskCollection<T extends Task> implements TaskCollection<T>, Iterable<T> {
+
     private final TaskCollection<T> delegate;
     private final Class<T> type;
-    private final ProjectInternal project;
     private final AtomicBoolean realized = new AtomicBoolean(false);
+    private final MutableModelNode modelNode;
 
+    public RealizableTaskCollection(Class<T> type, TaskCollection<T> delegate, MutableModelNode modelNode) {
+        assert !(delegate instanceof RealizableTaskCollection) : "Attempt to wrap already realizable task collection in realizable wrapper: " + delegate;
 
-    public RealizableTaskCollection(Class<T> type, TaskCollection<T> delegate, ProjectInternal project) {
         this.delegate = delegate;
         this.type = type;
-        this.project = project;
+        this.modelNode = modelNode;
     }
 
     public void realizeRuleTaskTypes() {
+        // Task dependencies may be calculated more than once.
+        // This guard is purely an optimisation.
         if (realized.compareAndSet(false, true)) {
-            ModelNode modelNode = project.getModelRegistry().atStateOrLater(TaskContainerInternal.MODEL_PATH, ModelNode.State.SelfClosed);
-            MutableModelNode taskContainerNode = (MutableModelNode) modelNode;
-            Iterable<? extends MutableModelNode> links = taskContainerNode.getLinks(ModelType.of(type));
-            for (MutableModelNode node : links) {
-                project.getModelRegistry().realizeNode(node.getPath());
+            modelNode.ensureAtLeast(ModelNode.State.SelfClosed);
+            for (MutableModelNode node : modelNode.getLinks(ModelType.of(type))) {
+                node.ensureAtLeast(ModelNode.State.GraphClosed);
             }
         }
     }
 
+    private <S extends T> RealizableTaskCollection<S> realizable(Class<S> type, TaskCollection<S> collection) {
+        return new RealizableTaskCollection<S>(type, collection, modelNode);
+    }
+
     @Override
     public TaskCollection<T> matching(Spec<? super T> spec) {
-        return delegate.matching(spec);
+        return realizable(type, delegate.matching(spec));
     }
 
     @Override
     public TaskCollection<T> matching(Closure closure) {
-        return delegate.matching(closure);
+        return realizable(type, delegate.matching(closure));
     }
 
     @Override
@@ -74,7 +79,7 @@ public class RealizableTaskCollection<T extends Task> implements TaskCollection<
 
     @Override
     public <S extends T> TaskCollection<S> withType(Class<S> type) {
-        return delegate.withType(type);
+        return realizable(type, delegate.withType(type));
     }
 
     @Override
@@ -144,12 +149,12 @@ public class RealizableTaskCollection<T extends Task> implements TaskCollection<
 
     @Override
     public <S extends T> DomainObjectCollection<S> withType(Class<S> type, Action<? super S> configureAction) {
-        return delegate.withType(type, configureAction);
+        return realizable(type, (DefaultTaskCollection<S>) delegate.withType(type, configureAction));
     }
 
     @Override
     public <S extends T> DomainObjectCollection<S> withType(Class<S> type, Closure configureClosure) {
-        return delegate.withType(type, configureClosure);
+        return realizable(type, (DefaultTaskCollection<S>) delegate.withType(type, configureClosure));
     }
 
     @Override

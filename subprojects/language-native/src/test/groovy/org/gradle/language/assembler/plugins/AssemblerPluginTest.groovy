@@ -20,20 +20,30 @@ import org.gradle.api.Project
 import org.gradle.api.tasks.TaskDependencyMatchers
 import org.gradle.language.assembler.AssemblerSourceSet
 import org.gradle.language.assembler.tasks.Assemble
+import org.gradle.language.base.ProjectSourceSet
 import org.gradle.model.ModelMap
-import org.gradle.model.internal.core.ModelPath
-import org.gradle.model.internal.type.ModelTypes
 import org.gradle.nativeplatform.*
+import org.gradle.platform.base.BinarySpec
 import org.gradle.platform.base.ComponentSpec
 import org.gradle.util.GFileUtils
 import org.gradle.util.TestUtil
 import spock.lang.Specification
 
+import static org.gradle.model.internal.type.ModelTypes.modelMap
+
 class AssemblerPluginTest extends Specification {
     final def project = TestUtil.createRootProject()
 
     ModelMap<ComponentSpec> realizeComponents() {
-        project.modelRegistry.realize(ModelPath.path("components"), ModelTypes.modelMap(ComponentSpec))
+        project.modelRegistry.realize("components", modelMap(ComponentSpec))
+    }
+
+    ProjectSourceSet realizeSourceSets() {
+        project.modelRegistry.find("sources", ProjectSourceSet)
+    }
+
+    ModelMap<BinarySpec> realizeBinaries() {
+        project.modelRegistry.find("binaries", modelMap(BinarySpec))
     }
 
     def "creates asm source set with conventional locations for components"() {
@@ -56,7 +66,8 @@ class AssemblerPluginTest extends Specification {
         exe.sources.asm.source.srcDirs == [project.file("src/exe/asm")] as Set
 
         and:
-        project.sources as Set == exe.sources as Set
+        def sources = realizeSourceSets()
+        sources as Set == exe.sources as Set
     }
 
     def "can configure source set locations"() {
@@ -105,7 +116,7 @@ class AssemblerPluginTest extends Specification {
         }
 
         then:
-        NativeExecutableBinarySpec binary = project.binaries.testExecutable
+        NativeExecutableBinarySpec binary = realizeBinaries().testExecutable
         binary.tasks.withType(Assemble)*.name == ["assembleTestExecutableTestAnotherOne", "assembleTestExecutableTestAsm"]
 
         and:
@@ -148,7 +159,7 @@ class AssemblerPluginTest extends Specification {
         }
 
         then:
-        SharedLibraryBinarySpec sharedLib = project.binaries.testSharedLibrary
+        SharedLibraryBinarySpec sharedLib = realizeBinaries().testSharedLibrary
         sharedLib.tasks.withType(Assemble)*.name == ["assembleTestSharedLibraryTestAnotherOne", "assembleTestSharedLibraryTestAsm"]
         sharedLib.tasks.withType(Assemble).each { compile ->
             compile.toolChain == sharedLib.toolChain
@@ -158,7 +169,7 @@ class AssemblerPluginTest extends Specification {
         sharedLinkTask TaskDependencyMatchers.dependsOn("assembleTestSharedLibraryTestAnotherOne", "assembleTestSharedLibraryTestAsm")
 
         and:
-        StaticLibraryBinarySpec staticLib = project.binaries.testStaticLibrary
+        StaticLibraryBinarySpec staticLib = realizeBinaries().testStaticLibrary
         staticLib.tasks.withType(Assemble)*.name == ["assembleTestStaticLibraryTestAnotherOne", "assembleTestStaticLibraryTestAsm"]
         staticLib.tasks.withType(Assemble).each { compile ->
             compile.toolChain == sharedLib.toolChain

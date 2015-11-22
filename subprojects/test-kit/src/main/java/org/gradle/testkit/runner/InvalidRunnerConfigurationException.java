@@ -17,6 +17,7 @@
 package org.gradle.testkit.runner;
 
 import org.gradle.api.Incubating;
+import org.gradle.tooling.UnsupportedVersionException;
 
 /**
  * Thrown when a build cannot be executed due to the runner being in an invalid state.
@@ -31,7 +32,7 @@ public class InvalidRunnerConfigurationException extends IllegalStateException {
         super(s);
     }
 
-    public InvalidRunnerConfigurationException(String message, Throwable cause) {
-        super(message, cause);
+    public InvalidRunnerConfigurationException(String s, UnsupportedVersionException e) {
+        super(s, e);
     }
 }

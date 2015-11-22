@@ -18,12 +18,10 @@ package org.gradle.nativeplatform
 
 import org.gradle.api.reporting.model.ModelReportOutput
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.EnableModelDsl
 
 class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
 
     def "setup"() {
-        EnableModelDsl.enable(executer)
         buildScript """
             apply type: NativeBinariesTestPlugin
 
@@ -121,7 +119,7 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
             model {
                 tasks {
                     create("printSourceNames") {
-                        def sources = $("testSuites.main.sources")
+                        def sources = $.testSuites.main.sources
                         doLast {
                             println "names: ${sources.values()*.name}"
                         }
@@ -171,26 +169,24 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
                 foo {
                     binaries()
                     sources {
-                        bar(nodeValue: "DefaultCustomLanguageSourceSet 'foo:bar'")
+                        bar(type: "CustomLanguageSourceSet")
                     }
                 }
                 main {
                     binaries()
                     sources {
-                        main(nodeValue: "DefaultCustomLanguageSourceSet 'main:main'")
-                        test(nodeValue: "DefaultCustomLanguageSourceSet 'main:test'")
+                        main(type: "CustomLanguageSourceSet")
+                        test(type: "CustomLanguageSourceSet")
                     }
                 }
                 secondary {
                     binaries()
                     sources {
-                        test(nodeValue: "DefaultCustomLanguageSourceSet 'secondary:test'")
-
+                        test(type: "CustomLanguageSourceSet")
                     }
                 }
             }
         }
-
     }
 
     def "can reference sources container elements in a rule"() {
@@ -200,7 +196,7 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
             model {
                 tasks {
                     create("printSourceDisplayName") {
-                        def sources = $("testSuites.main.sources.main")
+                        def sources = $.testSuites.main.sources.main
                         doLast {
                             println "sources display name: ${sources.displayName}"
                         }
@@ -213,7 +209,7 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
         succeeds "printSourceDisplayName"
 
         then:
-        output.contains "sources display name: DefaultCustomLanguageSourceSet 'main:main'"
+        output.contains "sources display name: CustomLanguageSourceSet 'main:main'"
     }
 
     def "can reference sources container elements using specialized type in a rule"() {
@@ -240,32 +236,7 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
         then:
         output.contains "sources data: foo"
     }
-
-    def "cannot remove source sets"() {
-        given:
-        withMainSourceSet()
-        buildFile << '''
-            class SourceSetRemovalRules extends RuleSource {
-                @Mutate
-                void clearSourceSets(@Path("testSuites.main.sources") NamedDomainObjectCollection<LanguageSourceSet> sourceSets) {
-                    sourceSets.clear()
-                }
-
-                @Mutate
-                void closeMainComponentSourceSetsForTasks(ModelMap<Task> tasks, @Path("testSuites.main.sources") NamedDomainObjectCollection<LanguageSourceSet> sourceSets) {
-                }
-            }
-
-            apply type: SourceSetRemovalRules
-        '''
-
-        when:
-        fails()
-
-        then:
-        failureHasCause("This collection does not support element removal.")
-    }
-
+    
     def "test suite binaries container elements and their tasks containers are visible in model report"() {
         given:
         withTestBinaryFactory()
@@ -291,9 +262,11 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
                 main {
                     binaries {
                         first {
+                            sources()
                             tasks(nodeValue: "[]")
                         }
                         second {
+                            sources()
                             tasks(nodeValue: "[]")
                         }
 
@@ -321,7 +294,7 @@ class TestSuiteModelIntegrationSpec extends AbstractIntegrationSpec {
                 }
                 tasks {
                     create("printBinaryNames") {
-                        def binaries = $("testSuites.main.binaries")
+                        def binaries = $.testSuites.main.binaries
                         doLast {
                             println "names: ${binaries.values().name}"
                         }

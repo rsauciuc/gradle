@@ -77,12 +77,12 @@ public class NodeBackedModelSet<T> implements ModelSet<T>, ManagedInstance {
         final ModelRuleDescriptor descriptor = NestedModelRuleDescriptor.append(this.descriptor, "create()");
 
         NodeInitializer nodeInitializer = creatorStrategy.initializer(elementType);
-        ModelCreator creator = ModelCreators.of(childPath, nodeInitializer)
+        ModelRegistration registration = ModelRegistrations.of(childPath, nodeInitializer)
             .descriptor(descriptor)
             .action(ModelActionRole.Initialize, NoInputsModelAction.of(ModelReference.of(childPath, elementType), descriptor, action))
             .build();
 
-        modelNode.addLink(creator);
+        modelNode.addLink(registration);
     }
 
     @Override
@@ -183,7 +183,7 @@ public class NodeBackedModelSet<T> implements ModelSet<T>, ManagedInstance {
                 Iterables.transform(modelNode.getLinks(elementType), new Function<MutableModelNode, T>() {
                     @Override
                     public T apply(MutableModelNode input) {
-                        return input.asReadOnly(elementType, descriptor).getInstance();
+                        return input.asImmutable(elementType, descriptor).getInstance();
                     }
                 })
             );
