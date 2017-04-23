@@ -18,7 +18,6 @@ package org.gradle.integtests.resolve
 import org.gradle.integtests.fixtures.AbstractIntegrationTest
 import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
 import org.gradle.integtests.fixtures.TestResources
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.junit.Before
 import org.junit.Rule
@@ -29,7 +28,6 @@ import spock.lang.Issue
 import static org.hamcrest.Matchers.containsString
 
 @RunWith(FluidDependenciesResolveRunner)
-@LeaksFileHandles
 class ArtifactDependenciesIntegrationTest extends AbstractIntegrationTest {
     @Rule
     public final TestResources testResources = new TestResources(testDirectoryProvider)
@@ -78,7 +76,7 @@ subprojects {
     configurations {
         compile
     }
-    task listDeps << { configurations.compile.each { } }
+    task listDeps { doLast { configurations.compile.each { } } }
 }
 project(':a') {
     repositories {
@@ -115,9 +113,9 @@ dependencies {
     missingExt "org.gradle.test:lib:1.0@zip"
     missingClassifier "org.gradle.test:lib:1.0:classifier1"
 }
-task listJar << { configurations.compile.each { } }
-task listMissingExt << { configurations.missingExt.each { } }
-task listMissingClassifier << { configurations.missingClassifier.each { } }
+task listJar { doLast { configurations.compile.each { } } }
+task listMissingExt { doLast { configurations.missingExt.each { } } }
+task listMissingClassifier { doLast { configurations.missingClassifier.each { } } }
 """
 
         def module = repo.module('org.gradle.test', 'lib', '1.0')
@@ -149,7 +147,7 @@ subprojects {
     configurations {
         compile
     }
-    task listDeps << { configurations.compile.each { } }
+    task listDeps { doLast { configurations.compile.each { } } }
 }
 project(':a') {
     repositories {
@@ -181,10 +179,10 @@ project(':b') {
         repo.module('org', 'leaf3').publish()
         repo.module('org', 'leaf4').publish()
 
-        repo.module('org', 'middle1').dependsOn("leaf1", "leaf2").publish()
-        repo.module('org', 'middle2').dependsOn("leaf3", "leaf4").publish()
+        repo.module('org', 'middle1').dependsOnModules("leaf1", "leaf2").publish()
+        repo.module('org', 'middle2').dependsOnModules("leaf3", "leaf4").publish()
 
-        repo.module('org', 'top').dependsOn("middle1", "middle2").publish()
+        repo.module('org', 'top').dependsOnModules("middle1", "middle2").publish()
 
         testFile('build.gradle') << """
             repositories {
@@ -196,8 +194,10 @@ project(':b') {
             dependencies {
                 compile "org:middle2:1.0", "org:middle1:1.0"
             }
-            task test << {
-                assert configurations.compile.files.collect { it.name } == ['middle2-1.0.jar', 'middle1-1.0.jar', 'leaf3-1.0.jar', 'leaf4-1.0.jar', 'leaf1-1.0.jar', 'leaf2-1.0.jar']
+            task test {
+                doLast {
+                    assert configurations.compile.files.collect { it.name } == ['middle2-1.0.jar', 'middle1-1.0.jar', 'leaf3-1.0.jar', 'leaf4-1.0.jar', 'leaf1-1.0.jar', 'leaf2-1.0.jar']
+                }
             }
         """
 
@@ -225,26 +225,28 @@ dependencies {
     compile "org.gradle.test:lib:1.0@zip"
     compile "org.gradle.test:dist:1.0"
 }
-task test << {
-    assert configurations.compile.files.collect { it.name } == ['lib-1.0.jar', 'lib-1.0-classifier.jar', 'lib-1.0.zip', 'dist-1.0.zip']
-    def artifacts = configurations.compile.resolvedConfiguration.resolvedArtifacts as List
-    assert artifacts.size() == 4
-    assert artifacts[0].name == 'lib'
-    assert artifacts[0].type == 'jar'
-    assert artifacts[0].extension == 'jar'
-    assert artifacts[0].classifier == null
-    assert artifacts[1].name == 'lib'
-    assert artifacts[1].type == 'jar'
-    assert artifacts[1].extension == 'jar'
-    assert artifacts[1].classifier == 'classifier'
-    assert artifacts[2].name == 'lib'
-    assert artifacts[2].type == 'zip'
-    assert artifacts[2].extension == 'zip'
-    assert artifacts[2].classifier == null
-    assert artifacts[3].name == 'dist'
-    assert artifacts[3].type == 'zip'
-    assert artifacts[3].extension == 'zip'
-    assert artifacts[3].classifier == null
+task test {
+    doLast {
+        assert configurations.compile.files.collect { it.name } == ['lib-1.0.jar', 'lib-1.0-classifier.jar', 'lib-1.0.zip', 'dist-1.0.zip']
+        def artifacts = configurations.compile.resolvedConfiguration.resolvedArtifacts as List
+        assert artifacts.size() == 4
+        assert artifacts[0].name == 'lib'
+        assert artifacts[0].type == 'jar'
+        assert artifacts[0].extension == 'jar'
+        assert artifacts[0].classifier == null
+        assert artifacts[1].name == 'lib'
+        assert artifacts[1].type == 'jar'
+        assert artifacts[1].extension == 'jar'
+        assert artifacts[1].classifier == 'classifier'
+        assert artifacts[2].name == 'lib'
+        assert artifacts[2].type == 'zip'
+        assert artifacts[2].extension == 'zip'
+        assert artifacts[2].classifier == null
+        assert artifacts[3].name == 'dist'
+        assert artifacts[3].type == 'zip'
+        assert artifacts[3].extension == 'zip'
+        assert artifacts[3].classifier == null
+    }
 }
 """
 
@@ -273,18 +275,22 @@ project(':a') {
     dependencies {
         compile 'org.gradle.test:external1:1.0:classifier1'
     }
-    task test(dependsOn: configurations.compile) << {
-        assert configurations.compile.collect { it.name } == ['external1-1.0-classifier1.jar']
-        assert configurations.compile.resolvedConfiguration.resolvedArtifacts.collect { "\${it.name}-\${it.classifier}" } == ['external1-classifier1']
+    task test(dependsOn: configurations.compile) {
+        doLast {
+            assert configurations.compile.collect { it.name } == ['external1-1.0-classifier1.jar']
+            assert configurations.compile.resolvedConfiguration.resolvedArtifacts.collect { "\${it.name}-\${it.classifier}" } == ['external1-classifier1']
+        }
     }
 }
 project(':b') {
     dependencies {
         compile 'org.gradle.test:external1:1.0:classifier2'
     }
-    task test(dependsOn: configurations.compile) << {
-        assert configurations.compile.collect { it.name } == ['external1-1.0-classifier2.jar']
-        assert configurations.compile.resolvedConfiguration.resolvedArtifacts.collect { "\${it.name}-\${it.classifier}" } == ['external1-classifier2']
+    task test(dependsOn: configurations.compile) {
+        doLast {
+            assert configurations.compile.collect { it.name } == ['external1-1.0-classifier2.jar']
+            assert configurations.compile.resolvedConfiguration.resolvedArtifacts.collect { "\${it.name}-\${it.classifier}" } == ['external1-classifier2']
+        }
     }
 }
 """
@@ -333,14 +339,16 @@ def checkDeps(config, expectedDependencies) {
     assert config.collect({ it.name }) as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.base, ['external1-1.0.jar', 'external1-1.0-baseClassifier.jar']
-    checkDeps configurations.extendedWithOther, ['external1-1.0.jar', 'external1-1.0-baseClassifier.jar', 'other-1.0.jar']
-    checkDeps configurations.extendedWithClassifier, ['external1-1.0.jar', 'external1-1.0-baseClassifier.jar', 'external1-1.0-extendedClassifier.jar']
-    checkDeps configurations.justDefault, ['external1-1.0.jar']
-    checkDeps configurations.justClassifier, ['external1-1.0-baseClassifier.jar', 'external1-1.0-extendedClassifier.jar']
-    checkDeps configurations.rawBase, ['external1-1.0.jar']
-    checkDeps configurations.rawExtended, ['external1-1.0.jar', 'external1-1.0-extendedClassifier.jar']
+task test {
+    doLast {
+        checkDeps configurations.base, ['external1-1.0.jar', 'external1-1.0-baseClassifier.jar']
+        checkDeps configurations.extendedWithOther, ['external1-1.0.jar', 'external1-1.0-baseClassifier.jar', 'other-1.0.jar']
+        checkDeps configurations.extendedWithClassifier, ['external1-1.0.jar', 'external1-1.0-baseClassifier.jar', 'external1-1.0-extendedClassifier.jar']
+        checkDeps configurations.justDefault, ['external1-1.0.jar']
+        checkDeps configurations.justClassifier, ['external1-1.0-baseClassifier.jar', 'external1-1.0-extendedClassifier.jar']
+        checkDeps configurations.rawBase, ['external1-1.0.jar']
+        checkDeps configurations.rawExtended, ['external1-1.0.jar', 'external1-1.0-extendedClassifier.jar']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -379,11 +387,13 @@ def checkDeps(config, expectedDependencies) {
     assert config.collect({ it.name }) as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.base, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar']
-    checkDeps configurations.extended, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar', 'other-1.0.jar']
-    checkDeps configurations.extendedWithClassifier, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar', 'external1-1.0-extendedClassifier.jar']
-    checkDeps configurations.extendedWithType, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar', 'external1-1.0.txt']
+task test {
+    doLast {
+        checkDeps configurations.base, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar']
+        checkDeps configurations.extended, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar', 'other-1.0.jar']
+        checkDeps configurations.extendedWithClassifier, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar', 'external1-1.0-extendedClassifier.jar']
+        checkDeps configurations.extendedWithType, ['external1-1.0.zip', 'external1-1.0-baseClassifier.jar', 'external1-1.0.txt']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -418,10 +428,12 @@ def checkDeps(config, expectedDependencies) {
     assert config.collect({ it.name }) as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.base, ['external1-1.0.jar', 'external1-1.0.zip']
-    checkDeps configurations.extended, ['external1-1.0.jar', 'external1-1.0.zip', 'external1-1.0-classifier.jar']
-    checkDeps configurations.extended2, ['external1-1.0.jar', 'external1-1.0.zip', 'external1-1.0-classifier.bin']
+task test {
+    doLast {
+        checkDeps configurations.base, ['external1-1.0.jar', 'external1-1.0.zip']
+        checkDeps configurations.extended, ['external1-1.0.jar', 'external1-1.0.zip', 'external1-1.0-classifier.jar']
+        checkDeps configurations.extended2, ['external1-1.0.jar', 'external1-1.0.zip', 'external1-1.0-classifier.bin']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -458,11 +470,13 @@ def checkDeps(config, expectedDependencies) {
     assert config*.name as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.reference, ['external1-1.0.jar', 'one-1.0.jar']
-    checkDeps configurations.excluded, ['external1-1.0.jar']
-    checkDeps configurations.extendedExcluded, ['external1-1.0.jar', 'two-1.0.jar']
-    checkDeps configurations.excludedWithClassifier, ['external1-1.0.jar', 'external1-1.0-classifier.jar']
+task test {
+    doLast {
+        checkDeps configurations.reference, ['external1-1.0.jar', 'one-1.0.jar']
+        checkDeps configurations.excluded, ['external1-1.0.jar']
+        checkDeps configurations.extendedExcluded, ['external1-1.0.jar', 'two-1.0.jar']
+        checkDeps configurations.excludedWithClassifier, ['external1-1.0.jar', 'external1-1.0-classifier.jar']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -496,9 +510,11 @@ def checkDeps(config, expectedDependencies) {
     assert config*.name as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.excluded, ['external-1.0.jar']
-    checkDeps configurations.extendedExcluded, ['external-1.0.jar']
+task test {
+    doLast {
+        checkDeps configurations.excluded, ['external-1.0.jar']
+        checkDeps configurations.extendedExcluded, ['external-1.0.jar']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -529,8 +545,10 @@ def checkDeps(config, expectedDependencies) {
     assert config*.name as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.excluded, ['external-1.0.jar']
+task test {
+    doLast {
+        checkDeps configurations.excluded, ['external-1.0.jar']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -546,7 +564,7 @@ task test << {
 
         expect:
         def failure = inTestDirectory().runWithFailure()
-        failure.assertHasCause("No such property: modue")
+        failure.assertHasCause("Could not set unknown property 'modue' for object of type org.gradle.api.internal.artifacts.DefaultExcludeRule.")
     }
 
     @Test
@@ -581,12 +599,14 @@ def checkDeps(config, expectedDependencies) {
     assert config.collect({ it.name }) as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.transitive, ['external1-1.0.jar', 'one-1.0.jar']
-    checkDeps configurations.nonTransitive, ['external1-1.0.jar']
-    checkDeps configurations.extendedNonTransitive, ['external1-1.0.jar', 'two-1.0.jar']
-    checkDeps configurations.extendedBoth, ['external1-1.0.jar', 'one-1.0.jar']
-    checkDeps configurations.mergedNonTransitive, ['external1-1.0.jar', 'external1-1.0-classifier.jar']
+task test {
+    doLast {
+        checkDeps configurations.transitive, ['external1-1.0.jar', 'one-1.0.jar']
+        checkDeps configurations.nonTransitive, ['external1-1.0.jar']
+        checkDeps configurations.extendedNonTransitive, ['external1-1.0.jar', 'two-1.0.jar']
+        checkDeps configurations.extendedBoth, ['external1-1.0.jar', 'one-1.0.jar']
+        checkDeps configurations.mergedNonTransitive, ['external1-1.0.jar', 'external1-1.0-classifier.jar']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -610,8 +630,10 @@ dependencies {
     override 'org.gradle.test:external1:1.0'
 }
 
-task test << {
-    assert configurations.override.collect { it.name } == ['external1-1.0.jar']
+task test {
+    doLast {
+        assert configurations.override.collect { it.name } == ['external1-1.0.jar']
+    }
 }
 """
 
@@ -645,9 +667,11 @@ def checkDeps(config, expectedDependencies) {
     assert config.collect({ it.name }) as Set == expectedDependencies as Set
 }
 
-task test << {
-    checkDeps configurations.a, ['external1-1.0.jar']
-    checkDeps configurations.b, ['external1-1.0-withClassifier.jar', 'external1-1.0.jar']
+task test {
+    doLast {
+        checkDeps configurations.a, ['external1-1.0.jar']
+        checkDeps configurations.b, ['external1-1.0-withClassifier.jar', 'external1-1.0.jar']
+    }
 }
 """
         inTestDirectory().withTasks('test').run()
@@ -662,31 +686,14 @@ task test << {
             task jar1(type: Jar) { destinationDir = buildDir; baseName = '1' }
             task jar2(type: Jar) { destinationDir = buildDir; baseName = '2' }
             artifacts { compile jar1; 'default' jar2 }
-            task listJars << {
-                assert configurations.compile.collect { it.name } == ['2.jar']
+            task listJars {
+                doLast {
+                    assert configurations.compile.collect { it.name } == ['2.jar']
+                }
             }
 '''
 
         inTestDirectory().withTasks("listJars").run()
-    }
-
-    @Test
-    public void canSpecifyProducerTasksForFileDependency() {
-        testFile("settings.gradle").write("include 'sub'");
-        testFile("build.gradle") << '''
-            configurations { compile }
-            dependencies { compile project(path: ':sub', configuration: 'compile') }
-            task test(dependsOn: configurations.compile) << {
-                assert file('sub/sub.jar').isFile()
-            }
-'''
-        testFile("sub/build.gradle") << '''
-            configurations { compile }
-            dependencies { compile files('sub.jar') { builtBy 'jar' } }
-            task jar << { file('sub.jar').text = 'content' }
-'''
-
-        inTestDirectory().withTasks("test").run().assertTasksExecuted(":sub:jar", ":test");
     }
 
     def getRepo() {

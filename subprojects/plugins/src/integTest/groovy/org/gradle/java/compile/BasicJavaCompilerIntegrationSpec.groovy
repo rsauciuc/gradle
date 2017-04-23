@@ -142,6 +142,45 @@ public class FxApp extends Application {
         succeeds("compileJava")
     }
 
+    @Requires(TestPrecondition.JDK9_OR_LATER)
+    def "compile with release option"() {
+        given:
+        goodCode()
+        buildFile << """
+compileJava.options.compilerArgs.addAll(['-release', '7'])
+"""
+
+        expect:
+        succeeds 'compileJava'
+    }
+
+    @Requires(TestPrecondition.JDK9_OR_LATER)
+    def "compile fails when using newer API with release option"() {
+        given:
+        file("src/main/java/compile/test/FailsOnJava7.java") << '''
+package compile.test;
+
+import java.util.Optional;
+
+public class FailsOnJava7 {
+    public Optional<String> someOptional() {
+        return Optional.of("Hello");
+    }
+}
+'''
+
+        buildFile << """
+compileJava.options.compilerArgs.addAll(['-release', '7'])
+"""
+
+        expect:
+        fails 'compileJava'
+        output.contains(logStatement())
+        compilerErrorOutput.contains("cannot find symbol")
+        compilerErrorOutput.contains("class Optional")
+
+    }
+
     def getCompilerErrorOutput() {
         return errorOutput
     }
@@ -154,7 +193,7 @@ repositories {
 }
 
 dependencies {
-    compile "org.codehaus.groovy:groovy:2.4.4"
+    compile "org.codehaus.groovy:groovy:2.4.10"
 }
 '''
     }
@@ -291,8 +330,8 @@ class Main {
                         public class SimpleAnnotationProcessor extends AbstractProcessor {
                             @Override
                             public boolean process(final Set<? extends TypeElement> annotations, final RoundEnvironment roundEnv) {
-                                if (isClasspathContaminated()) {
-                                    throw new RuntimeException("Annotation Processor Classpath is contaminated by Gradle ClassLoader");
+                                if (${gradleLeaksIntoAnnotationProcessor() ? '!' : ''}isClasspathContaminated()) {
+                                    throw new RuntimeException("Annotation Processor Classpath is ${gradleLeaksIntoAnnotationProcessor() ? 'not ' : ''}}contaminated by Gradle ClassLoader");
                                 }
 
                                 for (final Element classElement : roundEnv.getElementsAnnotatedWith(SimpleAnnotation.class)) {
@@ -353,6 +392,10 @@ class Main {
         then:
         fails("compileJava")
         compilerErrorOutput.contains("package ${gradleBaseServicesClass.package.name} does not exist")
+    }
+
+    protected boolean gradleLeaksIntoAnnotationProcessor() {
+        return false;
     }
 
 }

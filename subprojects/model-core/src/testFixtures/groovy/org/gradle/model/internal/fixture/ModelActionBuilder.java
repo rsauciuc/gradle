@@ -88,6 +88,14 @@ public class ModelActionBuilder<T> {
         return toAction(action, path, type, descriptor);
     }
 
+    public <I> ModelAction action(ModelPath modelPath, Class<I> inputType, BiAction<? super T, ? super I> action) {
+        return action(modelPath, ModelType.of(inputType), action);
+    }
+
+    public <I> ModelAction action(String modelPath, Class<I> inputType, BiAction<? super T, ? super I> action) {
+        return action(ModelPath.path(modelPath), ModelType.of(inputType), action);
+    }
+
     public <I> ModelAction action(ModelPath modelPath, ModelType<I> inputType, BiAction<? super T, ? super I> action) {
         return action(modelPath, inputType, inputType.toString(), action);
     }
@@ -126,7 +134,7 @@ public class ModelActionBuilder<T> {
     }
 
     private static <T> ModelAction toAction(final List<ModelReference<?>> references, final TriAction<? super MutableModelNode, ? super T, ? super List<ModelView<?>>> action, final ModelPath path, final ModelType<T> type, final ModelRuleDescriptor descriptor) {
-        return DirectNodeInputUsingModelAction.of(ModelReference.of(path, type), descriptor, references, new TriAction<MutableModelNode, T, List<ModelView<?>>>() {
+        return DirectNodeInputUsingModelAction.of(subject(path, type), descriptor, references, new TriAction<MutableModelNode, T, List<ModelView<?>>>() {
             @Override
             public void execute(MutableModelNode modelNode, T t, List<ModelView<?>> inputs) {
                 action.execute(modelNode, t, inputs);
@@ -135,6 +143,10 @@ public class ModelActionBuilder<T> {
     }
 
     private static <T> ModelAction toAction(Action<? super MutableModelNode> action, final ModelPath path, final ModelType<T> type, final ModelRuleDescriptor descriptor) {
-        return DirectNodeNoInputsModelAction.of(ModelReference.of(path, type), descriptor, action);
+        return DirectNodeNoInputsModelAction.of(subject(path, type), descriptor, action);
+    }
+
+    private static <T> ModelReference<T> subject(ModelPath path, ModelType<T> type) {
+        return path != null ? ModelReference.of(path, type) : ModelReference.of(type).inScope(ModelPath.ROOT);
     }
 }

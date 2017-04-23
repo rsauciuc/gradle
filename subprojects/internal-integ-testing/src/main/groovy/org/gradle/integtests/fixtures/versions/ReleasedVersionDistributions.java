@@ -24,10 +24,12 @@ import org.gradle.internal.Factory;
 import org.gradle.util.CollectionUtils;
 import org.gradle.util.GradleVersion;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 
 import static org.gradle.util.CollectionUtils.findFirst;
+import static org.gradle.util.CollectionUtils.sort;
 
 /**
  * Provides access to {@link GradleDistribution}s for versions of Gradle that have been released.
@@ -36,18 +38,23 @@ import static org.gradle.util.CollectionUtils.findFirst;
  */
 public class ReleasedVersionDistributions {
 
-    private final IntegrationTestBuildContext buildContext = new IntegrationTestBuildContext();
+    private final IntegrationTestBuildContext buildContext;
 
     private final Factory<Properties> versionsFactory;
     private Properties properties;
     private List<GradleDistribution> distributions;
 
     public ReleasedVersionDistributions() {
-        this(new ClasspathVersionSource());
+        this(IntegrationTestBuildContext.INSTANCE);
     }
 
-    ReleasedVersionDistributions(Factory<Properties> versionsFactory) {
+    public ReleasedVersionDistributions(IntegrationTestBuildContext buildContext) {
+        this(new ClasspathVersionSource(), buildContext);
+    }
+
+    ReleasedVersionDistributions(Factory<Properties> versionsFactory, IntegrationTestBuildContext buildContext) {
         this.versionsFactory = versionsFactory;
+        this.buildContext = buildContext;
     }
 
     private Properties getProperties() {
@@ -89,11 +96,40 @@ public class ReleasedVersionDistributions {
         return distributions;
     }
 
+    public List<GradleDistribution> getSupported() {
+        final GradleVersion firstSupported = GradleVersion.version("1.0");
+        return CollectionUtils.filter(getAll(), new Spec<GradleDistribution>() {
+            @Override
+            public boolean isSatisfiedBy(GradleDistribution element) {
+                return element.getVersion().compareTo(firstSupported) >= 0;
+            }
+        });
+    }
+
     public GradleDistribution getDistribution(final GradleVersion gradleVersion) {
         return findFirst(getAll(), new Spec<GradleDistribution>() {
             public boolean isSatisfiedBy(GradleDistribution element) {
                 return element.getVersion().equals(gradleVersion);
             }
         });
+    }
+
+    public GradleDistribution getDistribution(final String gradleVersion) {
+        return findFirst(getAll(), new Spec<GradleDistribution>() {
+            public boolean isSatisfiedBy(GradleDistribution element) {
+                return element.getVersion().getVersion().equals(gradleVersion);
+            }
+        });
+    }
+
+    public GradleDistribution getPrevious(final GradleVersion gradleVersion) {
+        GradleDistribution distribution = getDistribution(gradleVersion);
+        List<GradleDistribution> sortedDistributions = sort(distributions, new Comparator<GradleDistribution>() {
+            public int compare(GradleDistribution dist1, GradleDistribution dist2) {
+                return dist1.getVersion().compareTo(dist2.getVersion());
+            }
+        });
+        int distributionIndex = sortedDistributions.indexOf(distribution) - 1;
+        return distributionIndex >= 0 ? sortedDistributions.get(distributionIndex) : null;
     }
 }

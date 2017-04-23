@@ -16,53 +16,33 @@
 
 package org.gradle.model.internal.inspect
 
-import org.gradle.api.credentials.Credentials
-import org.gradle.internal.service.ServiceRegistry
-import org.gradle.internal.typeconversion.TypeConverter
 import org.gradle.model.Managed
 import org.gradle.model.ModelMap
 import org.gradle.model.Unmanaged
-import org.gradle.model.internal.core.*
-import org.gradle.model.internal.fixture.ModelRegistryHelper
-import org.gradle.model.internal.fixture.TestManagedProxyFactory
-import org.gradle.model.internal.fixture.TestNodeInitializerRegistry
-import org.gradle.model.internal.manage.instance.ManagedProxyFactory
+import org.gradle.model.internal.core.DefaultNodeInitializerRegistry
+import org.gradle.model.internal.core.ModelRuleExecutionException
+import org.gradle.model.internal.core.ModelTypeInitializationException
+import org.gradle.model.internal.core.NodeInitializerRegistry
+import org.gradle.model.internal.fixture.ProjectRegistrySpec
+import org.gradle.model.internal.manage.binding.StructBindingsStore
 import org.gradle.model.internal.manage.schema.ModelSchemaStore
-import org.gradle.model.internal.manage.schema.extract.DefaultConstructableTypesRegistry
-import org.gradle.model.internal.manage.schema.extract.DefaultModelSchemaStore
 import org.gradle.model.internal.manage.schema.extract.ScalarTypes
-import org.gradle.model.internal.registry.ModelRegistry
-import org.gradle.model.internal.type.ModelType
 import org.gradle.util.TextUtil
-import spock.lang.Specification
 import spock.lang.Unroll
 
 import java.util.concurrent.atomic.AtomicInteger
 
-class ManagedModelInitializerTest extends Specification {
+import static org.gradle.model.ModelTypeTesting.fullyQualifiedNameOf
 
-    def store = DefaultModelSchemaStore.instance
-    def nodeInitializerRegistry
-    def r = new ModelRegistryHelper()
+class ManagedModelInitializerTest extends ProjectRegistrySpec {
+
     def classLoader = new GroovyClassLoader(getClass().classLoader)
-    def proxyFactory = TestManagedProxyFactory.INSTANCE
     static final List<Class<?>> JDK_SCALAR_TYPES = ScalarTypes.TYPES.rawClass
 
-    def setup() {
-        registerServiceInstance("schemaStore", ModelSchemaStore, DefaultModelSchemaStore.instance)
-        registerServiceInstance("proxyFactory", ManagedProxyFactory, proxyFactory)
-        registerServiceInstance("serviceRegistry", ServiceRegistry, Mock(ServiceRegistry))
-        registerServiceInstance("typeConverter", TypeConverter, Mock(TypeConverter))
-        nodeInitializerRegistry = new TestNodeInitializerRegistry() //Not shared across tests as test may add constructable types only applying to that particular test
-        registerServiceInstance(DefaultNodeInitializerRegistry.DEFAULT_REFERENCE, nodeInitializerRegistry)
-    }
-
-    private <T> ModelRegistry registerServiceInstance(String path, Class<T> clazz, T instance) {
-        registerServiceInstance(ModelReference.of(path, clazz), instance)
-    }
-
-    private <T> ModelRegistry registerServiceInstance(ModelReference<T> reference, T instance) {
-        r.register(ModelRegistrations.serviceInstance(reference, instance).build())
+    @Override
+    protected NodeInitializerRegistry createNodeInitializerRegistry(ModelSchemaStore schemaStore, StructBindingsStore structBindingsStore) {
+        // Not shared across tests as test may add constructible types only applying to that particular test
+        return new DefaultNodeInitializerRegistry(schemaStore, structBindingsStore)
     }
 
     def "should fail with a contextual exception for managed collections properties"() {
@@ -71,7 +51,7 @@ class ManagedModelInitializerTest extends Specification {
 
         then:
         def ex = thrown(ModelRuleExecutionException)
-        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '$ManagedWithInvalidModelMap.name' can not be constructed.
+        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '${fullyQualifiedNameOf(ManagedWithInvalidModelMap)}' can not be constructed.
 Its property 'org.gradle.model.ModelMap<java.io.FileInputStream> map' is not a valid managed collection
 A managed collection can not contain 'java.io.FileInputStream's
 A valid managed collection takes the form of ModelSet<T> or ModelMap<T> where 'T' is:
@@ -81,30 +61,6 @@ A valid managed collection takes the form of ModelSet<T> or ModelMap<T> where 'T
     @Managed
     interface ManagedWithInvalidModelMap {
         ModelMap<FileInputStream> getMap()
-    }
-
-    def "should fail with a contextual exception for a managed model element with an unknown property type"() {
-        when:
-        def constructableTypesRegistry = new DefaultConstructableTypesRegistry()
-        NodeInitializer nodeInitializer = Mock()
-        constructableTypesRegistry.registerConstructableType(ModelType.of(Credentials), nodeInitializer)
-        nodeInitializerRegistry.registerStrategy(constructableTypesRegistry)
-        realizeNodeOfType(ManagedWithUnsupportedType)
-
-        then:
-        def ex = thrown(ModelRuleExecutionException)
-        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '$ManagedWithUnsupportedType.name' can not be constructed.
-Its property 'java.io.FileInputStream stream' can not be constructed
-It must be one of:
-    - A managed type (annotated with @Managed)
-    - A managed collection. A valid managed collection takes the form of ModelSet<T> or ModelMap<T> where 'T' is:
-        - A managed type (annotated with @Managed)
-        - or a type which Gradle is capable of constructing:
-            - org.gradle.api.credentials.Credentials
-    - A scalar collection. A valid scalar collection takes the form of List<T> or Set<T> where 'T' is one of (String, Boolean, Character, Byte, Short, Integer, Float, Long, Double, BigInteger, BigDecimal, File)
-    - An unmanaged property (i.e. annotated with @Unmanaged)
-    - or a type which Gradle is capable of constructing:
-        - org.gradle.api.credentials.Credentials""")
     }
 
     @Managed
@@ -118,7 +74,7 @@ It must be one of:
 
         then:
         def ex = thrown(ModelRuleExecutionException)
-        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '$ManagedWithInvalidScalarCollection.name' can not be constructed.
+        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '${fullyQualifiedNameOf(ManagedWithInvalidScalarCollection)}' can not be constructed.
 Its property 'java.util.List<java.io.FileInputStream> scalarThings' is not a valid scalar collection
 A scalar collection can not contain 'java.io.FileInputStream's
 A valid scalar collection takes the form of List<T> or Set<T> where 'T' is one of (String, Boolean, Character, Byte, Short, Integer, Float, Long, Double, BigInteger, BigDecimal, File)""")
@@ -135,7 +91,7 @@ A valid scalar collection takes the form of List<T> or Set<T> where 'T' is one o
 
         then:
         def ex = thrown(ModelRuleExecutionException)
-        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '$ManagedReadOnlyWithInvalidProperty.name' can not be constructed.
+        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '${fullyQualifiedNameOf(ManagedReadOnlyWithInvalidProperty)}' can not be constructed.
 Its property 'java.io.FileInputStream stream' can not be constructed
 It must be one of:
     - A managed type (annotated with @Managed)
@@ -156,7 +112,7 @@ It must be one of:
 
         then:
         def ex = thrown(ModelRuleExecutionException)
-        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '$ManagedReadWriteWithInvalidProperty.name' can not be constructed.
+        ex.cause.message == TextUtil.toPlatformLineSeparators("""A model element of type: '${fullyQualifiedNameOf(ManagedReadWriteWithInvalidProperty)}' can not be constructed.
 Its property 'java.io.FileInputStream stream' can not be constructed
 It must be one of:
     - A managed type (annotated with @Managed)
@@ -173,7 +129,7 @@ It must be one of:
         void setStream(FileInputStream stream)
     }
 
-    def "should fail with a reasonable exception when a type is not managed and not constructable"() {
+    def "should fail with a reasonable exception when a type is not managed and not constructible"() {
         when:
         realizeNodeOfType(NonManaged)
 
@@ -206,8 +162,8 @@ It must be one of:
     def "only selected unmanaged property types are allowed #type"() {
         expect:
         failWhenRealized(type,
-            canNotBeConstructed("${type.name}"),
-            "Its property '$failingProperty.name $propertyName' can not be constructed",
+            canNotBeConstructed(fullyQualifiedNameOf(type)),
+            "Its property '${fullyQualifiedNameOf(failingProperty)} $propertyName' can not be constructed",
             "It must be one of:",
             "    - A managed collection.",
             "    - A scalar collection.",
@@ -223,7 +179,7 @@ It must be one of:
     def "unmanaged types must be annotated with unmanaged"() {
         expect:
         failWhenRealized(MissingUnmanaged,
-            canNotBeConstructed(MissingUnmanaged.name),
+            canNotBeConstructed(fullyQualifiedNameOf(MissingUnmanaged)),
             "Its property 'java.io.InputStream thing' can not be constructed",
             "It must be one of:",
             "- An unmanaged property (i.e. annotated with @Unmanaged)"
@@ -270,7 +226,7 @@ interface Managed${typeName} {
     @Unroll
     def "must have a setter - #managedType.simpleName"() {
         expect:
-        failWhenRealized(managedType, "Invalid managed model type '$managedType.name': read only property 'thing' has non managed type boolean, only managed types can be used")
+        failWhenRealized(managedType, "Invalid managed model type '${fullyQualifiedNameOf(managedType)}': read only property 'thing' has non managed type boolean, only managed types can be used")
 
         where:
         managedType << [OnlyIsGetter, OnlyGetGetter]
@@ -349,8 +305,8 @@ interface Managed${typeName} {
     }
 
     void realizeNodeOfType(Class type) {
-        r.register(ModelRegistrations.of(r.path("bar"), nodeInitializerRegistry.getNodeInitializer(NodeInitializerContext.forType(ModelType.of(type)))).descriptor(r.desc("bar")).build())
-        r.realize("bar", type)
+        registry.registerWithInitializer("bar", type, nodeInitializerRegistry)
+        registry.realize("bar", type)
     }
 
     void assertExpected(Exception e, String... expectedMessages) {

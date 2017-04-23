@@ -17,9 +17,15 @@
 package org.gradle.integtests.fixtures.executer
 
 import org.gradle.api.Action
+import org.gradle.cache.CacheBuilder
 import org.gradle.cache.PersistentCache
-import org.gradle.cache.internal.*
+import org.gradle.cache.internal.CacheFactory
+import org.gradle.cache.internal.DefaultCacheFactory
+import org.gradle.cache.internal.DefaultFileLockManager
+import org.gradle.cache.internal.DefaultProcessMetaDataProvider
+import org.gradle.cache.internal.FileLockManager
 import org.gradle.cache.internal.locklistener.NoOpFileLockContentionHandler
+import org.gradle.internal.concurrent.DefaultExecutorFactory
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.testfixtures.internal.NativeServicesTestFixture
 import org.gradle.util.GradleVersion
@@ -36,7 +42,7 @@ abstract class DownloadableGradleDistribution extends DefaultGradleDistribution 
                         new DefaultProcessMetaDataProvider(
                                 NativeServicesTestFixture.getInstance().get(org.gradle.internal.nativeintegration.ProcessEnvironment)),
                         20 * 60 * 1000 // allow up to 20 minutes to download a distribution
-                , new NoOpFileLockContentionHandler()))
+                        , new NoOpFileLockContentionHandler()), new DefaultExecutorFactory())
     }
 
     protected TestFile versionDir
@@ -66,7 +72,7 @@ abstract class DownloadableGradleDistribution extends DefaultGradleDistribution 
                 super.binDistribution.usingNativeTools().unzipTo(versionDir)
             }
             //noinspection GrDeprecatedAPIUsage
-            cache = CACHE_FACTORY.open(versionDir, version.version, null, [:], mode(FileLockManager.LockMode.Shared).useCrossVersionImplementation(), downloadAction as Action)
+            cache = CACHE_FACTORY.open(versionDir, version.version, null, [:], CacheBuilder.LockTarget.DefaultTarget, mode(FileLockManager.LockMode.Shared).useCrossVersionImplementation(), downloadAction as Action)
         }
 
         super.binDistribution.assertIsFile()

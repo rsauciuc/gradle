@@ -16,49 +16,42 @@
 
 package org.gradle.api.internal.tasks.compile.incremental.jar;
 
+import com.google.common.hash.HashCode;
 import org.gradle.api.internal.cache.MinimalPersistentCache;
-import org.gradle.cache.CacheRepository;
+import org.gradle.cache.PersistentIndexedCache;
 import org.gradle.internal.Factory;
-import org.gradle.internal.serialize.BaseSerializerFactory;
 
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Cross-process, global cache of jar snapshots. Required to make incremental java compilation fast.
- * Jar snapshots are cached globally, so if one project caches the groovy jar, it can be used by some other project.
- */
 public class DefaultJarSnapshotCache implements JarSnapshotCache {
+    private final MinimalPersistentCache<HashCode, JarSnapshotData> cache;
 
-    private final MinimalPersistentCache<byte[], JarSnapshotData> cache;
-
-    public DefaultJarSnapshotCache(CacheRepository cacheRepository) {
-        cache = new MinimalPersistentCache<byte[], JarSnapshotData>(cacheRepository, "jar snapshots", BaseSerializerFactory.BYTE_ARRAY_SERIALIZER, new JarSnapshotDataSerializer());
+    public DefaultJarSnapshotCache(PersistentIndexedCache<HashCode, JarSnapshotData> persistentCache) {
+        cache = new MinimalPersistentCache<HashCode, JarSnapshotData>(persistentCache);
     }
 
-    public Map<File, JarSnapshot> getJarSnapshots(final Map<File, byte[]> jarHashes) {
-        return cache.getCacheAccess().useCache("loading jar snapshots", new Factory<Map<File, JarSnapshot>>() {
-            public Map<File, JarSnapshot> create() {
-                final Map<File, JarSnapshot> out = new HashMap<File, JarSnapshot>();
-                for (Map.Entry<File, byte[]> entry : jarHashes.entrySet()) {
-                    JarSnapshot snapshot = new JarSnapshot(cache.getCache().get(entry.getValue()));
-                    out.put(entry.getKey(), snapshot);
-                }
-                return out;
+    @Override
+    public Map<File, JarSnapshot> getJarSnapshots(final Map<File, HashCode> jarHashes) {
+        Map<File, JarSnapshot> out = new HashMap<File, JarSnapshot>();
+        for (Map.Entry<File, HashCode> entry : jarHashes.entrySet()) {
+            JarSnapshotData snapshotData = cache.get(entry.getValue());
+            if (snapshotData == null) {
+                throw new IllegalStateException("No Jar snapshot data available for " + entry.getKey() + " with hash " + entry.getValue() + ".");
             }
-        });
+            JarSnapshot snapshot = new JarSnapshot(snapshotData);
+            out.put(entry.getKey(), snapshot);
+        }
+        return out;
     }
 
-    public JarSnapshot get(byte[] key, final Factory<JarSnapshot> factory) {
+    @Override
+    public JarSnapshot get(HashCode key, final Factory<JarSnapshot> factory) {
         return new JarSnapshot(cache.get(key, new Factory<JarSnapshotData>() {
             public JarSnapshotData create() {
                 return factory.create().getData();
             }
         }));
-    }
-
-    public void stop() {
-        cache.stop();
     }
 }

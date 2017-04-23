@@ -38,8 +38,10 @@ project.logger.quiet("quiet log message");
 project.logger.info ("info log message");
 project.logger.debug("debug log message");
 
-task log << {
-    println "task log message"
+task log {
+    doLast {
+        println "task log message"
+    }
 }
 """
 
@@ -65,8 +67,10 @@ project.logger.quiet("quiet logging");
 project.logger.info ("info logging");
 project.logger.debug("debug logging");
 
-task log << {
-    println "task logging"
+task log {
+    doLast {
+        println "task logging"
+    }
 }
 """
 
@@ -121,7 +125,7 @@ task log {
     }
 
     @ToolingApiVersion(">=2.3")
-    @TargetGradleVersion(">=1.0-milestone-8 <2.3")
+    @TargetGradleVersion(">=1.2 <2.3")
     def "can specify color output when target version does not support colored output"() {
         file("build.gradle") << """
 task log {

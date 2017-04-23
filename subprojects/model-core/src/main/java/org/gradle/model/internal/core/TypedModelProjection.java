@@ -25,11 +25,11 @@ public class TypedModelProjection<M> extends TypeCompatibilityModelProjectionSup
     private final ModelViewFactory<M> viewFactory;
 
     public static <M> ModelProjection of(ModelType<M> type, ModelViewFactory<M> viewFactory) {
-        return new TypedModelProjection<M>(type, viewFactory, true, true);
+        return new TypedModelProjection<M>(type, viewFactory);
     }
 
-    public TypedModelProjection(ModelType<M> type, ModelViewFactory<M> viewFactory, boolean canBeViewedAsReadOnly, boolean canBeViewedAsWritable) {
-        super(type, canBeViewedAsReadOnly, canBeViewedAsWritable);
+    public TypedModelProjection(ModelType<M> type, ModelViewFactory<M> viewFactory) {
+        super(type);
         this.viewFactory = viewFactory;
     }
 
@@ -41,30 +41,5 @@ public class TypedModelProjection<M> extends TypeCompatibilityModelProjectionSup
     @Override
     protected ModelView<M> toView(MutableModelNode modelNode, ModelRuleDescriptor ruleDescriptor, boolean writable) {
         return viewFactory.toView(modelNode, ruleDescriptor, writable);
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        //noinspection EqualsBetweenInconvertibleTypes
-        if (!super.equals(o)) {
-            return false;
-        }
-
-        TypedModelProjection<?> that = (TypedModelProjection<?>) o;
-        return viewFactory.equals(that.viewFactory);
-
-    }
-
-    @Override
-    public int hashCode() {
-        int result = super.hashCode();
-        result = 31 * result + viewFactory.hashCode();
-        return result;
     }
 }

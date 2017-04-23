@@ -37,15 +37,19 @@ public class ExclusiveFileAccessManager {
 
     public <T> T access(File exclusiveFile, Callable<T> task) throws Exception {
         final File lockFile = new File(exclusiveFile.getParentFile(), exclusiveFile.getName() + LOCK_FILE_SUFFIX);
-        lockFile.getParentFile().mkdirs();
+        File lockFileDirectory = lockFile.getParentFile();
+        if (!lockFileDirectory.mkdirs()
+            && (!lockFileDirectory.exists() || !lockFileDirectory.isDirectory())) {
+            throw new RuntimeException("Could not create parent directory for lock file " + lockFile.getAbsolutePath());
+        }
         RandomAccessFile randomAccessFile = null;
         FileChannel channel = null;
         try {
 
-            long startAt = System.currentTimeMillis();
+            long expiry = getTimeMillis() + timeoutMs;
             FileLock lock = null;
 
-            while (lock == null && System.currentTimeMillis() < startAt + timeoutMs) {
+            while (lock == null && getTimeMillis() < expiry) {
                 randomAccessFile = new RandomAccessFile(lockFile, "rw");
                 channel = randomAccessFile.getChannel();
                 lock = channel.tryLock();
@@ -75,6 +79,10 @@ public class ExclusiveFileAccessManager {
             maybeCloseQuietly(channel);
             maybeCloseQuietly(randomAccessFile);
         }
+    }
+
+    private long getTimeMillis() {
+        return System.nanoTime() / (1000L * 1000L);
     }
 
     private static void maybeCloseQuietly(Closeable closeable) {

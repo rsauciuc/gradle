@@ -17,18 +17,61 @@
 package org.gradle
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.internal.nativeintegration.jansi.JansiStorageLocator
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.junit.Rule
+import spock.lang.Issue
 
 class NativeServicesIntegrationTest extends AbstractIntegrationSpec {
 
+    @Rule
+    final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+
+    def nativeDir = new File(executer.gradleUserHomeDir, 'native')
+    def library
+
+    def setup() {
+        def jansiLibraryLocator = new JansiStorageLocator()
+        def jansiStorage = jansiLibraryLocator.locate(nativeDir)
+        library = jansiStorage.targetLibFile
+
+        executer.requireGradleDistribution().withNoExplicitTmpDir()
+    }
+
     def "native services libs are unpacked to gradle user home dir"() {
         given:
-        def nativeDir = new File(executer.gradleUserHomeDir, "native")
+        executer.withArguments('-q')
 
         when:
-        executer.withArguments("-q").run()
+        succeeds("help")
 
         then:
         nativeDir.directory
     }
 
+    @Issue("GRADLE-3573")
+    def "jansi library is unpacked to gradle user home dir and isn't overwritten if existing"() {
+        String tmpDirJvmOpt = "-Djava.io.tmpdir=$tmpDir.testDirectory.absolutePath"
+        executer.withBuildJvmOpts(tmpDirJvmOpt)
+
+        when:
+        succeeds("help")
+
+        then:
+        library.exists()
+        assertNoFilesInTmp()
+        long lastModified = library.lastModified()
+
+        when:
+        succeeds("help")
+
+        then:
+        library.exists()
+        assertNoFilesInTmp()
+        lastModified == library.lastModified()
+    }
+
+    private void assertNoFilesInTmp() {
+        assert tmpDir.testDirectory.listFiles().length == 0
+    }
 }

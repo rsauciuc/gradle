@@ -21,35 +21,43 @@ import org.gradle.api.InvalidUserCodeException
 import org.gradle.api.artifacts.ComponentMetadataDetails
 import org.gradle.api.artifacts.ModuleVersionIdentifier
 import org.gradle.api.artifacts.ivy.IvyModuleDescriptor
+import org.gradle.api.internal.artifacts.DefaultImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
+import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.ivyservice.NamespaceId
 import org.gradle.api.specs.Specs
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier
-import org.gradle.internal.component.external.model.IvyModuleResolveMetaData
-import org.gradle.internal.component.external.model.MutableModuleComponentResolveMetaData
+import org.gradle.internal.component.external.model.DefaultMutableIvyModuleResolveMetadata
+import org.gradle.internal.component.external.model.DefaultMutableMavenModuleResolveMetadata
 import org.gradle.internal.reflect.DirectInstantiator
 import org.gradle.internal.resolve.ModuleVersionResolveException
 import org.gradle.internal.rules.RuleAction
 import org.gradle.internal.rules.RuleActionAdapter
 import org.gradle.internal.rules.RuleActionValidationException
-import org.gradle.internal.typeconversion.NotationParser
 import spock.lang.Specification
 
 import javax.xml.namespace.QName
 
 class DefaultComponentMetadataHandlerTest extends Specification {
     private static final String GROUP = "group"
-    private static final String MODULE = "module"
+    final ImmutableModuleIdentifierFactory moduleIdentifierFactory = new DefaultImmutableModuleIdentifierFactory()
 
     // For testing ModuleMetadataProcessor capabilities
-    def handler = new DefaultComponentMetadataHandler(DirectInstantiator.INSTANCE)
+    private static final String MODULE = "module"
 
     // For testing ComponentMetadataHandler capabilities
+    def handler = new DefaultComponentMetadataHandler(DirectInstantiator.INSTANCE, moduleIdentifierFactory)
     RuleActionAdapter<ComponentMetadataDetails> adapter = Mock(RuleActionAdapter)
-    NotationParser<Object, String> notationParser = Mock(NotationParser)
-    def mockedHandler = new DefaultComponentMetadataHandler(DirectInstantiator.INSTANCE, adapter, notationParser)
+    def mockedHandler = new DefaultComponentMetadataHandler(DirectInstantiator.INSTANCE, adapter, moduleIdentifierFactory)
     def ruleAction = Stub(RuleAction)
+
+    def "does nothing when no rules registered"() {
+        def metadata = ivyMetadata().asImmutable()
+
+        expect:
+        mockedHandler.processMetadata(metadata).is(metadata)
+    }
 
     def "add action rule that applies to all components" () {
         def action = new Action<ComponentMetadataDetails>() {
@@ -104,14 +112,13 @@ class DefaultComponentMetadataHandlerTest extends Specification {
             @Override
             void execute(ComponentMetadataDetails componentMetadataDetails) { }
         }
-        def notation = "${GROUP}:${MODULE}"
+        String notation = "${GROUP}:${MODULE}"
 
         when:
         mockedHandler.withModule(notation, action)
 
         then:
         1 * adapter.createFromAction(action) >> ruleAction
-        1 * notationParser.parseNotation(notation) >> DefaultModuleIdentifier.newId(GROUP, MODULE)
 
         and:
         mockedHandler.rules.size() == 1
@@ -121,14 +128,13 @@ class DefaultComponentMetadataHandlerTest extends Specification {
 
     def "add closure rule that applies to module" () {
         def closure = { ComponentMetadataDetails cmd -> }
-        def notation = "${GROUP}:${MODULE}"
+        String notation = "${GROUP}:${MODULE}"
 
         when:
         mockedHandler.withModule(notation, closure)
 
         then:
         1 * adapter.createFromClosure(ComponentMetadataDetails, closure) >> ruleAction
-        1 * notationParser.parseNotation(notation) >> DefaultModuleIdentifier.newId(GROUP, MODULE)
 
         and:
         mockedHandler.rules.size() == 1
@@ -138,14 +144,13 @@ class DefaultComponentMetadataHandlerTest extends Specification {
 
     def "add rule source rule that applies to module" () {
         def ruleSource = new Object()
-        def notation = "${GROUP}:${MODULE}"
+        String notation = "${GROUP}:${MODULE}"
 
         when:
         mockedHandler.withModule(notation, ruleSource)
 
         then:
         1 * adapter.createFromRuleSource(ComponentMetadataDetails, ruleSource) >> ruleAction
-        1 * notationParser.parseNotation(notation) >> DefaultModuleIdentifier.newId(GROUP, MODULE)
 
         and:
         mockedHandler.rules.size() == 1
@@ -192,14 +197,12 @@ class DefaultComponentMetadataHandlerTest extends Specification {
     }
 
     def "processing fails when status is not present in status scheme"() {
-        def metadata = Stub(MutableModuleComponentResolveMetaData) {
-            getComponentId() >> DefaultModuleComponentIdentifier.newId("group", "module", "version")
-            getStatus() >> "green"
-            getStatusScheme() >> ["alpha", "beta"]
-        }
+        def metadata = ivyMetadata()
+        metadata.status = "green"
+        metadata.statusScheme = ["alpha", "beta"]
 
         when:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         ModuleVersionResolveException e = thrown()
@@ -208,15 +211,13 @@ class DefaultComponentMetadataHandlerTest extends Specification {
 
     def "produces sensible error when rule action throws an exception" () {
         def failure = new Exception("from test")
-        def metadata = Stub(TestIvyMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-        }
+        def metadata = ivyMetadata()
 
         when:
         handler.all { throw failure }
 
         and:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         InvalidUserCodeException e = thrown()
@@ -225,11 +226,7 @@ class DefaultComponentMetadataHandlerTest extends Specification {
     }
 
     def "all rules get evaluated" () {
-        def metadata = Stub(TestIvyMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-            getStatus() >> "integration"
-            getStatusScheme() >> ["integration", "release"]
-        }
+        def metadata = ivyMetadata()
         def closuresCalled = []
 
         when:
@@ -238,25 +235,21 @@ class DefaultComponentMetadataHandlerTest extends Specification {
         handler.all { ComponentMetadataDetails cmd, IvyModuleDescriptor imd -> closuresCalled << 3 }
 
         and:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         closuresCalled.sort() == [ 1, 2, 3 ]
     }
 
     def "supports rule with typed ComponentMetaDataDetails parameter"() {
-        def metadata = Stub(MutableModuleComponentResolveMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-            getStatus() >> "integration"
-            getStatusScheme() >> ["integration", "release"]
-        }
+        def metadata = ivyMetadata()
         def capturedDetails = null
         handler.all { ComponentMetadataDetails details ->
             capturedDetails = details
         }
 
         when:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         noExceptionThrown()
@@ -271,22 +264,20 @@ class DefaultComponentMetadataHandlerTest extends Specification {
     }
 
     def "supports rule with typed IvyModuleDescriptor parameter"() {
+        def metadata = ivyMetadata()
         def id1 = new NamespaceId('namespace', 'info1')
         def id2 = new NamespaceId('namespace', 'info2')
-        def metadata = Stub(TestIvyMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-            getStatus() >> "integration"
-            getStatusScheme() >> ["integration", "release"]
-            getExtraInfo() >> [(id1): "info1 value", (id2): "info2 value"]
-            getBranch() >> "someBranch"
-        }
+        metadata.descriptor.extraInfo[id1] = "info1 value"
+        metadata.descriptor.extraInfo[id2] = "info2 value"
+        metadata.descriptor.branch = "someBranch"
+
         def capturedDescriptor = null
         handler.all { ComponentMetadataDetails details, IvyModuleDescriptor descriptor ->
             capturedDescriptor = descriptor
         }
 
         when:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         noExceptionThrown()
@@ -298,12 +289,32 @@ class DefaultComponentMetadataHandlerTest extends Specification {
         }
     }
 
-    def "rule with IvyModuleDescriptor parameter does not get invoked for non-Ivy components"() {
-        def metadata = Stub(MutableModuleComponentResolveMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-            getStatus() >> "integration"
-            getStatusScheme() >> ["integration", "release"]
+    def "rule with IvyModuleDescriptor parameter sees original status"() {
+        def metadata = ivyMetadata()
+        def id1 = new NamespaceId('namespace', 'info1')
+        def id2 = new NamespaceId('namespace', 'info2')
+        metadata.descriptor.extraInfo[id1] = "info1 value"
+        metadata.descriptor.extraInfo[id2] = "info2 value"
+        metadata.descriptor.branch = "someBranch"
+
+        def capturedDescriptor = null
+        handler.all { ComponentMetadataDetails details, IvyModuleDescriptor descriptor ->
+            capturedDescriptor = descriptor
+            assert descriptor.ivyStatus == "integration"
+            details.status = "release"
+            assert descriptor.ivyStatus == "integration"
         }
+
+        when:
+        handler.processMetadata(metadata.asImmutable())
+
+        then:
+        noExceptionThrown()
+        capturedDescriptor instanceof IvyModuleDescriptor
+    }
+
+    def "rule with IvyModuleDescriptor parameter does not get invoked for non-Ivy components"() {
+        def metadata = mavenMetadata()
 
         def invoked = false
         handler.all { ComponentMetadataDetails details, IvyModuleDescriptor descriptor ->
@@ -311,7 +322,7 @@ class DefaultComponentMetadataHandlerTest extends Specification {
         }
 
         when:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         !invoked
@@ -329,12 +340,6 @@ class DefaultComponentMetadataHandlerTest extends Specification {
     }
 
     def "complains if rule has unsupported parameter type"() {
-        def metadata = Stub(MutableModuleComponentResolveMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-            getStatus() >> "integration"
-            getStatusScheme() >> ["integration", "release"]
-        }
-
         when:
         handler.all { ComponentMetadataDetails details, String str -> }
 
@@ -346,14 +351,12 @@ class DefaultComponentMetadataHandlerTest extends Specification {
     }
 
     def "supports rule with multiple inputs in arbitrary order"() {
+        def metadata = ivyMetadata()
         def id1 = new NamespaceId('namespace', 'info1')
         def id2 = new NamespaceId('namespace', 'info2')
-        def metadata = Stub(TestIvyMetaData) {
-            getId() >> new DefaultModuleVersionIdentifier("group", "module", "version")
-            getStatus() >> "integration"
-            getStatusScheme() >> ["integration", "release"]
-            getExtraInfo() >> [(id1): "info1 value", (id2): "info2 value"]
-        }
+        metadata.descriptor.extraInfo[id1] = "info1 value"
+        metadata.descriptor.extraInfo[id2] = "info2 value"
+        metadata.descriptor.branch = "someBranch"
 
         def capturedDetails1 = null
         def capturedDescriptor1 = null
@@ -366,7 +369,7 @@ class DefaultComponentMetadataHandlerTest extends Specification {
         }
 
         when:
-        handler.processMetadata(metadata)
+        handler.processMetadata(metadata.asImmutable())
 
         then:
         noExceptionThrown()
@@ -408,5 +411,17 @@ class DefaultComponentMetadataHandlerTest extends Specification {
         "org.gradle" | "lib" | false
     }
 
-    interface TestIvyMetaData extends IvyModuleResolveMetaData, MutableModuleComponentResolveMetaData {}
+    private DefaultMutableIvyModuleResolveMetadata ivyMetadata() {
+        def metadata = new DefaultMutableIvyModuleResolveMetadata(DefaultModuleVersionIdentifier.newId("group", "module", "version"), DefaultModuleComponentIdentifier.newId("group", "module", "version"), [] as Set)
+        metadata.status = "integration"
+        metadata.statusScheme = ["integration", "release"]
+        return metadata
+    }
+
+    private DefaultMutableMavenModuleResolveMetadata mavenMetadata() {
+        def metadata = new DefaultMutableMavenModuleResolveMetadata(DefaultModuleVersionIdentifier.newId("group", "module", "version"), DefaultModuleComponentIdentifier.newId("group", "module", "version"), [] as Set)
+        metadata.status = "integration"
+        metadata.statusScheme = ["integration", "release"]
+        return metadata
+    }
 }

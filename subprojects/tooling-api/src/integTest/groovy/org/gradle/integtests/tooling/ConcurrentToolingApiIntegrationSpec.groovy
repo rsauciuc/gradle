@@ -17,19 +17,23 @@
 package org.gradle.integtests.tooling
 
 import org.gradle.initialization.BuildCancellationToken
+import org.gradle.integtests.fixtures.RetryRuleUtil
+import org.gradle.integtests.fixtures.daemon.DaemonsFixture
 import org.gradle.integtests.fixtures.executer.GradleDistribution
 import org.gradle.integtests.fixtures.executer.UnderDevelopmentGradleDistribution
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
 import org.gradle.integtests.tooling.fixture.ConfigurableOperation
 import org.gradle.integtests.tooling.fixture.ToolingApi
 import org.gradle.internal.classpath.ClassPath
-import org.gradle.logging.ProgressLoggerFactory
+import org.gradle.internal.logging.progress.ProgressLoggerFactory
 import org.gradle.test.fixtures.ConcurrentTestUtil
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.testing.internal.util.RetryRule
 import org.gradle.tooling.GradleConnector
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.internal.consumer.Distribution
+import org.gradle.tooling.internal.protocol.InternalBuildProgressListener
 import org.gradle.tooling.model.GradleProject
 import org.gradle.tooling.model.idea.IdeaProject
 import org.junit.Rule
@@ -47,6 +51,13 @@ class ConcurrentToolingApiIntegrationSpec extends Specification {
     final ToolingApi toolingApi = new ToolingApi(dist, temporaryFolder)
 
     int threads = 3
+
+    @Rule
+    RetryRule retryRule = RetryRuleUtil.retryToolingAPIOnWindowsSocketDisappearance(this)
+
+    DaemonsFixture getDaemonsFixture() {
+        toolingApi.daemons
+    }
 
     def setup() {
         //concurrent tooling api at the moment is only supported for forked mode
@@ -157,7 +168,7 @@ project.description = text
     def "handles standard input concurrently when running build"() {
         when:
         threads.times { idx ->
-            file("build$idx/build.gradle") << "task show << { println System.in.text}"
+            file("build$idx/build.gradle") << "task show { doLast { println System.in.text} }"
         }
 
         then:
@@ -273,12 +284,12 @@ project.description = text
             return 'mock'
         }
 
-        ClassPath getToolingImplementationClasspath(ProgressLoggerFactory progressLoggerFactory, File userHomeDir, BuildCancellationToken cancellationToken) {
+        ClassPath getToolingImplementationClasspath(ProgressLoggerFactory progressLoggerFactory, InternalBuildProgressListener progressListener, File userHomeDir, BuildCancellationToken cancellationToken) {
             def o = progressLoggerFactory.newOperation("mock")
             operation(o)
             o.started()
             o.completed()
-            return delegate.getToolingImplementationClasspath(progressLoggerFactory, userHomeDir, cancellationToken)
+            return delegate.getToolingImplementationClasspath(progressLoggerFactory, progressListener, userHomeDir, cancellationToken)
         }
     }
 

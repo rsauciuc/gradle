@@ -15,6 +15,7 @@
  */
 package org.gradle.integtests.resolve.maven
 
+import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
 import org.gradle.test.fixtures.server.http.MavenHttpModule
 import spock.lang.Ignore
@@ -199,7 +200,7 @@ repositories {
 configurations { compile }
 configurations.compile.resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
 
-dependencies { 
+dependencies {
     compile "org.gradle.integtests.resolve:unique:1.0-SNAPSHOT"
     compile "org.gradle.integtests.resolve:nonunique:1.0-SNAPSHOT"
 }
@@ -241,6 +242,70 @@ task retrieve(type: Sync) {
         run 'retrieve'
 
         then:
+        file('libs/unique-1.0-SNAPSHOT.jar').assertIsCopyOf(uniqueVersionModule.artifactFile).assertHasChangedSince(uniqueJarSnapshot)
+        file('libs/nonunique-1.0-SNAPSHOT.jar').assertIsCopyOf(nonUniqueVersionModule.artifactFile).assertHasChangedSince(nonUniqueJarSnapshot)
+    }
+
+    @Issue("GRADLE-3524")
+    @NotYetImplemented
+    def "cacheChangingModulesFor inherits to an extension of the configuration"() {
+        given:
+        buildFile << """
+repositories {
+    maven { url "${mavenHttpRepo.uri}" }
+}
+
+configurations {
+    compile
+    testCompile.extendsFrom(compile)
+}
+configurations.compile {
+    resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+}
+
+dependencies {
+    compile "org.gradle.integtests.resolve:unique:1.0-SNAPSHOT"
+    compile "org.gradle.integtests.resolve:nonunique:1.0-SNAPSHOT"
+}
+
+task retrieve(type: Sync) {
+    into 'libs'
+    from configurations.testCompile
+}
+"""
+
+        when: "snapshot modules are published"
+        def uniqueVersionModule = mavenHttpRepo.module("org.gradle.integtests.resolve", "unique", "1.0-SNAPSHOT").publish()
+        def nonUniqueVersionModule = mavenHttpRepo.module("org.gradle.integtests.resolve", "nonunique", "1.0-SNAPSHOT").withNonUniqueSnapshots().publish()
+
+        and: "Server handles requests"
+        expectModuleServed(uniqueVersionModule)
+        expectModuleServed(nonUniqueVersionModule)
+
+        and: "We resolve dependencies"
+        run 'retrieve'
+
+        then: "Snapshots are downloaded"
+        file('libs').assertHasDescendants('unique-1.0-SNAPSHOT.jar', 'nonunique-1.0-SNAPSHOT.jar')
+        def uniqueJarSnapshot = file('libs/unique-1.0-SNAPSHOT.jar').assertIsCopyOf(uniqueVersionModule.artifactFile).snapshot()
+        def nonUniqueJarSnapshot = file('libs/nonunique-1.0-SNAPSHOT.jar').assertIsCopyOf(nonUniqueVersionModule.artifactFile).snapshot()
+        server.resetExpectations()
+
+        when: "Change the snapshot artifacts directly: do not change the pom"
+        uniqueVersionModule.artifactFile << 'more content'
+        uniqueVersionModule.backingModule.sha1File(uniqueVersionModule.artifactFile)
+        nonUniqueVersionModule.artifactFile << 'more content'
+        nonUniqueVersionModule.backingModule.sha1File(nonUniqueVersionModule.artifactFile)
+
+        and: "No server requests"
+        expectChangedArtifactServed(uniqueVersionModule)
+        expectChangedArtifactServed(nonUniqueVersionModule)
+
+        and: "Resolve dependencies again"
+        run 'retrieve'
+
+        then:
+        server.resetExpectations()
         file('libs/unique-1.0-SNAPSHOT.jar').assertIsCopyOf(uniqueVersionModule.artifactFile).assertHasChangedSince(uniqueJarSnapshot)
         file('libs/nonunique-1.0-SNAPSHOT.jar').assertIsCopyOf(nonUniqueVersionModule.artifactFile).assertHasChangedSince(nonUniqueJarSnapshot)
     }
@@ -407,7 +472,8 @@ tasks.getByPath(":a:retrieve").dependsOn ":b:retrieve"
         file('b/build').assertHasDescendants('testproject-1.0-SNAPSHOT.jar')
     }
 
-    @Ignore //TODO SF need to rework this test. First step might be turning off in-memory metadata caching for this test.
+    @Ignore
+    //TODO SF need to rework this test. First step might be turning off in-memory metadata caching for this test.
     def "can update snapshot artifact during build even if it is locked earlier in build"() {
         given:
         def module = mavenHttpRepo("/repo", maven("repo1")).module("org.gradle.integtests.resolve", "testproject", "1.0-SNAPSHOT").withNonUniqueSnapshots().publish()
@@ -437,11 +503,13 @@ subprojects {
         compile "org.gradle.integtests.resolve:testproject:1.0-SNAPSHOT"
     }
 
-    task lock << {
-        configurations.compile.each { file ->
-            println "locking " + file
-            def lockFile = new RandomAccessFile(file.canonicalPath, 'r')
-            fileLocks[file] = lockFile
+    task lock {
+        doLast {
+            configurations.compile.each { file ->
+                println "locking " + file
+                def lockFile = new RandomAccessFile(file.canonicalPath, 'r')
+                fileLocks[file] = lockFile
+            }
         }
     }
 
@@ -455,10 +523,12 @@ project('second') {
     lock.dependsOn ':first:lock'
     retrieve.dependsOn ':first:retrieve'
 
-    task cleanup << {
-        fileLocks.each { key, value ->
-            println "unlocking " + key
-            value.close()
+    task cleanup {
+        doLast {
+            fileLocks.each { key, value ->
+                println "unlocking " + key
+                value.close()
+            }
         }
     }
     cleanup.dependsOn 'retrieve'
@@ -602,7 +672,7 @@ task retrieve(type: Sync) {
         file('libs').assertHasDescendants('projectA-1.0-SNAPSHOT.jar', 'projectB-1.0.jar')
 
         when: "Resolve without cache"
-        projectA.metaData.expectGet()
+        projectA.metaData.expectHead()
         projectA.pom.expectHead()
         projectA.pom.sha1.expectGet()
         projectA.pom.expectGet()
@@ -965,6 +1035,9 @@ Required by:
     }
 
     private expectChangedModuleServed(MavenHttpModule module) {
+        if (module.uniqueSnapshots) {
+            module.metaData.expectHead()
+        }
         module.metaData.expectGet()
         module.pom.expectHead()
         module.pom.sha1.expectGet()
@@ -975,7 +1048,11 @@ Required by:
     }
 
     private expectChangedArtifactServed(MavenHttpModule module) {
-        module.metaData.expectGet()
+        if (module.uniqueSnapshots) {
+            module.metaData.expectHead()
+        } else {
+            module.metaData.expectGet()
+        }
         module.pom.expectHead()
         def artifact = module.artifact
         artifact.expectHead()
@@ -984,7 +1061,11 @@ Required by:
     }
 
     private expectChangedProbe(MavenHttpModule module) {
-        module.metaData.expectGet()
+        if (module.uniqueSnapshots) {
+            module.metaData.expectHead()
+        } else {
+            module.metaData.expectGet()
+        }
         module.pom.expectHead()
         module.artifact.expectHead()
     }

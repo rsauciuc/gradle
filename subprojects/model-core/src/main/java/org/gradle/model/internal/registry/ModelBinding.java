@@ -20,7 +20,6 @@ import org.gradle.model.InvalidModelRuleException;
 import org.gradle.model.ModelRuleBindingException;
 import org.gradle.model.internal.core.ModelNode;
 import org.gradle.model.internal.core.ModelPath;
-import org.gradle.model.internal.core.ModelPromise;
 import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
 import org.gradle.model.internal.report.AmbiguousBindingReporter;
 
@@ -42,6 +41,10 @@ abstract class ModelBinding {
         this.writable = writable;
     }
 
+    /**
+     * Returns the reference to the <em>output</em> of the rule. The state returned from {@link BindingPredicate#getState()} should reflect
+     * the target state, not the input state. Implicitly, a rule accepts as input the subject in the state that is the predecessor of the target state.
+     */
     public BindingPredicate getPredicate() {
         return predicate;
     }
@@ -55,10 +58,6 @@ abstract class ModelBinding {
             throw new IllegalStateException("Target node has not been bound.");
         }
         return boundTo;
-    }
-
-    boolean isTypeCompatible(ModelPromise promise) {
-        return predicate.isUntyped() || promise.canBeViewedAsMutable(predicate.getType()) || promise.canBeViewedAsImmutable(predicate.getType());
     }
 
     @Override

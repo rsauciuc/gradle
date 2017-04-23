@@ -25,6 +25,7 @@ public class VersionSelectionReasons {
     public static final ComponentSelectionReason CONFLICT_RESOLUTION = new DefaultComponentSelectionReason(false, true, false, false, "conflict resolution");
     public static final ComponentSelectionReason SELECTED_BY_RULE = new DefaultComponentSelectionReason(false, false, true, false, "selected by rule");
     public static final ComponentSelectionReason CONFLICT_RESOLUTION_BY_RULE = new DefaultComponentSelectionReason(false, true, true, false, "selected by rule and conflict resolution");
+    public static final ComponentSelectionReason COMPOSITE_BUILD = new DefaultComponentSelectionReason(false, false, false, false, "composite build substitution");
 
     public static ComponentSelectionReason withConflictResolution(ComponentSelectionReason reason) {
         if (reason.isConflictResolution()) {
@@ -35,6 +36,8 @@ public class VersionSelectionReasons {
             return CONFLICT_RESOLUTION;
         } else if (reason == FORCED) {
             return CONFLICT_RESOLUTION;
+        } else if (reason == ROOT) {
+            return reason;
         }
         throw new IllegalArgumentException("Cannot create conflict resolution selection reason for input: " + reason);
     }

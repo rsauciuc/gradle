@@ -1,53 +1,11 @@
 allprojects {
-    def antBuilder = it.services.get(org.gradle.api.internal.project.IsolatedAntBuilder)
     ext.useClassycle = { params = [:] ->
         def excludePatterns = params.exclude ?: []
 
-        configurations {
-            classycle
-        }
+        apply plugin: org.gradle.plugins.classycle.ClassyclePlugin
 
-        dependencies {
-            classycle 'classycle:classycle:1.4@jar'
-        }
-
-        task classycle
-
-        sourceSets.all { sourceSet ->
-            def taskName = sourceSet.getTaskName('classycle', null)
-            task(taskName) {
-                def reportFile = reporting.file("classcycle/${sourceSet.name}.txt")
-                inputs.files sourceSet.output
-                outputs.file reportFile
-                doLast {
-                    if (!sourceSet.output.classesDir.directory) {
-                        return;
-                    }
-                    antBuilder.withClasspath(configurations.classycle.files).execute {
-                        ant.taskdef(name: "classycleDependencyCheck", classname: "classycle.ant.DependencyCheckingTask")
-                        reportFile.parentFile.mkdirs()
-                        try {
-                            ant.classycleDependencyCheck(reportFile: reportFile, failOnUnwantedDependencies: true, mergeInnerClasses: true,
-                                """
-                        show allResults
-                        check absenceOfPackageCycles > 1 in org.gradle.*
-                    """
-                            ) {
-                                fileset(dir: sourceSet.output.classesDir) {
-                                    excludePatterns.each { excludePattern ->
-                                        exclude(name: excludePattern)
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                            throw new RuntimeException("Classycle check failed: $e.message. See report at ${new org.gradle.logging.ConsoleRenderer().asClickableFileUrl(reportFile)}", e)
-                        }
-                    }
-                }
-            }
-            classycle.dependsOn taskName
-            check.dependsOn taskName
-            codeQuality.dependsOn taskName
+        tasks.withType(org.gradle.plugins.classycle.Classycle).all() {
+            it.excludePatterns = excludePatterns
         }
     }
 }

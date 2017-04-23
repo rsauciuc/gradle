@@ -15,25 +15,27 @@
  */
 package org.gradle.language.rc
 
+import org.gradle.api.internal.file.BaseDirFileResolver
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
-import org.gradle.nativeplatform.internal.CompilerOutputFileNamingScheme
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.ExecutableFixture
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.app.HelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.WindowsResourceHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.nativeplatform.internal.CompilerOutputFileNamingSchemeFactory
 import spock.lang.IgnoreIf
 
-import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VisualCpp
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VISUALCPP
 
-@RequiresInstalledToolChain(VisualCpp)
+@RequiresInstalledToolChain(VISUALCPP)
 class WindowsResourcesIncrementalBuildIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
-
     HelloWorldApp helloWorldApp = new WindowsResourceHelloWorldApp()
     ExecutableFixture mainExe
-    def mainResourceFile
+    File mainResourceFile
     def unusedHeaderFile
+    def compilerOutputFileNamingScheme = new CompilerOutputFileNamingSchemeFactory(new BaseDirFileResolver(TestFiles.fileSystem(), temporaryFolder.testDirectory, TestFiles.getPatternSetFactory())).create()
+
 
     def "setup"() {
         buildFile << helloWorldApp.pluginScript
@@ -53,7 +55,7 @@ model {
 
         run "mainExecutable"
 
-        mainExe = executable("build/binaries/mainExecutable/main")
+        mainExe = executable("build/exe/main/main")
         mainResourceFile = file("src/main/rc/resources.rc")
     }
 
@@ -66,7 +68,6 @@ model {
         nonSkippedTasks.empty
     }
 
-    @LeaksFileHandles
     def "compiles and links when resource source changes"() {
         when:
         file("src/main/rc/resources.rc").text = """
@@ -125,8 +126,8 @@ model {
 
     def "stale .res files are removed when a resource source file is renamed"() {
         setup:
-        def outputFileNameScheme = new CompilerOutputFileNamingScheme()
-                .withOutputBaseFolder(file("build/objs/mainExecutable/mainRc"))
+        def outputFileNameScheme = compilerOutputFileNamingScheme
+                .withOutputBaseFolder(file("build/objs/main/mainRc"))
                 .withObjectFileNameSuffix(".res")
         def oldResFile = outputFileNameScheme.map(mainResourceFile)
         def newResFile = outputFileNameScheme.map(file('src/main/rc/changed_resources.rc'))
@@ -148,8 +149,8 @@ model {
     def "recompiles resource when included header is changed"() {
 
         given: "set the generated res file timestamp to zero"
-        def outputFileNameScheme = new CompilerOutputFileNamingScheme()
-                .withOutputBaseFolder(file("build/objs/mainExecutable/mainRc"))
+        def outputFileNameScheme = compilerOutputFileNamingScheme
+                .withOutputBaseFolder(file("build/objs/main/mainRc"))
                 .withObjectFileNameSuffix(".res")
         def resourceFile = outputFileNameScheme.map(mainResourceFile)
 

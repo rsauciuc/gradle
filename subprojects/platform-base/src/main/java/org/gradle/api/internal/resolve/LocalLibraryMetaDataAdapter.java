@@ -16,10 +16,9 @@
 
 package org.gradle.api.internal.resolve;
 
-import org.gradle.api.tasks.TaskDependency;
-import org.gradle.internal.component.local.model.LocalComponentMetaData;
-import org.gradle.platform.base.BinarySpec;
+import org.gradle.internal.component.local.model.LocalComponentMetadata;
+import org.gradle.platform.base.Binary;
 
 public interface LocalLibraryMetaDataAdapter {
-    LocalComponentMetaData createLocalComponentMetaData(BinarySpec selectedBinary, TaskDependency buildDependencies, String projectPath);
+    LocalComponentMetadata createLocalComponentMetaData(Binary selectedBinary, String projectPath, boolean toAssembly);
 }

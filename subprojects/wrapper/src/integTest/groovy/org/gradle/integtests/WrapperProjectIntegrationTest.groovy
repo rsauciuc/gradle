@@ -16,42 +16,27 @@
 
 package org.gradle.integtests
 
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.executer.GradleExecuter
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.hamcrest.Matchers
 import spock.lang.Issue
 
 import static org.hamcrest.Matchers.containsString
 import static org.junit.Assert.assertThat
 
-@LeaksFileHandles
-class WrapperProjectIntegrationTest extends AbstractIntegrationSpec {
-    void setup() {
-        assert distribution.binDistribution.exists(): "bin distribution must exist to run this test, you need to run the :distributions:binZip task"
-        executer.beforeExecute(new WrapperSetup())
-    }
-
-    GradleExecuter getWrapperExecuter() {
-        executer.usingExecutable('gradlew').inDirectory(testDirectory)
-    }
-
-    private prepareWrapper() {
+class WrapperProjectIntegrationTest extends AbstractWrapperIntegrationSpec {
+    def setup() {
         file("build.gradle") << """
-    wrapper {
-        distributionUrl = '${distribution.binDistribution.toURI()}'
+    task hello {
+        doLast {
+            println 'hello'
+        }
     }
 
-    task hello << {
-        println 'hello'
-    }
-
-    task echoProperty << {
-        println "fooD=" + project.properties["fooD"]
+    task echoProperty {
+        doLast {
+            println "fooD=" + project.properties["fooD"]
+        }
     }
 """
-
-        executer.withTasks('wrapper').run()
     }
 
     public void "has non-zero exit code on build failure"() {

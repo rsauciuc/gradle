@@ -25,22 +25,19 @@ import java.util.List;
  * @param <T> The type which this option represents.
  */
 public abstract class AbstractListJavadocOptionFileOption<T extends List<?>> extends AbstractJavadocOptionFileOption<T> {
-    protected String joinBy;
-
-    protected AbstractListJavadocOptionFileOption(String option, String joinBy) {
-        super(option);
-        this.joinBy = joinBy;
-    }
+    protected final String joinBy;
 
     protected AbstractListJavadocOptionFileOption(String option, T value, String joinBy) {
         super(option, value);
         this.joinBy = joinBy;
     }
 
+    @Override
     public T getValue() {
         return value;
     }
 
+    @Override
     public void setValue(T value) {
         if (value == null) {
             this.value.clear();
@@ -49,6 +46,7 @@ public abstract class AbstractListJavadocOptionFileOption<T extends List<?>> ext
         }
     }
 
+    @Override
     public void write(JavadocOptionFileWriterContext writerContext) throws IOException {
         if (value != null && !value.isEmpty()) {
             writeCollectionValue(writerContext);

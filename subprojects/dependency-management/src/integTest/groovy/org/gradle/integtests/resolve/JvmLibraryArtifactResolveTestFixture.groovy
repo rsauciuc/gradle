@@ -124,33 +124,35 @@ class VerificationException extends org.gradle.internal.exceptions.DefaultMultiC
 
     void createVerifyTask(String taskName) {
         buildFile << """
-task $taskName << {
-    def deps = configurations.${config}.incoming.resolutionResult.allDependencies as List
-    assert deps.size() == 1
-    def componentId = deps[0].selected.id
+task $taskName {
+    doLast {
+        def deps = configurations.${config}.incoming.resolutionResult.allDependencies as List
+        assert deps.size() == 1
+        def componentId = deps[0].selected.id
 
-    def result = dependencies.createArtifactResolutionQuery()
-        .forComponents(componentId)
-        .withArtifacts(JvmLibrary, $artifactTypesString)
-        .execute()
+        def result = dependencies.createArtifactResolutionQuery()
+            .forComponents(componentId)
+            .withArtifacts(JvmLibrary, $artifactTypesString)
+            .execute()
 
-    assert result.components.size() == 1
+        assert result.components.size() == 1
 
-    // Check generic component result
-    def componentResult = result.components.iterator().next()
-    assert componentResult.id.displayName == "${id.displayName}"
-    assert componentResult.id.group == "${id.group}"
-    assert componentResult.id.module == "${id.module}"
-    assert componentResult.id.version == "${id.version}"
-    assert componentResult instanceof ComponentArtifactsResult
+        // Check generic component result
+        def componentResult = result.components.iterator().next()
+        assert componentResult.id.displayName == "${id.displayName}"
+        assert componentResult.id.group == "${id.group}"
+        assert componentResult.id.module == "${id.module}"
+        assert componentResult.id.version == "${id.version}"
+        assert componentResult instanceof ComponentArtifactsResult
 
-    def failures = []
+        def failures = []
 
-    ${checkComponentResultArtifacts("componentResult", "sources", expectedSources)}
-    ${checkComponentResultArtifacts("componentResult", "javadoc", expectedJavadoc)}
+        ${checkComponentResultArtifacts("componentResult", "sources", expectedSources)}
+        ${checkComponentResultArtifacts("componentResult", "javadoc", expectedJavadoc)}
 
-    if (!failures.empty) {
-        throw new VerificationException("Artifact resolution failed", failures)
+        if (!failures.empty) {
+            throw new VerificationException("Artifact resolution failed", failures)
+        }
     }
 }
 """
@@ -158,33 +160,39 @@ task $taskName << {
 
     void prepareComponentNotFound() {
         buildFile << """
-task verify << {
-    def componentId = new org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier("${id.group}", "${id.module}", "${id.version}")
+task verify {
+    doLast {
+        def componentId = new org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier("${id.group}", "${id.module}", "${id.version}")
 
-    def result = dependencies.createArtifactResolutionQuery()
-        .forComponents(componentId)
-        .withArtifacts(JvmLibrary, $artifactTypesString)
-        .execute()
+        def result = dependencies.createArtifactResolutionQuery()
+            .forComponents(componentId)
+            .withArtifacts(JvmLibrary, $artifactTypesString)
+            .execute()
 
-    assert result.components.size() == 1
+        assert result.components.size() == 1
 
-    // Check generic component result
-    def componentResult = result.components.iterator().next()
-    assert componentResult.id.displayName == "${id.displayName}"
-    assert componentResult.id.group == "${id.group}"
-    assert componentResult.id.module == "${id.module}"
-    assert componentResult.id.version == "${id.version}"
-    assert componentResult instanceof UnresolvedComponentResult
+        // Check generic component result
+        def componentResult = result.components.iterator().next()
+        assert componentResult.id.displayName == "${id.displayName}"
+        assert componentResult.id.group == "${id.group}"
+        assert componentResult.id.module == "${id.module}"
+        assert componentResult.id.version == "${id.version}"
+        assert componentResult instanceof UnresolvedComponentResult
 
-    throw componentResult.failure
+        throw componentResult.failure
+    }
 }
 """
     }
 
-    private static String checkComponentResultArtifacts(String componentResult, String type, def expectedFiles) {
+    private String checkComponentResultArtifacts(String componentResult, String type, def expectedFiles) {
         """
     def ${type}ArtifactResultFiles = []
     ${componentResult}.getArtifacts(${type.capitalize()}Artifact).each { artifactResult ->
+        assert artifactResult.id.componentIdentifier.displayName == "${id.displayName}" 
+        assert artifactResult.id.componentIdentifier.group == "${id.group}" 
+        assert artifactResult.id.componentIdentifier.module == "${id.module}" 
+        assert artifactResult.id.componentIdentifier.version == "${id.version}" 
         if (artifactResult instanceof ResolvedArtifactResult) {
             copy {
                 from artifactResult.file

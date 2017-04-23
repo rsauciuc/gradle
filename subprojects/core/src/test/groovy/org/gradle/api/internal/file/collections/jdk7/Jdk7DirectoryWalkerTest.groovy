@@ -16,56 +16,55 @@
 
 package org.gradle.api.internal.file.collections.jdk7
 
+import com.google.common.base.Charsets
 import org.gradle.api.GradleException
 import org.gradle.api.JavaVersion
 import org.gradle.api.file.FileVisitDetails
 import org.gradle.api.file.FileVisitor
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.DefaultDirectoryWalker
 import org.gradle.api.internal.file.collections.DirectoryFileTree
+import org.gradle.api.internal.file.collections.ReproducibleDirectoryWalker
 import org.gradle.api.tasks.util.PatternSet
 import org.gradle.internal.Factory
-import org.gradle.internal.resource.CharsetUtil
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.Requires
+import org.gradle.util.SetSystemProperties
 import org.gradle.util.TestPrecondition
 import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Issue
-import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Unroll
 
 import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicInteger
 
-@Requires(TestPrecondition.JDK7_OR_LATER)
+import static org.gradle.api.internal.file.TestFiles.directoryFileTreeFactory
+
 @UsesNativeServices
 class Jdk7DirectoryWalkerTest extends Specification {
     @Rule
     public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider();
 
-    @Shared
-    private String originalFileEncoding
+    @Rule
+    SetSystemProperties setSystemPropertiesRule
 
-    def setupSpec() {
-        originalFileEncoding = System.getProperty("file.encoding")
-    }
 
     def cleanup() {
-        System.setProperty("file.encoding", originalFileEncoding)
         Charset.defaultCharset = null // clear cache
     }
 
     // java.nio2 cannot access files with unicode characters when using single-byte non-unicode platform encoding
     // bug seems to show up only on JDK7 when file.encoding != sun.jnu.encoding
     @Issue("GRADLE-2181")
-    @Requires(adhoc = { JavaVersion.current().isJava7() && (System.getProperty("sun.jnu.encoding") == null || Charset.forName(System.getProperty("sun.jnu.encoding")).contains(CharsetUtil.UTF_8)) })
+    @Requires(adhoc = { JavaVersion.current().isJava7() && (System.getProperty("sun.jnu.encoding") == null || Charset.forName(System.getProperty("sun.jnu.encoding")).contains(Charsets.UTF_8)) })
     def "check that JDK7 walker gets picked with Unicode encoding as default"() {
         setup:
         System.setProperty("file.encoding", fileEncoding)
         Charset.defaultCharset = null
-        def directoryWalkerFactory = new DirectoryFileTree(tmpDir.createDir("root")).directoryWalkerFactory
+        def directoryWalkerFactory = directoryFileTreeFactory().create(tmpDir.createDir("root")).directoryWalkerFactory
         directoryWalkerFactory.reset()
         expect:
         directoryWalkerFactory.create().class.simpleName == expectedClassName
@@ -93,7 +92,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         patterns.include("**/*.txt")
         patterns.exclude("subdir1/**")
 
-        def fileTree = new DirectoryFileTree(rootDir, patterns, { walkerInstance } as Factory)
+        def fileTree = new DirectoryFileTree(rootDir, patterns, { walkerInstance } as Factory, TestFiles.fileSystem(), false)
         def visited = []
         def visitClosure = { visited << it.file.absolutePath }
         def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
@@ -110,7 +109,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         !visited.contains(doesNotExist.absolutePath)
 
         where:
-        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker()]
+        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker(), new ReproducibleDirectoryWalker()]
     }
 
     def "both DirectoryWalker implementations return same set of files and attributes"() {
@@ -156,7 +155,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
     }
 
     private List<FileVisitDetails> walkFiles(rootDir, walkerInstance) {
-        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory)
+        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory, TestFiles.fileSystem(), false)
         def visited = []
         def visitClosure = { visited << it }
         def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
@@ -175,7 +174,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         def link = rootDir.file("a/d")
         link.createLink(dir)
 
-        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory)
+        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory, TestFiles.fileSystem(), false)
         def visited = []
         def visitClosure = { visited << it.file.absolutePath }
         def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
@@ -192,7 +191,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         link.delete()
 
         where:
-        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker()]
+        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker(), new ReproducibleDirectoryWalker()]
     }
 
     @Requires(TestPrecondition.SYMLINKS)
@@ -206,7 +205,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         def link = rootDir.file("a/d").createDir().file("e.txt")
         link.createLink(file)
 
-        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory)
+        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory, TestFiles.fileSystem(), false)
         def visited = []
         def visitClosure = { visited << it.file.absolutePath }
         def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
@@ -223,7 +222,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         link.delete()
 
         where:
-        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker()]
+        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker(), new ReproducibleDirectoryWalker()]
     }
 
     @Requires(TestPrecondition.SYMLINKS)
@@ -235,7 +234,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         def link = rootDir.file("a/d")
         link.createLink(dir)
 
-        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory)
+        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory, TestFiles.fileSystem(), false)
         def visited = []
         def visitClosure = { visited << it.file.absolutePath }
         def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
@@ -252,9 +251,42 @@ class Jdk7DirectoryWalkerTest extends Specification {
         link.delete()
 
         where:
-        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker()]
+        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker(), new ReproducibleDirectoryWalker()]
     }
 
+    @Issue("GRADLE-3400")
+    @Requires(TestPrecondition.SYMLINKS)
+    @Unroll
+    def "missing symbolic link that gets filtered doesn't cause an exception - walker: #walkerInstance.class.simpleName"() {
+        given:
+        def rootDir = tmpDir.createDir("root")
+        def dir = rootDir.createDir("target")
+        def link = rootDir.file("source")
+        link.createLink(dir)
+        dir.deleteDir()
+        def file = rootDir.createFile("hello.txt")
+        file << "Hello world"
+
+        def patternSet = new PatternSet()
+        patternSet.include("*.txt")
+        def fileTree = new DirectoryFileTree(rootDir, patternSet, { walkerInstance } as Factory, TestFiles.fileSystem(), false)
+        def visited = []
+        def visitClosure = { visited << it.file.absolutePath }
+        def fileVisitor = [visitFile: visitClosure, visitDir: visitClosure] as FileVisitor
+
+        when:
+        fileTree.visit(fileVisitor)
+
+        then:
+        visited.size() == 1
+        visited[0] == file.absolutePath
+
+        cleanup:
+        link.delete()
+
+        where:
+        walkerInstance << [new DefaultDirectoryWalker(), new Jdk7DirectoryWalker(), new ReproducibleDirectoryWalker()]
+    }
 
     def "file walker sees a snapshot of file metadata even if files are deleted after walking has started"() {
         given:
@@ -267,7 +299,7 @@ class Jdk7DirectoryWalkerTest extends Specification {
         def file3 = rootDir.createFile("a/b/3.txt")
         file3 << '12345'
         def walkerInstance = new Jdk7DirectoryWalker()
-        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory)
+        def fileTree = new DirectoryFileTree(rootDir, new PatternSet(), { walkerInstance } as Factory, TestFiles.fileSystem(), false)
         def visitedFiles = []
         def visitedDirectories = []
         def fileVisitor = [visitFile: { visitedFiles << it }, visitDir: { visitedDirectories << it }] as FileVisitor

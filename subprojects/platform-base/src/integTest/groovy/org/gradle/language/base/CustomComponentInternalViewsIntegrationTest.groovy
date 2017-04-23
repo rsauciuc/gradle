@@ -17,14 +17,13 @@
 package org.gradle.language.base
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.platform.base.internal.ComponentSpecInternal
 
 class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
         buildFile << """
             apply plugin: "jvm-component"
 
-            interface SampleLibrarySpec extends ComponentSpec {
+            interface SampleLibrarySpec extends GeneralComponentSpec {
                 String getPublicData()
                 void setPublicData(String publicData)
             }
@@ -34,7 +33,7 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
                 void setBareData(String bareData)
             }
 
-            interface SampleLibrarySpecInternal extends ComponentSpec {
+            interface SampleLibrarySpecInternal extends GeneralComponentSpec {
                 String getInternalData()
                 void setInternalData(String internalData)
             }
@@ -51,7 +50,7 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
         buildFile << """
             class RegisterComponentRules extends RuleSource {
                 @ComponentType
-                void register(ComponentTypeBuilder<SampleLibrarySpec> builder) {
+                void register(TypeBuilder<SampleLibrarySpec> builder) {
                     builder.defaultImplementation(DefaultSampleLibrarySpec)
                     builder.internalView(SampleLibrarySpecInternal)
                     builder.internalView(BareInternalView)
@@ -80,7 +79,6 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
                 tasks.create("validate") {
                     assert components*.name == ["jar", "sampleLib"]
                     assert components.withType(ComponentSpec)*.name == ["jar", "sampleLib"]
-                    assert components.withType($ComponentSpecInternal.name)*.name == ["jar", "sampleLib"]
                     assert components.withType(JvmLibrarySpec)*.name == ["jar"]
                     assert components.withType(SampleLibrarySpec)*.name == ["sampleLib"]
                     assert components.withType(SampleLibrarySpecInternal)*.name == ["sampleLib"]
@@ -101,14 +99,14 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
         class Rules extends RuleSource {
             @Finalize
             void mutateInternal(ModelMap<SampleLibrarySpecInternal> sampleLibs) {
-                sampleLibs.each { sampleLib ->
+                sampleLibs.all { sampleLib ->
                     sampleLib.internalData = "internal"
                 }
             }
 
             @Finalize
-            void mutateComponentSpecInternal(ModelMap<$ComponentSpecInternal.name> sampleLibs) {
-                sampleLibs.each { sampleLib ->
+            void mutateComponentSpecInternal(ModelMap<VariantComponentSpec> sampleLibs) {
+                sampleLibs.all { sampleLib ->
                     sampleLib.binaries {
                         sampleBin(JarBinarySpec)
                     }
@@ -117,7 +115,7 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
 
             @Finalize
             void mutatePublic(ModelMap<SampleLibrarySpec> sampleLibs) {
-                sampleLibs.each { sampleLib ->
+                sampleLibs.all { sampleLib ->
                     sampleLib.publicData = "public"
                 }
                 sampleLibs.withType(BareInternalView).all { sampleLib ->
@@ -157,12 +155,12 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
         buildFile << """
             class RegisterComponentRules extends RuleSource {
                 @ComponentType
-                void registerComponent(ComponentTypeBuilder<SampleLibrarySpec> builder) {
+                void registerComponent(TypeBuilder<SampleLibrarySpec> builder) {
                     builder.defaultImplementation(DefaultSampleLibrarySpec)
                 }
 
                 @ComponentType
-                void registerInternalView(ComponentTypeBuilder<SampleLibrarySpec> builder) {
+                void registerInternalView(TypeBuilder<SampleLibrarySpec> builder) {
                     builder.internalView(SampleLibrarySpecInternal)
                     builder.internalView(BareInternalView)
                 }
@@ -183,12 +181,12 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
 
             class RegisterComponentRules extends RuleSource {
                 @ComponentType
-                void registerComponent(ComponentTypeBuilder<SampleLibrarySpec> builder) {
+                void registerComponent(TypeBuilder<SampleLibrarySpec> builder) {
                     builder.defaultImplementation(DefaultSampleLibrarySpec)
                 }
 
                 @ComponentType
-                void registerInternalView(ComponentTypeBuilder<SampleLibrarySpec> builder) {
+                void registerInternalView(TypeBuilder<SampleLibrarySpec> builder) {
                     builder.internalView(NotImplementedInternalView)
                 }
             }
@@ -200,6 +198,6 @@ class CustomComponentInternalViewsIntegrationTest extends AbstractIntegrationSpe
 
         expect:
         def failure = fails("validate")
-        failure.assertHasCause "Factory registration for 'SampleLibrarySpec' is invalid because the implementation type 'DefaultSampleLibrarySpec' does not implement internal view 'NotImplementedInternalView', implementation type was registered by RegisterComponentRules#registerComponent, internal view was registered by RegisterComponentRules#registerInternalView"
+        failure.assertHasCause "Factory registration for 'SampleLibrarySpec' is invalid because the implementation type 'DefaultSampleLibrarySpec' does not implement internal view 'NotImplementedInternalView', implementation type was registered by RegisterComponentRules#registerComponent(TypeBuilder<SampleLibrarySpec>), internal view was registered by RegisterComponentRules#registerInternalView(TypeBuilder<SampleLibrarySpec>)"
     }
 }

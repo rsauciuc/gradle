@@ -16,18 +16,25 @@
 
 package org.gradle.tooling.internal.provider;
 
-import org.gradle.internal.classloader.ClassLoaderFactory;
 import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.jvm.inspection.JvmVersionDetector;
+import org.gradle.internal.logging.events.OutputEventListener;
+import org.gradle.internal.logging.services.LoggingServiceRegistry;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.GlobalScopeServices;
 import org.gradle.launcher.daemon.client.DaemonClientFactory;
 import org.gradle.launcher.daemon.client.DaemonClientGlobalServices;
-import org.gradle.launcher.daemon.client.JvmVersionDetector;
 import org.gradle.launcher.exec.BuildExecuter;
-import org.gradle.logging.LoggingServiceRegistry;
-import org.gradle.logging.internal.OutputEventRenderer;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
+import org.gradle.tooling.internal.provider.serialization.ClassLoaderCache;
+import org.gradle.tooling.internal.provider.serialization.ClasspathInferer;
+import org.gradle.tooling.internal.provider.serialization.ClientSidePayloadClassLoaderFactory;
+import org.gradle.tooling.internal.provider.serialization.ClientSidePayloadClassLoaderRegistry;
+import org.gradle.tooling.internal.provider.serialization.DefaultPayloadClassLoaderRegistry;
+import org.gradle.tooling.internal.provider.serialization.ModelClassLoaderFactory;
+import org.gradle.tooling.internal.provider.serialization.PayloadSerializer;
+import org.gradle.tooling.internal.provider.serialization.WellKnownClassLoaderRegistry;
 
 /**
  * Shared services for a tooling API provider connection.
@@ -45,31 +52,34 @@ public class ConnectionScopeServices {
         serviceRegistration.addProvider(new DaemonClientGlobalServices());
     }
 
-    ShutdownCoordinator createShutdownCoordinator(ListenerManager listenerManager, DaemonClientFactory daemonClientFactory, OutputEventRenderer outputEventRenderer) {
-        ShutdownCoordinator shutdownCoordinator = new ShutdownCoordinator(daemonClientFactory, outputEventRenderer);
+    ShutdownCoordinator createShutdownCoordinator(ListenerManager listenerManager, DaemonClientFactory daemonClientFactory, OutputEventListener outputEventListener) {
+        ShutdownCoordinator shutdownCoordinator = new ShutdownCoordinator(daemonClientFactory, outputEventListener);
         listenerManager.addListener(shutdownCoordinator);
         return shutdownCoordinator;
     }
 
-    ProviderConnection createProviderConnection(BuildExecuter buildActionExecuter, DaemonClientFactory daemonClientFactory,
-                                                ClassLoaderFactory classLoaderFactory, ServiceRegistry serviceRegistry,
+    ProviderConnection createProviderConnection(BuildExecuter buildActionExecuter,
+                                                DaemonClientFactory daemonClientFactory,
+                                                ServiceRegistry serviceRegistry,
                                                 JvmVersionDetector jvmVersionDetector,
                                                 // This is here to trigger creation of the ShutdownCoordinator. Could do this in a nicer way
                                                 ShutdownCoordinator shutdownCoordinator) {
+        ClassLoaderCache classLoaderCache = new ClassLoaderCache();
         return new ProviderConnection(
                 serviceRegistry,
                 loggingServices,
                 daemonClientFactory,
                 buildActionExecuter,
                 new PayloadSerializer(
-                        new ClientSidePayloadClassLoaderRegistry(
+                        new WellKnownClassLoaderRegistry(
+                            new ClientSidePayloadClassLoaderRegistry(
                                 new DefaultPayloadClassLoaderRegistry(
-                                        new ClassLoaderCache(),
-                                        new ClientSidePayloadClassLoaderFactory(
-                                                new ModelClassLoaderFactory(
-                                                        classLoaderFactory))),
-                                new ClasspathInferer())),
-                jvmVersionDetector
+                                    classLoaderCache,
+                                    new ClientSidePayloadClassLoaderFactory(
+                                        new ModelClassLoaderFactory())),
+                                new ClasspathInferer(),
+                                classLoaderCache))),
+            jvmVersionDetector
         );
     }
 

@@ -16,18 +16,22 @@
 
 package org.gradle.integtests.tooling.m8
 
+import org.apache.commons.io.output.TeeOutputStream
 import org.gradle.integtests.fixtures.executer.ExecutionResult
+import org.gradle.integtests.tooling.fixture.TestOutputStream
 import org.gradle.integtests.tooling.fixture.ToolingApiLoggingSpecification
+import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.junit.Assume
 
+@ToolingApiVersion(">=2.2")
 class ToolingApiLoggingCrossVersionSpec extends ToolingApiLoggingSpecification {
 
     def setup() {
-        reset()
+        toolingApi.requireIsolatedToolingApi()
     }
 
     def cleanup() {
-        reset()
+        toolingApi.close()
     }
 
     def "client receives same stdout and stderr when in verbose mode as if running from the command-line in debug mode"() {
@@ -46,10 +50,17 @@ project.logger.info ("info logging yyy");
 project.logger.debug("debug logging yyy");
 """
         when:
-        def op = withBuild()
+        def stdOut = new TestOutputStream()
+        def stdErr = new TestOutputStream()
+        withConnection {
+            def build = it.newBuild()
+            build.standardOutput = new TeeOutputStream(stdOut, System.out)
+            build.standardError = new TeeOutputStream(stdErr, System.err)
+            build.run()
+        }
 
         then:
-        def out = op.standardOutput
+        def out = stdOut.toString()
         out.count("debug logging yyy") == 1
         out.count("info logging yyy") == 1
         out.count("quiet logging yyy") == 1
@@ -60,7 +71,7 @@ project.logger.debug("debug logging yyy");
 
         shouldNotContainProviderLogging(out)
 
-        def err = op.standardError
+        def err = stdErr.toString()
         err.count("error logging") == 1
         err.toString().count("sys err") == 1
         err.toString().count("logging yyy") == 0
@@ -109,14 +120,18 @@ project.logger.debug("debug logging");
     }
 
     private ExecutionResult runUsingCommandLine() {
-        targetDist.executer(temporaryFolder)
-            .requireGradleHome()
+        targetDist.executer(temporaryFolder, getBuildContext())
+            .requireGradleDistribution()
             .withArgument("--no-daemon") //suppress daemon usage suggestions
+            .withBuildJvmOpts("-Dorg.gradle.deprecation.trace=false") //suppress deprecation stack trace
             .run()
     }
 
     String normaliseOutput(String output) {
-        return output.replaceFirst("Total time: .+ secs", "Total time: 0 secs")
+        // Must replace both build result formats for cross compat
+        return output
+            .replaceFirst(" in .+s", " in 0s")
+            .replaceFirst("Total time: .+ secs", "Total time: 0 secs")
     }
 
     void shouldNotContainProviderLogging(String output) {

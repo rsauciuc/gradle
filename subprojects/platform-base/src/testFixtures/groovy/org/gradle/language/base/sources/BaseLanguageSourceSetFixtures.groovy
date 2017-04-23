@@ -16,27 +16,17 @@
 
 package org.gradle.language.base.sources
 
-import org.gradle.api.internal.AsmBackedClassGenerator
-import org.gradle.model.internal.core.ModelNode
-import org.gradle.model.internal.core.ModelReference
-import org.gradle.model.internal.core.ModelRegistrations
-import org.gradle.model.internal.fixture.ModelRegistryHelper
-import org.gradle.model.internal.fixture.TestNodeInitializerRegistry
+import org.gradle.api.internal.file.TestFiles
+import org.gradle.language.base.LanguageSourceSet
+import org.gradle.language.base.internal.LanguageSourceSetInternal
+import org.gradle.model.internal.core.MutableModelNode
+import org.gradle.platform.base.internal.DefaultComponentSpecIdentifier
+import org.gradle.test.fixtures.BaseInstanceFixtureSupport
 
 class BaseLanguageSourceSetFixtures {
-    static final def GENERATOR = new AsmBackedClassGenerator()
-
-    static <T extends BaseLanguageSourceSet> T create(Class<T> type, Class<T> implType, String name) {
-        def modelRegistry = new ModelRegistryHelper()
-        modelRegistry.registerInstance("TestNodeInitializerRegistry", TestNodeInitializerRegistry.INSTANCE)
-        modelRegistry.register(
-            ModelRegistrations.unmanagedInstanceOf(ModelReference.of(name, type), {
-                def decorated = GENERATOR.generate(implType)
-                BaseLanguageSourceSet.create(type, decorated, name, null, null)
-            })
-                .descriptor(name)
-                .build()
-        ).atState(name, ModelNode.State.Initialized).getPrivateData(type)
+    static <T extends LanguageSourceSet> T create(Class<T> publicType, Class<? extends BaseLanguageSourceSet> implType, String name) {
+        return BaseInstanceFixtureSupport.create(publicType, LanguageSourceSetInternal, implType, name) { MutableModelNode node ->
+            BaseLanguageSourceSet.create(publicType, implType, new DefaultComponentSpecIdentifier("project", name), TestFiles.sourceDirectorySetFactory())
+        }
     }
-
 }

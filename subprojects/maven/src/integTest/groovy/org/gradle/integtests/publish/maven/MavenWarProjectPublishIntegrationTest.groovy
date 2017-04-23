@@ -18,12 +18,10 @@ package org.gradle.integtests.publish.maven
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class MavenWarProjectPublishIntegrationTest extends AbstractIntegrationSpec {
-    def setup() {
-        overrideMavenLocal()
-    }
 
     public void "publishes WAR only for mixed java and WAR project"() {
         given:
+        using m2
         file("settings.gradle") << "rootProject.name = 'publishTest' "
 
         and:
@@ -39,7 +37,7 @@ repositories {
 }
 
 dependencies {
-    compile "commons-collections:commons-collections:3.2.1"
+    compile "commons-collections:commons-collections:3.2.2"
     runtime "commons-io:commons-io:1.4"
 }
 

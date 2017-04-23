@@ -18,15 +18,22 @@ package org.gradle.ide.visualstudio.internal;
 
 import org.gradle.api.internal.DefaultNamedDomainObjectSet;
 import org.gradle.api.internal.file.FileResolver;
+import org.gradle.api.internal.project.ProjectIdentifier;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.nativeplatform.*;
+import org.gradle.nativeplatform.NativeBinarySpec;
+import org.gradle.nativeplatform.NativeComponentSpec;
+import org.gradle.nativeplatform.NativeExecutableBinarySpec;
+import org.gradle.nativeplatform.test.NativeTestSuiteBinarySpec;
+import org.gradle.platform.base.internal.DefaultComponentSpecIdentifier;
 
 public class VisualStudioProjectRegistry extends DefaultNamedDomainObjectSet<DefaultVisualStudioProject> {
+    private final ProjectIdentifier projectIdentifier;
     private final FileResolver fileResolver;
     private final VisualStudioProjectMapper projectMapper;
 
-    public VisualStudioProjectRegistry(FileResolver fileResolver, VisualStudioProjectMapper projectMapper, Instantiator instantiator) {
+    public VisualStudioProjectRegistry(ProjectIdentifier projectIdentifier, FileResolver fileResolver, VisualStudioProjectMapper projectMapper, Instantiator instantiator) {
         super(DefaultVisualStudioProject.class, instantiator);
+        this.projectIdentifier = projectIdentifier;
         this.fileResolver = fileResolver;
         this.projectMapper = projectMapper;
     }
@@ -46,14 +53,14 @@ public class VisualStudioProjectRegistry extends DefaultNamedDomainObjectSet<Def
 
     private VisualStudioProjectConfiguration createVisualStudioProjectConfiguration(NativeBinarySpec nativeBinary, DefaultVisualStudioProject project, String configuration, String platform) {
         Class<? extends VisualStudioProjectConfiguration> type =
-                nativeBinary instanceof NativeExecutableBinarySpec ? ExecutableVisualStudioProjectConfiguration.class : VisualStudioProjectConfiguration.class;
+                (nativeBinary instanceof NativeExecutableBinarySpec  || nativeBinary instanceof NativeTestSuiteBinarySpec)? ExecutableVisualStudioProjectConfiguration.class : VisualStudioProjectConfiguration.class;
         return getInstantiator().newInstance(type, project, configuration, platform, nativeBinary);
     }
 
-    private DefaultVisualStudioProject getOrCreateProject(NativeComponentSpec nativeComponent, String projectName) {
-        DefaultVisualStudioProject vsProject = findByName(projectName);
+    private DefaultVisualStudioProject getOrCreateProject(NativeComponentSpec nativeComponent, String vsProjectName) {
+        DefaultVisualStudioProject vsProject = findByName(vsProjectName);
         if (vsProject == null) {
-            vsProject = getInstantiator().newInstance(DefaultVisualStudioProject.class, projectName, nativeComponent, fileResolver, getInstantiator());
+            vsProject = getInstantiator().newInstance(DefaultVisualStudioProject.class, new DefaultComponentSpecIdentifier(projectIdentifier.getPath(), vsProjectName), nativeComponent, fileResolver, getInstantiator());
             add(vsProject);
         }
         return vsProject;

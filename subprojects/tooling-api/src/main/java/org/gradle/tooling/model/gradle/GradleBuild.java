@@ -17,6 +17,8 @@
 package org.gradle.tooling.model.gradle;
 
 import org.gradle.api.Incubating;
+import org.gradle.tooling.model.BuildIdentifier;
+import org.gradle.tooling.model.BuildModel;
 import org.gradle.tooling.model.DomainObjectSet;
 import org.gradle.tooling.model.Model;
 
@@ -26,7 +28,15 @@ import org.gradle.tooling.model.Model;
  * @since 1.8
  */
 @Incubating
-public interface GradleBuild extends Model {
+public interface GradleBuild extends Model, BuildModel {
+    /**
+     * Returns the identifier for this Gradle build.
+     *
+     * @since 2.13
+     */
+    @Incubating
+    BuildIdentifier getBuildIdentifier();
+
     /**
      * Returns the root project for this build.
      *
@@ -35,9 +45,17 @@ public interface GradleBuild extends Model {
     BasicGradleProject getRootProject();
 
     /**
-     * Returns the set of all projects for this build. Will include the root project and any ancestors.
+     * Returns the set of all projects for this build.
      *
      * @return The set of all projects.
      */
     DomainObjectSet<? extends BasicGradleProject> getProjects();
+
+    /**
+     * Returns the builds that were included into this one.
+     *
+     * @since 3.3
+     */
+    @Incubating
+    DomainObjectSet<? extends GradleBuild> getIncludedBuilds();
 }

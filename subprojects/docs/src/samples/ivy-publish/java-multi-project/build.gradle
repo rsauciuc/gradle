@@ -28,7 +28,7 @@ project(":project2") {
     description = "The second project"
 
     dependencies {
-       compile 'commons-collections:commons-collections:3.1'
+       compile 'commons-collections:commons-collections:3.2.2'
     }
 }
 
@@ -48,7 +48,7 @@ subprojects {
                 from components.java
                 artifact(sourceJar) {
                     type "source"
-                    conf "runtime"
+                    conf "compile"
                 }
 // END SNIPPET publish-custom-artifact
                 descriptor.withXml {

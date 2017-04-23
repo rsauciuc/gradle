@@ -15,13 +15,13 @@
  */
 package org.gradle.language.nativeplatform.internal.incremental;
 
+import com.google.common.collect.Sets;
+import org.gradle.internal.FileUtils;
 import org.gradle.language.nativeplatform.internal.Include;
-import org.gradle.language.nativeplatform.internal.SourceIncludes;
-import org.gradle.util.GFileUtils;
+import org.gradle.language.nativeplatform.internal.IncludeDirectives;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -32,15 +32,16 @@ public class DefaultSourceIncludesResolver implements SourceIncludesResolver {
         this.includePaths = includePaths;
     }
 
-    public Set<ResolvedInclude> resolveIncludes(File sourceFile, SourceIncludes includes) {
-        Set<ResolvedInclude> dependencies = new LinkedHashSet<ResolvedInclude>();
-        searchForDependencies(dependencies, prependSourceDir(sourceFile, includePaths), includes.getQuotedIncludes());
-        searchForDependencies(dependencies, includePaths, includes.getSystemIncludes());
+    @Override
+    public ResolvedSourceIncludes resolveIncludes(File sourceFile, IncludeDirectives includes) {
+        BuildableResolvedSourceIncludes resolvedSourceIncludes = new BuildableResolvedSourceIncludes();
+        searchForDependencies(prependSourceDir(sourceFile, includePaths), includes.getQuotedIncludes(), resolvedSourceIncludes);
+        searchForDependencies(includePaths, includes.getSystemIncludes(), resolvedSourceIncludes);
         if (!includes.getMacroIncludes().isEmpty()) {
-            dependencies.add(new ResolvedInclude(includes.getMacroIncludes().get(0).getValue(), null));
+            resolvedSourceIncludes.resolved(includes.getMacroIncludes().get(0).getValue(), null);
         }
 
-        return dependencies;
+        return resolvedSourceIncludes;
     }
 
     private List<File> prependSourceDir(File sourceFile, List<File> includePaths) {
@@ -50,19 +51,51 @@ public class DefaultSourceIncludesResolver implements SourceIncludesResolver {
         return quotedSearchPath;
     }
 
-    private void searchForDependencies(Set<ResolvedInclude> dependencies, List<File> searchPath, List<Include> includes) {
+    private void searchForDependencies(List<File> searchPath, List<Include> includes, BuildableResolvedSourceIncludes dependencies) {
         for (Include include : includes) {
-            searchForDependency(dependencies, searchPath, include.getValue());
+            searchForDependency(searchPath, include.getValue(), dependencies);
         }
     }
 
-    private void searchForDependency(Set<ResolvedInclude> dependencies, List<File> searchPath, String include) {
+    private void searchForDependency(List<File> searchPath, String include, BuildableResolvedSourceIncludes dependencies) {
         for (File searchDir : searchPath) {
             File candidate = new File(searchDir, include);
+            // TODO: SLG This isn't correct, we need to consider directories too
+            // If a source file is #include <type_trait>
+            // and includePath = [ A, B ]
+            // and /B/type_trait is the header we want.
+            // We need /A/type_trait to be recorded as a directory in case it becomes a file later.
+            if (!candidate.isDirectory()) {
+                dependencies.searched(candidate);
+            }
             if (candidate.isFile()) {
-                dependencies.add(new ResolvedInclude(include, GFileUtils.canonicalise(candidate)));
+                dependencies.resolved(include, candidate);
                 return;
             }
+        }
+    }
+
+    private static class BuildableResolvedSourceIncludes implements ResolvedSourceIncludes {
+        private final Set<ResolvedInclude> dependencies = Sets.newLinkedHashSet();
+        private final Set<File> candidates = Sets.newLinkedHashSet();
+
+        void searched(File candidate) {
+            candidates.add(candidate);
+        }
+
+        void resolved(String rawInclude, File resolved) {
+            File dependencyFile = resolved == null ? null : FileUtils.canonicalize(resolved);
+            dependencies.add(new ResolvedInclude(rawInclude, dependencyFile));
+        }
+
+        @Override
+        public Set<ResolvedInclude> getResolvedIncludes() {
+            return dependencies;
+        }
+
+        @Override
+        public Set<File> getCheckedLocations() {
+            return candidates;
         }
     }
 }

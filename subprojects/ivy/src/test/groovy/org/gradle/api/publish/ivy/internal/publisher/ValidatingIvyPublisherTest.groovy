@@ -16,26 +16,32 @@
 
 package org.gradle.api.publish.ivy.internal.publisher
 
-import javax.xml.namespace.QName
 import org.gradle.api.Action
 import org.gradle.api.XmlProvider
+import org.gradle.api.internal.artifacts.DefaultImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.repositories.PublicationAwareRepository
 import org.gradle.api.publish.ivy.InvalidIvyPublicationException
 import org.gradle.api.publish.ivy.IvyArtifact
 import org.gradle.api.publish.ivy.internal.artifact.DefaultIvyArtifact
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyPublicationIdentity
+import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import spock.lang.Shared
+import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
+
+import javax.xml.namespace.QName
 
 import static java.util.Collections.emptySet
 import static org.gradle.util.CollectionUtils.toSet
 
 public class ValidatingIvyPublisherTest extends Specification {
-    @Shared TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider()
+    @Rule
+    final TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+
     def delegate = Mock(IvyPublisher)
-    def publisher = new ValidatingIvyPublisher(delegate)
+    DefaultImmutableModuleIdentifierFactory moduleIdentifierFactory = new DefaultImmutableModuleIdentifierFactory()
+    def publisher = new ValidatingIvyPublisher(delegate, moduleIdentifierFactory)
 
     def "delegates when publication is valid"() {
         when:
@@ -201,7 +207,7 @@ public class ValidatingIvyPublisherTest extends Specification {
         artifact.setConf("unknown")
         ivyFileGenerator.addArtifact(artifact)
 
-        def ivyFile = testDir.file("ivy")
+        def ivyFile = testDirectoryProvider.file("ivy")
         ivyFileGenerator.writeTo(ivyFile)
 
         and:
@@ -213,7 +219,7 @@ public class ValidatingIvyPublisherTest extends Specification {
 
         then:
         def e = thrown InvalidIvyPublicationException
-        e.message == "Invalid publication 'pub-name': Could not parse Ivy file ${ivyFile.toURI()}"
+        e.message == "Invalid publication 'pub-name': Could not parse Ivy file ${ivyFile}"
     }
 
     def "validates artifact attributes"() {
@@ -253,6 +259,11 @@ public class ValidatingIvyPublisherTest extends Specification {
         def ivyArtifact = Mock(IvyArtifact)
         def publication = new IvyNormalizedPublication("pub-name", projectIdentity("group", "artifact", "version"), ivyFile("group", "artifact", "version"), toSet([ivyArtifact]))
 
+        File theFile = new TestFile(testDirectoryProvider.testDirectory, "testFile")
+        if (createDir) {
+            theFile.createDir()
+        }
+
         when:
         publisher.publish(publication, Mock(PublicationAwareRepository))
 
@@ -267,9 +278,9 @@ public class ValidatingIvyPublisherTest extends Specification {
         t.message == "Invalid publication 'pub-name': artifact file ${message}: '${theFile}'"
 
         where:
-        theFile                                                         | message
-        new File(testDir.testDirectory, 'does-not-exist') | 'does not exist'
-        testDir.testDirectory.createDir('sub_directory')  | 'is a directory'
+        message          | createDir
+        'does not exist' | false
+        'is a directory' | true
     }
 
     def "cannot publish with duplicate artifacts"() {
@@ -279,14 +290,14 @@ public class ValidatingIvyPublisherTest extends Specification {
             getExtension() >> "ext1"
             getType() >> "type"
             getClassifier() >> "classified"
-            getFile() >> testDir.createFile('artifact1')
+            getFile() >> testDirectoryProvider.createFile('artifact1')
         }
         IvyArtifact artifact2 = Stub() {
             getName() >> "name"
             getExtension() >> "ext1"
             getType() >> "type"
             getClassifier() >> "classified"
-            getFile() >> testDir.createFile('artifact2')
+            getFile() >> testDirectoryProvider.createFile('artifact2')
         }
         def projectIdentity = projectIdentity("org", "module", "revision")
         def publication = new IvyNormalizedPublication("pub-name", projectIdentity, ivyFile("org", "module", "revision"), toSet([artifact1, artifact2]))
@@ -306,7 +317,7 @@ public class ValidatingIvyPublisherTest extends Specification {
             getExtension() >> "xml"
             getType() >> "xml"
             getClassifier() >> null
-            getFile() >> testDir.createFile('artifact1')
+            getFile() >> testDirectoryProvider.createFile('artifact1')
         }
         def projectIdentity = projectIdentity("org", "module", "revision")
         def publication = new IvyNormalizedPublication("pub-name", projectIdentity, ivyFile("org", "module", "revision"), toSet([artifact1]))
@@ -336,7 +347,7 @@ public class ValidatingIvyPublisherTest extends Specification {
     }
 
     private def ivyFile(IvyDescriptorFileGenerator ivyFileGenerator) {
-        def ivyXmlFile = testDir.file("ivy")
+        def ivyXmlFile = testDirectoryProvider.file("ivy")
         ivyFileGenerator.writeTo(ivyXmlFile)
         return ivyXmlFile
     }

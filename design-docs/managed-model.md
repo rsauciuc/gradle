@@ -154,24 +154,29 @@ be syntactic sugar for `clear` followed by `addAll`.
     - Same for `ModelMap<ModelSet<T>>`
 - `ModelMap<T>` does not allow T = `ModelMap<?>`
 
-### Support for polymorphic managed sets
+### Support polymorphic creation of ModelSet<T> elements
 
-```
-interface ModelSet<T> implements Set<T> {
-  void create(Class<? extends T> type, Action<? super T> initializer);
-  <O> Set<O> ofType(Class<O> type);
-}
-```
+On par with `ModelMap`, add the following method:
 
-- `<T>` does not need to be managed type (but can be)
+    interface ModelSet<T> extends Set<T> {
+        <S extends T> void create(Class<S> type, Action<? super T> action);
+    }
+
 - `type` given to `create()` must be a valid managed type
-- All mutative methods of `Set` throw UnsupportedOperationException (like `ModelSet`).
 - `create` throws exception when set has been realised (i.e. using as an input)
-- “read” methods (including `ofType`) throws exception when called on mutable instance
-- No constraints on `O` type parameter given to `ofType` method
-- set returned by `ofType` is immutable (exception thrown by mutative methods should include information about the model element of which it was derived)
 
 The initial target for this functionality will be to replace the `PlatformContainer` model element, but more functionality will be needed before this is possible.
+
+
+### Support polymorphic views of and actions on ModelSets
+
+On par with `ModelMap`, add the following methods:
+
+    interface ModelSet<T> extends Set<T> {
+        <S> ModelSet<S> withType(Class<S> type);
+        <S> void withType(Class<S> type, Action<? super S> configAction);
+        <S> void withType(Class<S> type, Class<? extends RuleSource> rules);
+    }
 
 ## Feature: Tasks defined using `CollectionBuilder` are not eagerly created and configured
 
@@ -331,6 +336,79 @@ Other issues:
 
 - Add `all(Action<? super T)` method to `ModelSet`.
 - Add DSL support for `all { }` rule.
+
+### Story: Display managed properties of `@Managed` subtypes of extensible types in reports
+
+Make sure `@Managed` subtypes of extensible types (`ComponentSpec`, `BinarySpec`, `LanguageSourceSet`) show up in a
+friendly way in both the `model` and `components` reports.
+
+#### Test cases
+
+- Managed instances in `model` report display their public type
+- Managed instances in `components` report display their public type
+- Managed properties are visible in `model` report
+
+### ​ModelSchemaExtraction should respect the JavaBean spec wrt. property naming
+
+When extracting model properties from types we map get/setters to property names.
+There's something shaky about how we handle property names / get-setters mapping wrt. (un)capitalization of names.
+This is about corner cases like property names starting with a single lowercase letter or getters with full-capitalized names.
+
+Here are some examples of what we are doing currently (setters omited for brevity):
+
+    getCCompiler() -> cCompiler
+    getcCompiler() -> cCompiler, or "not a property" on managed types
+    getURL() -> uRL
+
+If we were following the JavaBean spec, then we should have:
+
+    getCCompiler() -> CCompiler
+    getcCompiler() -> cCompiler
+    getURL() -> URL
+
+And when used from the Groovy DSL, things get messier.
+On his side, Groovy does follows the JavaBean spec.
+Mixed Gradle and Groovy behaviour can lead to terrible situations.
+
+If we take the `getCCompiler()` example above, and try to set such a property from Groovy:
+
+    model {
+        whatever {
+            // Both of theses statements work, note the name mistmatch and presence/abscence of the equal sign:
+            cCompiler 'clang'
+            CCompiler = 'clang'
+            // And both of theses statements fail:
+            CCompiler 'clang'   // Groovy: unexpected token '4.12'
+            cCompiler = 'clang' // Groovy: No such property
+        }
+    }
+
+#### Tests
+
+- Gradle property names and Groovy property names are equals
+- Gradle property naming respect the JavaBean spec corner cases as documented/implemented in `java.beans.Introspector`.
+- Adapt `DefaultModelSchemaExtractorTest` and `DefaultStructBindingStoreTest` to take the specs into account wrt. naming and getters filtering
+
+#### Implementation notes
+
+This boils down to using `java.beans.Introspect.decapitalize(..)` instead of `o.a.commons.lang.StringUtils.uncapitalize(..)` in `PropertyAccessorType`.
+
+#### Potential breaking changes
+
+- `NativeBinarySpec.getcCompiler()`
+	- Nothing to do, no impact
+- `CoreJavadocOptions.getJFlags()`
+	- Should be renamed `getjFlags()`
+	- No DSL impact
+	- Breaking change for Java API users
+- `JUnitTestSuiteSpec` & `JUnitTestSuiteBinarySpec` `.getJUnitTestSuite()`
+	Should be renamed `getjUnitTestSuite()`
+	No breaking change as this is new stuff
+
+#### Potential breakages outside Gradle
+
+People will no more see name mismatches in groovy DSL.
+Build scripts relying on theses mismatches will break.
 
 ## Backlog
 

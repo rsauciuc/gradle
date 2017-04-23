@@ -24,7 +24,7 @@
     <title>Continuous build</title>
     <para>
         Typically, you ask Gradle to perform a single build by way of specifying tasks that Gradle should execute.
-        Gradle will determine the the actual set of tasks that need to be executed to satisfy the request, execute them all, and then stop doing work until the next request.
+        Gradle will determine the actual set of tasks that need to be executed to satisfy the request, execute them all, and then stop doing work until the next request.
         A continuous build differs in that Gradle will keep satisfying the initial build request (until instructed to stop)
         by executing the build when it is detected that the result of the previous build is now out of date.
         For example, if your build compiles Java source files to Java class files, a continuous build would automatically initiate a compile when the source files change.
@@ -52,11 +52,11 @@
             <para>
                 Task implementations declare their file system inputs by annotating their properties with
                 <apilink class="org.gradle.api.tasks.InputFiles" /> and other similar annotations.
-                Please see <xref linkend="incrementalTask"/> for more information.
+                Please see <xref linkend="sec:up_to_date_checks"/> for more information.
             </para>
         </tip>
         <para>
-            At this time, only changes that occur after the build has completed (and Gradle has prompted that it is waiting for changes) are noticed.
+            At this time, only changes to task inputs are noticed. Gradle will start watching for changes just before the task starts to execute.
             No other changes will initiate a build.
             For example, changes to build scripts and build logic will not initiate build.
             Likewise, changes to files that are read during the configuration of the build, not the execution, will not initiate a build.
@@ -117,17 +117,34 @@
             There are several issues to be aware with the current implementation of continuous build.
             These are likely to be addressed in future Gradle releases.
         </para>
-        <section id="continuous_build_limitations_jdk">
-            <title>Requires Java 7 or later</title>
+        <section id="sec:build_cycles">
+            <title>Build cycles</title>
             <para>
-                Gradle uses the JDK's <ulink url="http://docs.oracle.com/javase/7/docs/api/java/nio/file/WatchService.html"><literal>WatchService</literal></ulink>
-                to receive notification of changes to files between builds.
-                This API was introduced in Java 7.
-                As such, Gradle's continuous build is not currently supported when building with Java 6.
+                Gradle starts watching for changes just before a task executes.
+
+                If a task modifies its own inputs while executing, Gradle will detect the change and trigger a new build.
+                If every time the task executes, the inputs are modified again, the build will be triggered again.
+                This isn't unique to continuous build. A task that modifies its own inputs will never be considered up-to-date when run "normally" without continuous build.
+            </para>
+            <para>
+                If your build enters a build cycle like this, you can track down the task by looking at the list of files reported changed by Gradle.
+                After identifying the file(s) that are changed during each build, you should look for a task that has that file as an input.
+                In some cases, it may be obvious (e.g., a Java file is compiled with <literal>compileJava</literal>).
+                In other cases, you can use <literal>--info</literal> logging to find the task that is out-of-date due to the identified files.
             </para>
         </section>
-        <section>
-            <title>Performance and stability on Mac OS X</title>
+        <section id="sec:continuous_build_limitations_jdk9">
+            <title>Restrictions with Java 9</title>
+            <para>
+                Due to class access restrictions related to Java 9, Gradle cannot set some operating system specific options, which means that:
+                <itemizedlist>
+                    <listitem><para>On Mac OS X, Gradle will poll for file changes every 10 seconds instead of every 2 seconds.</para></listitem>
+                    <listitem><para>On Windows, Gradle must use individual file watches (like on Linux/Mac OS), which may cause continuous build to no longer work on very large projects.</para></listitem>
+                </itemizedlist>
+            </para>
+        </section>
+        <section id="sec:performance_and_stability">
+            <title>Performance and stability</title>
             <para>
                 The JDK file watching facility relies on inefficient file system polling on Mac OS X (see: <ulink url="https://bugs.openjdk.java.net/browse/JDK-7133447">JDK-7133447</ulink>).
                 This can significantly delay notification of changes on large projects with many source files.
@@ -137,8 +154,11 @@
                 This will manifest as Gradle appearing not to notice file changes.
                 If you suspect this is occurring, exit continuous build and start again.
             </para>
+            <para>
+                On Linux, OpenJDK's implementation of the file watch service can sometimes miss file system events (see: <ulink url="https://bugs.openjdk.java.net/browse/JDK-8145981">JDK-8145981</ulink>).
+            </para>
         </section>
-        <section>
+        <section id="sec:changes_to_symbolic_links">
             <title>Changes to symbolic links</title>
             <para>
                 <itemizedlist>
@@ -150,7 +170,7 @@
                 </itemizedlist>
             </para>
         </section>
-        <section>
+        <section id="sec:changes_to_build_logic_are_not_considered">
             <title>Changes to build logic are not considered</title>
             <para>
                 The current implementation does not recalculate the build model on subsequent builds.

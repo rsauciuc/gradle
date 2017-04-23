@@ -16,13 +16,17 @@
 
 package org.gradle.language.nativeplatform
 
-import org.gradle.execution.taskgraph.DefaultTaskExecutionPlan
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.ExecutableFixture
 import org.gradle.nativeplatform.fixtures.NativeInstallationFixture
-import org.gradle.nativeplatform.fixtures.app.*
-import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.nativeplatform.fixtures.app.CHelloWorldApp
+import org.gradle.nativeplatform.fixtures.app.CppHelloWorldApp
+import org.gradle.nativeplatform.fixtures.app.ExeWithLibraryUsingLibraryHelloWorldApp
+import org.gradle.nativeplatform.fixtures.app.HelloWorldApp
+import org.gradle.nativeplatform.fixtures.app.MixedObjectiveCHelloWorldApp
+import org.gradle.nativeplatform.fixtures.app.ObjectiveCHelloWorldApp
+import org.gradle.nativeplatform.fixtures.app.ObjectiveCppHelloWorldApp
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import spock.lang.IgnoreIf
@@ -34,7 +38,6 @@ class ParallelNativePluginsIntegrationTest extends AbstractInstalledToolChainInt
     def setup() {
         executer.withArgument("--parallel")
                 .withArgument("--max-workers=4")
-                .withArgument("-D${DefaultTaskExecutionPlan.INTRA_PROJECT_TOGGLE}=true")
     }
 
     @Requires(TestPrecondition.OBJECTIVE_C_SUPPORT)
@@ -67,7 +70,7 @@ class ParallelNativePluginsIntegrationTest extends AbstractInstalledToolChainInt
 
         then:
         Map<ExecutableFixture, HelloWorldApp> executables = apps.collectEntries { name, app ->
-            def executable = executable("build/binaries/${name}Executable/$name")
+            def executable = executable("build/exe/$name/$name")
             executable.assertExists()
             [executable, app]
         }
@@ -77,7 +80,6 @@ class ParallelNativePluginsIntegrationTest extends AbstractInstalledToolChainInt
     }
 
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-    @LeaksFileHandles("can't delete build/install/firstMainExecutable/lib")
     def "can produce multiple executables that use a library from a single project in parallel"() {
         given:
         Map<String, ExeWithLibraryUsingLibraryHelloWorldApp> apps = [
@@ -132,7 +134,7 @@ class ParallelNativePluginsIntegrationTest extends AbstractInstalledToolChainInt
 
         then:
         Map<NativeInstallationFixture, HelloWorldApp> installations = apps.collectEntries { name, app ->
-            def installation = installation("build/install/${name}MainExecutable")
+            def installation = installation("build/install/${name}Main")
             [installation, app]
         }
         installations.every { installation, app ->

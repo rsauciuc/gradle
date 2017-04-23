@@ -15,6 +15,7 @@
  */
 package org.gradle.api.internal.artifacts.ivyservice.ivyresolve;
 
+import org.gradle.api.artifacts.ComponentMetadata;
 import org.gradle.api.artifacts.ComponentSelection;
 import org.gradle.api.artifacts.ModuleVersionSelector;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
@@ -24,7 +25,7 @@ import org.gradle.api.internal.artifacts.DefaultComponentSelection;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionComparator;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelector;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelectorScheme;
-import org.gradle.internal.component.model.ComponentResolveMetaData;
+import org.gradle.internal.component.model.ComponentResolveMetadata;
 import org.gradle.internal.resolve.result.BuildableComponentSelectionResult;
 import org.gradle.internal.resolve.result.BuildableModuleComponentMetaDataResolveResult;
 import org.gradle.internal.rules.SpecRuleAction;
@@ -46,7 +47,7 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         this.componentSelectionRules = componentSelectionRules;
     }
 
-    public ComponentResolveMetaData selectNewestComponent(ComponentResolveMetaData one, ComponentResolveMetaData two) {
+    public ComponentResolveMetadata selectNewestComponent(ComponentResolveMetadata one, ComponentResolveMetadata two) {
         if (one == null || two == null) {
             return two == null ? one : two;
         }
@@ -63,8 +64,8 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         return comparison < 0 ? two : one;
     }
 
-    private boolean isGeneratedModuleDescriptor(ComponentResolveMetaData componentResolveMetaData) {
-        return componentResolveMetaData.isGenerated();
+    private boolean isGeneratedModuleDescriptor(ComponentResolveMetadata componentResolveMetadata) {
+        return componentResolveMetadata.isGenerated();
     }
 
     public void selectNewestMatchingComponent(Collection<? extends ModuleComponentResolveState> versions, BuildableComponentSelectionResult result, ModuleVersionSelector requested) {
@@ -72,7 +73,7 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         Collection<SpecRuleAction<? super ComponentSelection>> rules = componentSelectionRules.getRules();
 
         for (ModuleComponentResolveState candidate : sortLatestFirst(versions)) {
-            MetadataProvider metadataProvider = new MetadataProvider(candidate);
+            MetadataProvider metadataProvider = createMetadataProvider(candidate);
 
             boolean versionMatches = versionMatches(requestedVersion, candidate, metadataProvider);
             if (!metadataProvider.isUsable()) {
@@ -106,6 +107,10 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
         result.noMatchFound();
     }
 
+    protected MetadataProvider createMetadataProvider(ModuleComponentResolveState candidate) {
+        return new MetadataProvider(candidate);
+    }
+
     private void applyTo(MetadataProvider provider, BuildableComponentSelectionResult result) {
         BuildableModuleComponentMetaDataResolveResult metaDataResult = provider.getResult();
         switch (metaDataResult.getState()) {
@@ -126,10 +131,8 @@ class DefaultVersionedComponentChooser implements VersionedComponentChooser {
 
     private boolean versionMatches(VersionSelector selector, ModuleComponentResolveState component, MetadataProvider metadataProvider) {
         if (selector.requiresMetadata()) {
-            if (!metadataProvider.resolve()) {
-                return false;
-            }
-            return selector.accept(metadataProvider.getComponentMetadata());
+            ComponentMetadata componentMetadata = metadataProvider.getComponentMetadata();
+            return componentMetadata != null && selector.accept(componentMetadata);
         } else {
             return selector.accept(component.getVersion());
         }

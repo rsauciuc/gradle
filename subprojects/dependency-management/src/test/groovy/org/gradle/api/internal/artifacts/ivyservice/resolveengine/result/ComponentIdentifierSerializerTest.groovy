@@ -21,8 +21,9 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier
 import org.gradle.internal.component.local.model.DefaultLibraryBinaryIdentifier
-import org.gradle.internal.component.local.model.DefaultProjectComponentIdentifier
 import org.gradle.internal.serialize.SerializerSpec
+
+import static org.gradle.internal.component.local.model.TestComponentIdentifiers.newProjectId
 
 class ComponentIdentifierSerializerTest extends SerializerSpec {
     ComponentIdentifierSerializer serializer = new ComponentIdentifierSerializer()
@@ -38,10 +39,10 @@ class ComponentIdentifierSerializerTest extends SerializerSpec {
 
     def "serializes ModuleComponentIdentifier"() {
         given:
-        ModuleComponentIdentifier selection = new DefaultModuleComponentIdentifier('group-one', 'name-one', 'version-one')
+        ModuleComponentIdentifier identifier = new DefaultModuleComponentIdentifier('group-one', 'name-one', 'version-one')
 
         when:
-        ModuleComponentIdentifier result = serialize(selection, serializer)
+        ModuleComponentIdentifier result = serialize(identifier, serializer)
 
         then:
         result.group == 'group-one'
@@ -51,22 +52,22 @@ class ComponentIdentifierSerializerTest extends SerializerSpec {
 
     def "serializes LibraryIdentifier"() {
         given:
-        LibraryBinaryIdentifier selection = new DefaultLibraryBinaryIdentifier(':project', 'lib', 'variant')
+        LibraryBinaryIdentifier identifier = new DefaultLibraryBinaryIdentifier(':project', 'lib', 'variant')
 
         when:
-        LibraryBinaryIdentifier result = serialize(selection, serializer)
+        LibraryBinaryIdentifier result = serialize(identifier, serializer)
 
         then:
         result.projectPath == ':project'
         result.libraryName == 'lib'
     }
 
-    def "serializes BuildComponentIdentifier"() {
+    def "serializes ProjectComponentIdentifier"() {
         given:
-        ProjectComponentIdentifier selection = new DefaultProjectComponentIdentifier(':myPath')
+        ProjectComponentIdentifier identifier = newProjectId(':myPath')
 
         when:
-        ProjectComponentIdentifier result = serialize(selection, serializer)
+        ProjectComponentIdentifier result = serialize(identifier, serializer)
 
         then:
         result.projectPath == ':myPath'

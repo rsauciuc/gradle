@@ -17,6 +17,7 @@
 package org.gradle.plugins.ide.idea
 
 import org.gradle.integtests.fixtures.TestResources
+import org.gradle.integtests.fixtures.executer.ExecutionResult
 import org.gradle.plugins.ide.AbstractIdeIntegrationTest
 import org.junit.Rule
 import org.junit.Test
@@ -207,13 +208,25 @@ idea {
     @Issue("GRADLE-1504")
     @Test
     void shouldNotPutSourceSetsOutputDirOnClasspath() {
-        testFile('build/generated/main/foo.resource').createFile()
-        testFile('build/ws/test/service.xml').createFile()
-
         //when
         runTask 'idea', '''
 apply plugin: "java"
 apply plugin: "idea"
+
+task generate {
+    doLast {
+        file('build/generated/main/foo.resource').with {
+            parentFile.mkdirs()
+            text = "resource"
+        }
+        file('build/ws/test/service.xml').with {
+            parentFile.mkdirs()
+            text = "<xml/>"
+        }
+    }
+}
+
+tasks.idea.dependsOn generate
 
 sourceSets.main.output.dir "$buildDir/generated/main"
 sourceSets.test.output.dir "$buildDir/ws/test"
@@ -235,8 +248,8 @@ apply plugin: "idea"
 sourceSets.main.output.dir "$buildDir/generated/main", builtBy: 'generateForMain'
 sourceSets.test.output.dir "$buildDir/generated/test", builtBy: 'generateForTest'
 
-task generateForMain << {}
-task generateForTest << {}
+task generateForMain
+task generateForTest
 ''')
         //then
         result.assertTasksExecuted(':generateForMain', ':generateForTest', ':ideaModule', ':ideaProject', ':ideaWorkspace', ':idea')
@@ -387,10 +400,10 @@ project(':impl') {
         def content = getFile([print : true], 'impl/impl.iml').text
 
         //then
-        assert content.count("someDependency.jar") == 1
-        assert content.count("artifactTwo-1.0.jar") == 1
-        assert content.count("someApiProject") == 1
-        assert content.count("unresolved dependency - i.dont Exist 1.0") == 1
+        assert content.count("someDependency.jar") == 3
+        assert content.count("artifactTwo-1.0.jar") == 3
+        assert content.count("someApiProject") == 3
+        assert content.count("unresolved dependency - i.dont Exist 1.0") == 3
     }
 
     @Issue("GRADLE-2017")
@@ -418,45 +431,14 @@ dependencies {
 """
         //then
         def dependencies = parseIml("root.iml").dependencies
-        assert dependencies.libraries.size() == 3
-        dependencies.assertHasLibrary('COMPILE', 'api-artifact-1.0.jar')
+        assert dependencies.libraries.size() == 5
+        dependencies.assertHasLibrary(['PROVIDED', 'RUNTIME','TEST'], 'api-artifact-1.0.jar')
         dependencies.assertHasLibrary('RUNTIME', 'impl-artifact-1.0.jar')
         dependencies.assertHasLibrary('TEST', 'impl-artifact-1.0.jar')
     }
 
     @Test
-    void "provided wins over compile scope for compile configuration"() {
-        //given
-        def repoDir = file("repo")
-        maven(repoDir).module("org.gradle", "api-artifact").publish()
-
-        //when
-        runIdeaTask """
-apply plugin: 'java'
-apply plugin: 'idea'
-
-repositories {
-    maven { url "${repoDir.toURI()}" }
-}
-
-dependencies {
-    compile 'org.gradle:api-artifact:1.0'
-}
-
-idea {
-  module {
-    scopes.PROVIDED.plus << configurations.compile
-  }
-}
-"""
-        //then
-        def dependencies = parseIml("root.iml").dependencies
-        assert dependencies.libraries.size() == 1
-        dependencies.assertHasLibrary('PROVIDED', 'api-artifact-1.0.jar')
-    }
-
-    @Test
-    void "custom configuration gets first scope"() {
+    void "custom configuration is added to all specified scopes"() {
         //given
         def repoDir = file("repo")
         maven(repoDir).module("org.gradle", "api-artifact").publish()
@@ -477,7 +459,6 @@ configurations {
 
 dependencies {
     myCustom 'foo:bar:1.0'
-    compile 'org.gradle:api-artifact:1.0'
 }
 
 idea {
@@ -490,8 +471,7 @@ idea {
         //then
         def dependencies = parseIml("root.iml").dependencies
         assert dependencies.libraries.size() == 2
-        dependencies.assertHasLibrary('PROVIDED', 'bar-1.0.jar')
-        dependencies.assertHasLibrary('COMPILE', 'api-artifact-1.0.jar')
+        dependencies.assertHasLibrary(['PROVIDED', 'COMPILE'], 'bar-1.0.jar')
     }
 
     @Test
@@ -521,19 +501,16 @@ dependencies {
 
 idea {
   module {
-    scopes.RUNTIME_TEST = [:]
-    scopes.RUNTIME_TEST.plus = [configurations.myCustom]
-    // scopes.TEST.plus += configurations.myCustom
-    // scopes.RUNTIME.plus += configurations.myCustom
+    scopes.TEST.plus += [configurations.myCustom]
+    scopes.RUNTIME.plus += [configurations.myCustom]
   }
 }
 """
         //then
         def dependencies = parseIml("root.iml").dependencies
-        assert dependencies.libraries.size() == 3
-        dependencies.assertHasLibrary('COMPILE', 'api-artifact-1.0.jar')
-        dependencies.assertHasLibrary('TEST', 'bar-1.0.jar')
-        dependencies.assertHasLibrary('RUNTIME', 'bar-1.0.jar')
+        assert dependencies.libraries.size() == 5
+        dependencies.assertHasLibrary(['PROVIDED', 'RUNTIME','TEST'], 'api-artifact-1.0.jar')
+        dependencies.assertHasLibrary(['RUNTIME','TEST'], 'bar-1.0.jar')
     }
 
     @Test
@@ -562,5 +539,254 @@ dependencies {
         //then
         def dependencies = parseIml("root.iml").dependencies
         assert dependencies.libraries.isEmpty()
+    }
+
+    @Test
+    @Issue("GRADLE-1945")
+    void unresolvedDependenciesAreLogged() {
+        //given
+        def module = mavenRepo.module('myGroup', 'existing-artifact', '1.0')
+        module.publish()
+
+        //when
+        ExecutionResult result = runIdeaTask """
+apply plugin: 'java'
+apply plugin: 'idea'
+
+repositories {
+    maven { url "${mavenRepo.uri}" }
+}
+
+configurations {
+    myPlusConfig
+    myMinusConfig
+}
+
+dependencies {
+    myPlusConfig group: 'myGroup', name: 'missing-extra-artifact', version: '1.0'
+    myPlusConfig group: 'myGroup', name: 'filtered-artifact', version: '1.0'
+    myMinusConfig group: 'myGroup', name: 'filtered-artifact', version: '1.0'
+    runtime  group: 'myGroup', name: 'missing-artifact', version: '1.0'
+    compile  group: 'myGroup', name: 'existing-artifact', version: '1.0'
+
+    idea {
+        module {
+            scopes.COMPILE.plus += [ configurations.myPlusConfig ]
+            scopes.COMPILE.minus += [ configurations.myMinusConfig ]
+        }
+    }
+}
+"""
+        String expected = """:ideaModule
+Could not resolve: myGroup:missing-artifact:1.0
+Could not resolve: myGroup:missing-extra-artifact:1.0
+:ideaProject
+:ideaWorkspace
+:idea
+"""
+        result.assertOutputContains(expected)
+    }
+
+    @Test
+    void "compile only dependencies handled correctly"() {
+        // given
+        def shared = mavenRepo.module('org.gradle.test', 'shared', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'compile', '1.0').dependsOn(shared).publish()
+        mavenRepo.module('org.gradle.test', 'compileOnly', '1.0').dependsOn(shared).publish()
+        mavenRepo.module('org.gradle.test', 'testCompileOnly', '1.0').dependsOn(shared).publish()
+
+        // when
+        runIdeaTask """
+apply plugin: 'java'
+apply plugin: 'idea'
+
+repositories {
+    maven { url "${mavenRepo.uri}" }
+}
+
+dependencies {
+    compile 'org.gradle.test:compile:1.0'
+    compileOnly 'org.gradle.test:compileOnly:1.0'
+    testCompileOnly 'org.gradle.test:testCompileOnly:1.0'
+}
+"""
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 8
+        dependencies.assertHasLibrary('PROVIDED', 'shared-1.0.jar')
+        dependencies.assertHasLibrary('RUNTIME', 'shared-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'shared-1.0.jar')
+        dependencies.assertHasLibrary('PROVIDED', 'compile-1.0.jar')
+        dependencies.assertHasLibrary('RUNTIME', 'compile-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'compile-1.0.jar')
+        dependencies.assertHasLibrary('PROVIDED', 'compileOnly-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'testCompileOnly-1.0.jar')
+    }
+
+    @Test
+    void "test compile only dependencies mapped to IDEA scopes"() {
+        // given
+        def shared = mavenRepo.module('org.gradle.test', 'shared', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'compile', '1.0').dependsOn(shared).publish()
+        mavenRepo.module('org.gradle.test', 'compileOnly', '1.0').dependsOn(shared).publish()
+
+        // when
+        runIdeaTask """
+            apply plugin: 'java'
+            apply plugin: 'idea'
+
+            repositories {
+                maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                testCompile 'org.gradle.test:compile:1.0'
+                testCompileOnly 'org.gradle.test:compileOnly:1.0'
+            }
+        """.stripIndent()
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 3
+        dependencies.assertHasLibrary('TEST', 'shared-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'compile-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'compileOnly-1.0.jar')
+    }
+
+    @Test
+    void "conflicting versions of the same library requested for compile and compile-only mapped to IDEA scopes"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'bothCompileAndCompileOnly', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'bothCompileAndCompileOnly', '2.0').publish()
+
+        // when
+        runIdeaTask """
+            apply plugin: 'java'
+            apply plugin: 'idea'
+
+            repositories {
+                maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                compile 'org.gradle.test:bothCompileAndCompileOnly:1.0'
+                compileOnly 'org.gradle.test:bothCompileAndCompileOnly:2.0'
+            }
+        """.stripIndent()
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 3
+        dependencies.assertHasLibrary('RUNTIME', 'bothCompileAndCompileOnly-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'bothCompileAndCompileOnly-1.0.jar')
+        dependencies.assertHasLibrary('PROVIDED', 'bothCompileAndCompileOnly-2.0.jar')
+    }
+
+    @Test
+    void "conflicting versions of the same library requested for runtime and compile-only mapped to IDEA scopes"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'bothCompileAndCompileOnly', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'bothCompileAndCompileOnly', '2.0').publish()
+
+        // when
+        runIdeaTask """
+            apply plugin: 'java'
+            apply plugin: 'idea'
+
+            repositories {
+                maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                compileOnly 'org.gradle.test:bothCompileAndCompileOnly:2.0'
+                runtime 'org.gradle.test:bothCompileAndCompileOnly:1.0'
+            }
+        """.stripIndent()
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 3
+        dependencies.assertHasLibrary('PROVIDED', 'bothCompileAndCompileOnly-2.0.jar')
+        dependencies.assertHasLibrary('RUNTIME', 'bothCompileAndCompileOnly-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'bothCompileAndCompileOnly-1.0.jar')
+    }
+
+    @Test
+    void "conflicting versions of the same library requested for test-compile and test-compile-only mapped to IDEA scopes"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'bothCompileAndCompileOnly', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'bothCompileAndCompileOnly', '2.0').publish()
+
+        // when
+        runIdeaTask """
+            apply plugin: 'java'
+            apply plugin: 'idea'
+
+            repositories {
+                maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                testCompile 'org.gradle.test:bothCompileAndCompileOnly:1.0'
+                testCompileOnly 'org.gradle.test:bothCompileAndCompileOnly:2.0'
+            }
+        """.stripIndent()
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 2
+        dependencies.assertHasLibrary('TEST', 'bothCompileAndCompileOnly-1.0.jar')
+        dependencies.assertHasLibrary('TEST', 'bothCompileAndCompileOnly-2.0.jar')
+    }
+
+    @Test
+    void "providedCompile dependencies are added to PROVIDED only"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'foo', '1.0').publish()
+
+        // when
+        runIdeaTask """
+            apply plugin: 'war'
+            apply plugin: 'idea'
+
+            repositories {
+                maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                providedCompile 'org.gradle.test:foo:1.0'
+            }
+        """.stripIndent()
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 1
+        dependencies.assertHasLibrary('PROVIDED', 'foo-1.0.jar')
+    }
+
+    @Test
+    void "providedRuntime dependencies are added to PROVIDED only"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'foo', '1.0').publish()
+
+        // when
+        runIdeaTask """
+            apply plugin: 'war'
+            apply plugin: 'idea'
+
+            repositories {
+                maven { url "${mavenRepo.uri}" }
+            }
+
+            dependencies {
+                providedRuntime 'org.gradle.test:foo:1.0'
+            }
+        """.stripIndent()
+
+        // then
+        def dependencies = parseIml("root.iml").dependencies
+        assert dependencies.libraries.size() == 1
+        dependencies.assertHasLibrary('PROVIDED', 'foo-1.0.jar')
     }
 }

@@ -19,15 +19,12 @@ package org.gradle.integtests.tooling.r18
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
 import org.gradle.integtests.tooling.fixture.ToolingApiVersion
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.tooling.BuildActionFailureException
 import org.gradle.tooling.BuildException
 import org.gradle.tooling.UnsupportedVersionException
 import org.gradle.tooling.model.idea.IdeaProject
 
-@ToolingApiVersion('>=1.8')
 @TargetGradleVersion('>=1.8')
-@LeaksFileHandles
 class BuildActionCrossVersionSpec extends ToolingApiSpecification {
     def "client receives the result of running a build action"() {
         given:
@@ -55,7 +52,7 @@ class BuildActionCrossVersionSpec extends ToolingApiSpecification {
     }
 
     @TargetGradleVersion(">=2.2")
-    def "action classes are reused"() {
+    def "action classes are reused in daemon"() {
         toolingApi.requireIsolatedDaemons()
 
         expect:
@@ -68,7 +65,7 @@ class BuildActionCrossVersionSpec extends ToolingApiSpecification {
     }
 
     @TargetGradleVersion(">=1.8 <=2.1")
-    def "action classes are reused when daemon is idle when operation starts"() {
+    def "action classes are reused in daemon when daemon is idle when operation starts"() {
         toolingApi.requireIsolatedDaemons()
 
         expect:
@@ -119,16 +116,8 @@ class BuildActionCrossVersionSpec extends ToolingApiSpecification {
         e.message.startsWith('Could not run build action using')
     }
 
-    def causes(Throwable throwable) {
-        def causes = []
-        for (def c = throwable.cause; c != null; c = c.cause) {
-            causes << c
-        }
-        return causes
-    }
-
     @ToolingApiVersion('current')
-    @TargetGradleVersion('>=1.0-milestone-8 <1.8')
+    @TargetGradleVersion('>=1.2 <1.8')
     def "gives reasonable error message when target Gradle version does not support build actions"() {
         when:
         withConnection { it.action(new FetchCustomModel()).run() }

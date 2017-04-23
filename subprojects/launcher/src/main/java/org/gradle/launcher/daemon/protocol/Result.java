@@ -25,7 +25,7 @@ package org.gradle.launcher.daemon.protocol;
  *
  * <p>The result is the last message sent from the daemon back to the daemon client.
  */
-abstract public class Result<T> extends Message {
+public abstract class Result<T> extends Message {
 
     private final T value;
 
@@ -36,9 +36,9 @@ abstract public class Result<T> extends Message {
     public T getValue() {
         return value;
     }
-    
+
     @Override
     public String toString() {
-        return String.format("%s[value=%s]", getClass().getSimpleName(), getValue());
+        return getClass().getSimpleName() + "[value=" + getValue() + "]";
     }
 }

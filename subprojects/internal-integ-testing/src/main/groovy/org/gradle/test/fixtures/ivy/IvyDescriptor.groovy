@@ -70,8 +70,14 @@ class IvyDescriptor {
                     org: dep.@org,
                     module: dep.@name,
                     revision: dep.@rev,
-                    conf: dep.@conf
+                    conf: dep.@conf,
+                    transitive: dep.@transitive
             )
+
+            dep.exclude.each { exclude ->
+                ivyDependency.exclusions << new IvyDescriptorDependencyExclusion(org: exclude.@org, module: exclude.@module, name: exclude.@name, type: exclude.@type, ext: exclude.@ext, conf: exclude.@conf, matcher: exclude.@matcher)
+            }
+
             def key = "${ivyDependency.org}:${ivyDependency.module}:${ivyDependency.revision}"
             dependencies[key] = ivyDependency
         }
@@ -104,5 +110,11 @@ class IvyDescriptor {
             assert dependencies[key].hasConf(conf)
         }
         true
+    }
+
+    IvyDescriptorDependency expectDependency(String key) {
+        final dependency = dependencies.get(key)
+        assert dependency != null : "Could not find expected dependency $key. Actual: ${dependencies.values()}"
+        return dependency
     }
 }

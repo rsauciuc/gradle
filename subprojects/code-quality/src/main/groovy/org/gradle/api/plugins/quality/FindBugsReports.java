@@ -18,6 +18,7 @@ package org.gradle.api.plugins.quality;
 
 import org.gradle.api.reporting.ReportContainer;
 import org.gradle.api.reporting.SingleFileReport;
+import org.gradle.api.tasks.Internal;
 
 /**
  * The reporting configuration for the {@link FindBugs} task.
@@ -32,6 +33,7 @@ public interface FindBugsReports extends ReportContainer<SingleFileReport> {
      *
      * @return The findbugs XML report
      */
+    @Internal
     FindBugsXmlReport getXml();
 
     /**
@@ -39,19 +41,22 @@ public interface FindBugsReports extends ReportContainer<SingleFileReport> {
      *
      * @return The findbugs HTML report
      */
+    @Internal
     SingleFileReport getHtml();
-    
+
     /**
      * The findbugs Text report
      *
      * @return The findbugs Text report
      */
+    @Internal
     SingleFileReport getText();
-    
+
     /**
      * The findbugs Emacs report
      *
      * @return The findbugs Emacs report
      */
+    @Internal
     SingleFileReport getEmacs();
 }

@@ -15,10 +15,14 @@
  */
 
 package org.gradle.api.tasks
+
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
+    def discoveredDir = file('discoveredDir')
+
     def "setup"() {
+        setupTaskSources()
         buildFile << buildFileBase
         buildFile << """
     task incremental(type: IncrementalTask) {
@@ -40,8 +44,13 @@ class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
         file('outputs/file2.txt') << "outputFile2"
     }
 
-    private static String getBuildFileBase() {
-        """
+    private void setupTaskSources() {
+        file("buildSrc/src/main/groovy/BaseIncrementalTask.groovy") << """
+    import org.gradle.api.*
+    import org.gradle.api.plugins.*
+    import org.gradle.api.tasks.*
+    import org.gradle.api.tasks.incremental.*
+
     class BaseIncrementalTask extends DefaultTask {
         @InputDirectory
         def File inputDir
@@ -70,7 +79,7 @@ class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
 
 
             // register discovered inputs
-            [ 'discovered/file0.txt', 'discovered/file1.txt', 'discovered/file2.txt' ].each { fileName ->
+            [ 'discovered/file0.txt', 'discovered/file1.txt', 'discovered/file2.txt', 'discoveredDir' ].each { fileName ->
                 def discoveredInput = project.file(fileName)
                 if (discoveredInput.exists()) {
                     inputs.newInput(discoveredInput)
@@ -91,6 +100,12 @@ class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
         def discoveredFiles = []
         def incrementalExecution
     }
+        """
+        file("buildSrc/src/main/groovy/IncrementalTask.groovy") << """
+    import org.gradle.api.*
+    import org.gradle.api.plugins.*
+    import org.gradle.api.tasks.*
+    import org.gradle.api.tasks.incremental.*
 
     class IncrementalTask extends BaseIncrementalTask {
         @Input
@@ -106,7 +121,11 @@ class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
             }
         }
     }
+"""
+    }
 
+    private static String getBuildFileBase() {
+        """
     ext {
         incrementalExecution = true
         added = []
@@ -116,12 +135,14 @@ class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
         discovered = [ 'file0.txt', 'file1.txt', 'file2.txt' ]
     }
 
-    task incrementalCheck(dependsOn: "incremental") << {
-        assert incremental.incrementalExecution == project.ext.incrementalExecution
-        assert incremental.addedFiles.collect({ it.name }).sort() == project.ext.added
-        assert incremental.changedFiles.collect({ it.name }).sort() == project.ext.changed
-        assert incremental.removedFiles.collect({ it.name }).sort() == project.ext.removed
-        assert incremental.discoveredFiles.collect({ it.name }).sort() == project.ext.discovered
+    task incrementalCheck(dependsOn: "incremental") {
+        doLast {
+            assert incremental.incrementalExecution == project.ext.incrementalExecution
+            assert incremental.addedFiles.collect({ it.name }).sort() == project.ext.added
+            assert incremental.changedFiles.collect({ it.name }).sort() == project.ext.changed
+            assert incremental.removedFiles.collect({ it.name }).sort() == project.ext.removed
+            assert incremental.discoveredFiles.collect({ it.name }).sort() == project.ext.discovered
+        }
     }
 """
     }
@@ -132,6 +153,19 @@ class IncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
     }
 
     def "incremental task is skipped when run with no changes since last execution"() {
+        given:
+        previousExecution()
+
+        when:
+        run "incremental"
+
+        then:
+        ":incremental" in skippedTasks
+    }
+
+    def "incremental task is skipped when run with no changes with discovered empty directory"() {
+        discoveredDir.file('empty/dir').mkdirs()
+
         given:
         previousExecution()
 

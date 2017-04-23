@@ -82,9 +82,10 @@ class DaemonsEventSequence implements Stoppable, Runnable {
                     checkForDaemonsStateChange()
                     sleep(pollRegistryMs)
                 }
-                putOnChangeQueue(null) // sentinel that no more is coming
             } catch (Exception e) {
                 e.printStackTrace()
+            } finally {
+                putOnChangeQueue(null) // sentinel that no more is coming
             }
         }
 
@@ -92,7 +93,7 @@ class DaemonsEventSequence implements Stoppable, Runnable {
     }
 
     private checkForDaemonsStateChange() {
-        def busy = registry.busy.size()
+        def busy = registry.notIdle.size()
         def idle = registry.idle.size()
 
         def currentState = new DaemonsState(busy, idle)

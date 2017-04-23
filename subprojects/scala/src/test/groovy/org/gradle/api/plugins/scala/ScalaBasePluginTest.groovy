@@ -15,16 +15,18 @@
  */
 package org.gradle.api.plugins.scala
 
+import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.internal.artifacts.configurations.Configurations
-import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.reporting.ReportingExtension
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.scala.ScalaCompile
 import org.gradle.api.tasks.scala.ScalaDoc
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TestUtil
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 import static org.gradle.api.tasks.TaskDependencyMatchers.dependsOn
@@ -35,7 +37,9 @@ import static org.hamcrest.Matchers.*
 import static org.junit.Assert.*
 
 public class ScalaBasePluginTest {
-    private final DefaultProject project = TestUtil.createRootProject()
+    @Rule
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+    private final Project project = TestUtil.create(temporaryFolder).rootProject()
 
     @Before
     void before() {
@@ -59,18 +63,8 @@ public class ScalaBasePluginTest {
     void preconfiguresZincClasspathForCompileTasksThatUseZinc() {
         project.sourceSets.create('custom')
         def task = project.tasks.compileCustomScala
-        task.scalaCompileOptions.useAnt = false
         assert task.zincClasspath instanceof Configuration
         assert task.zincClasspath.dependencies.find { it.name.contains('zinc') }
-    }
-
-    @Test
-    void doesNotPreconfigureZincClasspathForCompileTasksThatUseAnt() {
-        project.sourceSets.create('custom')
-        def task = project.tasks.compileCustomScala
-        task.scalaCompileOptions.useAnt = true
-        assert task.zincClasspath instanceof Configuration
-        assert task.zincClasspath.empty
     }
 
     @Test

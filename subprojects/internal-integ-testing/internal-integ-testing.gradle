@@ -20,18 +20,23 @@ dependencies {
     compile project(':launcher')
     compile project(':native')
     compile libraries.jetty
-    compile module("org.littleshoot:littleproxy:0.4") {
+    compile module("org.littleshoot:littleproxy:1.1.0-beta1") {
         dependency libraries.slf4j_api
-        dependency "org.jboss.netty:netty:3.2.4.Final"
+        dependency "io.netty:netty-all:4.0.23.Final"
+        dependency "org.apache.commons:commons-lang3:3.4"
     }
+    compile libraries.ivy
     compile libraries.sshd
     compile libraries.gson
     compile libraries.joda
     compile libraries.jsch
+    compile libraries.jcifs
+    runtime project(':logging')
+    runtime project(path: ':versionInfo', configuration: 'testVersionInfo')
 }
 
 useTestFixtures(sourceSet: 'main')
-useClassycle()
+//useClassycle()
 
 task prepareVersionsInfo(type: PrepareVersionsInfo) {
     destFile = new File(generatedResourcesDir, "all-released-versions.properties")
@@ -42,6 +47,7 @@ task prepareVersionsInfo(type: PrepareVersionsInfo) {
 
 sourceSets.main.output.dir generatedResourcesDir, builtBy: prepareVersionsInfo
 
+@CacheableTask
 class PrepareVersionsInfo extends DefaultTask {
     @OutputFile File destFile
     @Input String mostRecent
@@ -53,9 +59,8 @@ class PrepareVersionsInfo extends DefaultTask {
         properties.mostRecent = mostRecent
         properties.mostRecentSnapshot = mostRecentSnapshot
         properties.versions = versions.join(' ')
-        destFile.withOutputStream {
-            properties.store(it, "")
-        }
+
+        org.gradle.build.ReproduciblePropertiesWriter.store(properties, destFile)
     }
 }
 

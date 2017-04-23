@@ -1,8 +1,9 @@
+sourceCompatibility = 1.6
+
 dependencies {
+    compile project(":core")
     compile project(":platformJvm")
     compile project(":platformBase")
-
-    testCompile libraries.groovy
 
     testRuntime project(":languageJava")
 

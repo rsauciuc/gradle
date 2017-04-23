@@ -39,11 +39,22 @@ public class GradleBackedArtifactBuilder implements ArtifactBuilder {
     }
 
     public void buildJar(File jarFile) {
+        buildJar(jarFile, false);
+    }
+
+    public void buildJar(File jarFile, boolean deleteIfExists) {
+        if (deleteIfExists && jarFile.exists()) {
+            if(!jarFile.delete()) {
+                throw new IllegalStateException("Couldn't delete file " + jarFile);
+            }
+        }
         rootDir.file("build.gradle").writelns(
                 "apply plugin: 'java'",
                 "dependencies { compile gradleApi() }",
                 String.format("jar.destinationDir = file('%s')", FilenameUtils.separatorsToUnix(jarFile.getParent())),
-                String.format("jar.archiveName = '%s'", jarFile.getName())
+                String.format("jar.archiveName = '%s'", jarFile.getName()),
+                // disable jar file caching to prevent file locking
+                "new URL(\"jar:file://valid_jar_url_syntax.jar!/\").openConnection().setDefaultUseCaches(false)"
         );
         executer.inDirectory(rootDir).withTasks("clean", "jar").run();
     }

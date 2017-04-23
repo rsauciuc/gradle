@@ -17,9 +17,9 @@
 package org.gradle.initialization;
 
 import org.gradle.api.logging.LogLevel;
+import org.gradle.api.logging.configuration.ConsoleOutput;
+import org.gradle.api.logging.configuration.ShowStacktrace;
 import org.gradle.cli.CommandLineArgumentException;
-import org.gradle.logging.ConsoleOutput;
-import org.gradle.logging.ShowStacktrace;
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider;
 import org.hamcrest.Matchers;
 import org.junit.Assert;
@@ -241,10 +241,15 @@ public class DefaultCommandLineConverterTest extends CommandLineConverterTestSup
     }
 
     @Test
+    public void withWarnLoggingOptions() {
+        expectedLogLevel = LogLevel.WARN;
+        checkConversion("-w");
+    }
+
+    @Test
     public void withNoColor() {
-        expectedColorOutput = false;
         expectedConsoleOutput = ConsoleOutput.Plain;
-        checkConversion("--no-color");
+        checkConversion("--console", "plain");
     }
 
     @Test
@@ -314,20 +319,7 @@ public class DefaultCommandLineConverterTest extends CommandLineConverterTestSup
     @Test
     public void withParallelExecutor() {
         expectedParallelProjectExecution = true;
-        expectedParallelExecutorCount = expectedMaxWorkersCount;
         checkConversion("--parallel");
-    }
-
-    @Test
-    public void withParallelExecutorThreads() {
-        expectedParallelProjectExecution = true;
-        expectedMaxWorkersCount = expectedParallelExecutorCount = 5;
-        checkConversion("--parallel-threads", "5");
-    }
-
-    @Test(expected = CommandLineArgumentException.class)
-    public void withInvalidParallelExecutorThreads() {
-        checkConversion("--parallel-threads", "foo");
     }
 
     @Test
@@ -359,4 +351,10 @@ public class DefaultCommandLineConverterTest extends CommandLineConverterTestSup
         checkConversion("-t");
     }
 
+    @Test
+    public void withCompositeBuild() {
+        File build1 = currentDir.getParentFile().file("build1");
+        expectedParticipants.add(build1);
+        checkConversion("--include-build", "../build1");
+    }
 }

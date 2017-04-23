@@ -16,10 +16,13 @@
 
 package org.gradle.integtests
 
+import groovy.transform.NotYetImplemented
+import org.gradle.api.CircularReferenceException
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import spock.lang.Ignore
 import spock.lang.Issue
 
+import static org.gradle.integtests.fixtures.executer.TaskOrderSpecs.*
 import static org.hamcrest.Matchers.startsWith
 
 public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
@@ -27,15 +30,17 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
     def taskCanAccessTaskGraph() {
         buildFile << """
     boolean notified = false
-    task a(dependsOn: 'b') << { task ->
-        assert notified
-        assert gradle.taskGraph.hasTask(task)
-        assert gradle.taskGraph.hasTask(':a')
-        assert gradle.taskGraph.hasTask(a)
-        assert gradle.taskGraph.hasTask(':b')
-        assert gradle.taskGraph.hasTask(b)
-        assert gradle.taskGraph.allTasks.contains(task)
-        assert gradle.taskGraph.allTasks.contains(tasks.getByName('b'))
+    task a(dependsOn: 'b') {
+        doLast { task ->
+            assert notified
+            assert gradle.taskGraph.hasTask(task)
+            assert gradle.taskGraph.hasTask(':a')
+            assert gradle.taskGraph.hasTask(a)
+            assert gradle.taskGraph.hasTask(':b')
+            assert gradle.taskGraph.hasTask(b)
+            assert gradle.taskGraph.allTasks.contains(task)
+            assert gradle.taskGraph.allTasks.contains(tasks.getByName('b'))
+        }
     }
     task b
     gradle.taskGraph.whenReady { graph ->
@@ -58,10 +63,16 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
     def executesAllTasksInASingleBuildAndEachTaskAtMostOnce() {
         buildFile << """
     gradle.taskGraph.whenReady { assert !project.hasProperty('graphReady'); ext.graphReady = true }
-    task a << { task -> project.ext.executedA = task }
-    task b << { 
-        assert a == project.executedA
-        assert gradle.taskGraph.hasTask(':a')
+    task a {
+        doLast { task ->
+            project.ext.executedA = task
+        }
+    }
+    task b {
+        doLast {
+            assert a == project.executedA
+            assert gradle.taskGraph.hasTask(':a')
+        }
     }
     task c(dependsOn: a)
     task d(dependsOn: a)
@@ -106,8 +117,8 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
 
     def doesNotExecuteTaskActionsWhenDryRunSpecified() {
         buildFile << """
-    task a << { fail() }
-    task b(dependsOn: a) << { fail() }
+    task a { doLast { fail() } }
+    task b(dependsOn: a) { doLast { fail() } }
     defaultTasks 'b'
 """
 
@@ -121,7 +132,7 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
     def executesTaskActionsInCorrectEnvironment() {
         buildFile << """
     // An action attached to built-in task
-    task a << { assert Thread.currentThread().contextClassLoader == getClass().classLoader }
+    task a { doLast { assert Thread.currentThread().contextClassLoader == getClass().classLoader } }
 
     // An action defined by a custom task
     task b(type: CustomTask)
@@ -279,7 +290,7 @@ task someTask(dependsOn: [someDep, someOtherDep])
 
     def "explicit tasks are preferred over placeholder tasks"() {
         buildFile << """
-        task someTask << {println "explicit sometask"}
+        task someTask { doLast {println "explicit sometask"} }
         tasks.addPlaceholderAction("someTask", DefaultTask) {
             println  "placeholder action triggered"
             it.doLast { throw new RuntimeException() }
@@ -313,7 +324,7 @@ task someTask(dependsOn: [someDep, someOtherDep])
         succeeds 'c', 'd'
 
         then:
-        result.assertTasksExecuted(':d', ':b', ':a', ':c')
+        result.assertTasksExecutedInOrder(any(':d', ':b', ':a'), ':c')
     }
 
     def "finalizer task is executed if a finalized task is executed"() {
@@ -409,21 +420,19 @@ task someTask(dependsOn: [someDep, someOtherDep])
 
     def "honours shouldRunAfter task ordering"() {
         buildFile << """
-
-    class NotParallel extends DefaultTask {}
-
-    task a(type: NotParallel) {
+    task a() {
         dependsOn 'b'
     }
-    task b(type: NotParallel) {
+    task b() {
         shouldRunAfter 'c'
     }
-    task c(type: NotParallel)
-    task d(type: NotParallel) {
+    task c()
+    task d() {
         dependsOn 'c'
     }
 """
         when:
+        args("--max-workers=1")
         succeeds 'a', 'd'
 
         then:
@@ -432,38 +441,207 @@ task someTask(dependsOn: [someDep, someOtherDep])
 
     def "multiple should run after ordering can be ignored for one execution plan"() {
         buildFile << """
-    class NotParallel extends DefaultTask {}
-
-    task a(type: NotParallel) {
+    task a() {
         dependsOn 'b', 'h'
     }
-    task b(type: NotParallel) {
+    task b() {
         dependsOn 'c'
     }
-    task c(type: NotParallel) {
+    task c() {
         dependsOn 'g'
         shouldRunAfter 'd'
     }
-    task d(type: NotParallel) {
+    task d() {
         finalizedBy 'e'
         dependsOn 'f'
     }
-    task e(type: NotParallel)
-    task f(type: NotParallel) {
+    task e()
+    task f() {
         dependsOn 'c'
     }
-    task g(type: NotParallel) {
+    task g() {
         shouldRunAfter 'h'
     }
-    task h(type: NotParallel) {
+    task h() {
         dependsOn 'b'
     }
 """
 
         when:
+        args("--max-workers=1")
         succeeds 'a', 'd'
 
         then:
         executedTasks == [':g', ':c', ':b', ':h', ':a', ':f', ':d', ':e']
+    }
+
+    @Issue("GRADLE-3575")
+    def "honours task ordering with finalizers on finalizers"() {
+        buildFile << """
+            task a() {
+                dependsOn 'c', 'g'
+            }
+
+            task b() {
+                dependsOn 'd'
+                finalizedBy 'e'
+            }
+
+            task c() {
+                dependsOn 'd'
+            }
+
+            task d() {
+                dependsOn 'f'
+            }
+
+            task e() {
+                finalizedBy 'h'
+            }
+
+            task f() {
+                finalizedBy 'h'
+            }
+
+            task g() {
+                dependsOn 'd'
+            }
+
+            task h()
+        """
+
+        when:
+        succeeds 'a'
+
+        then:
+        result.assertTasksExecutedInOrder(
+            any(
+                exact(':f', ':h'),
+                exact(any(':c', ':g'), ':a'),
+                exact(':f', ':d', ':c')
+            )
+        )
+
+        when:
+        succeeds 'b'
+
+        then:
+        result.assertTasksExecutedInOrder(
+            any(
+                exact(':f', ':h'),
+                exact(':b', ':e'),
+                exact(':f', ':d', ':b')
+            )
+        )
+
+        when:
+        succeeds 'a', 'b'
+
+        then:
+        result.assertTasksExecutedInOrder(
+            any(
+                exact(':f', ':h'),
+                exact(':b', ':e'),
+                exact(':f', ':d', any(':b', ':c')),
+                exact(any(':c', ':g'), ':a'),
+            )
+        )
+
+        when:
+        succeeds 'b', 'a'
+
+        then:
+        result.assertTasksExecutedInOrder(
+            any(
+                exact(':f', ':h'),
+                exact(':b', ':e'),
+                exact(':f', ':d', any(':b', ':c')),
+                exact(any(':c', ':g'), ':a'),
+            )
+        )
+    }
+
+    @Issue("gradle/gradle#783")
+    def "executes finalizer task as soon as possible after finalized task"() {
+        buildFile << """
+            project(":a") {
+                task jar() {
+                  dependsOn "compileJava"
+                }
+                task compileJava() {
+                  dependsOn ":b:jar"
+                  finalizedBy "compileFinalizer"
+                }
+                task compileFinalizer()
+            }
+
+            project(":b") {
+                task jar()
+            }
+
+            task build() {
+              dependsOn ":a:jar"
+              dependsOn ":b:jar"
+            }
+        """
+        settingsFile << "include 'a', 'b'"
+
+        when:
+        succeeds ':build'
+
+        then:
+        result.assertTasksExecutedInOrder(':b:jar', ':a:compileJava', ':a:compileFinalizer', ':a:jar', ':build')
+    }
+
+    @Issue(["gradle/gradle#769", "gradle/gradle#841"])
+    def "execution succeed in presence of long dependency chain"() {
+        def count = 9000
+        buildFile << """
+            task a() {
+                finalizedBy 'f'
+            }
+
+            task f() {
+                dependsOn "d_0"
+            }
+
+            def nextIndex
+            ${count}.times {
+                nextIndex = it + 1
+                task "d_\$it"() { task ->
+                    dependsOn "d_\$nextIndex"
+                }
+            }
+            task "d_\$nextIndex"()
+        """
+
+        when:
+        succeeds 'a'
+
+        then:
+
+        result.assertTasksExecutedInOrder(([':a'] + (count..0).collect { ":d_$it" } + [':f']) as String[])
+    }
+
+    @NotYetImplemented
+    @Issue("gradle/gradle#767")
+    def "detect a cycle when a task finalized itself"() {
+        buildFile << """
+            class NotParallel extends DefaultTask {}
+
+            task a(type: NotParallel) {
+                finalizedBy "b"
+            }
+
+            task b(type: NotParallel) {
+                finalizedBy "b"
+            }
+        """
+
+        when:
+        fails 'a'
+
+        then:
+        thrown(CircularReferenceException)
     }
 }

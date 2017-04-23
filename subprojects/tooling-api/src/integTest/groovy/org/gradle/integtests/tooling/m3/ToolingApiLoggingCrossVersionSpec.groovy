@@ -32,10 +32,12 @@ class ToolingApiLoggingCrossVersionSpec extends ToolingApiLoggingSpecification {
         def finishedMessage = "logging task: finished"
 
         file("build.gradle") << """
-task log << {
-    println "${waitingMessage}"
-    new URL("${server.uri}").text
-    println "${finishedMessage}"
+task log {
+    doLast {
+        println "${waitingMessage}"
+        new URL("${server.uri}").text
+        println "${finishedMessage}"
+    }
 }
 """
 
@@ -47,14 +49,16 @@ task log << {
             build.standardOutput = output
             build.forTasks("log")
             build.run(resultHandler)
-            server.waitFor()
-            ConcurrentTestUtil.poll {
-                // Need to poll, as logging output is delivered asynchronously to client
-                assert output.toString().contains(waitingMessage)
+            if (server.waitFor(false)) {
+                ConcurrentTestUtil.poll {
+                    // Need to poll, as logging output is delivered asynchronously to client
+                    assert output.toString().contains(waitingMessage)
+                }
+                assert !output.toString().contains(finishedMessage)
+                server.release()
+                resultHandler.finished()
             }
-            assert !output.toString().contains(finishedMessage)
-            server.release()
-            resultHandler.finished()
+            resultHandler.failWithFailure()
         }
 
         then:

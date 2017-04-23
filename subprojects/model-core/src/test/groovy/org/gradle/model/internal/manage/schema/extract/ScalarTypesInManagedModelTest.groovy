@@ -15,14 +15,14 @@
  */
 
 package org.gradle.model.internal.manage.schema.extract
-
 import org.gradle.api.artifacts.Configuration
-import org.gradle.model.internal.core.ModelRegistrations
 import org.gradle.model.internal.core.ModelRuleExecutionException
 import org.gradle.model.internal.fixture.ProjectRegistrySpec
 import spock.lang.Unroll
 
 import java.util.regex.Pattern
+
+import static org.gradle.model.ModelTypeTesting.fullyQualifiedNameOf
 
 class ScalarTypesInManagedModelTest extends ProjectRegistrySpec {
 
@@ -44,7 +44,7 @@ class ScalarTypesInManagedModelTest extends ProjectRegistrySpec {
         """
 
         then:
-        failWhenRealized(clazz, Pattern.quote("Invalid managed model type 'ManagedType': read only property 'managedProperty' has non managed type ${someType.name}, only managed types can be used"))
+        failWhenRealized(clazz, Pattern.quote("Invalid managed model type 'ManagedType': read only property 'managedProperty' has non managed type ${fullyQualifiedNameOf(someType)}, only managed types can be used"))
 
         where:
         someType << [
@@ -100,7 +100,7 @@ class ScalarTypesInManagedModelTest extends ProjectRegistrySpec {
     }
 
     private void realize(Class type) {
-        registry.register(ModelRegistrations.of(registry.path("bar"), nodeInitializerRegistry.getNodeInitializer(type)).descriptor(registry.desc("bar")).build())
+        registry.registerWithInitializer("bar", type, nodeInitializerRegistry)
         registry.realize("bar", type)
     }
 }

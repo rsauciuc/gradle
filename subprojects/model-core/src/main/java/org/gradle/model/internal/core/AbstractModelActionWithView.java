@@ -19,14 +19,9 @@ package org.gradle.model.internal.core;
 import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
 import org.gradle.model.internal.type.ModelType;
 
-import java.util.Arrays;
 import java.util.List;
 
 public abstract class AbstractModelActionWithView<T> extends AbstractModelAction<T> {
-    protected AbstractModelActionWithView(ModelReference<T> subject, ModelRuleDescriptor descriptor, ModelReference<?>... inputs) {
-        this(subject, descriptor, Arrays.asList(inputs));
-    }
-
     protected AbstractModelActionWithView(ModelReference<T> subject, ModelRuleDescriptor descriptor, List<? extends ModelReference<?>> inputs) {
         super(subject, descriptor, inputs);
     }
@@ -37,11 +32,7 @@ public abstract class AbstractModelActionWithView<T> extends AbstractModelAction
             throw new IllegalStateException("Cannot get view for node " + node.getPath() + " in state " + node.getState());
         }
         ModelType<T> type = getSubject().getType();
-        ModelView<? extends T> view = node.asMutable(type, getDescriptor(), inputs);
-        if (view == null) {
-            // TODO better error reporting here
-            throw new IllegalArgumentException(String.format("Cannot project model element %s to writable type '%s' for rule %s", node.getPath(), type, getDescriptor()));
-        }
+        ModelView<? extends T> view = node.asMutable(type, getDescriptor());
         try {
             execute(node, view.getInstance(), inputs);
         } finally {

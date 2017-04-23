@@ -15,6 +15,8 @@
  */
 package org.gradle.build.docs.dsl.source
 
+import groovy.time.TimeCategory
+import groovy.time.TimeDuration
 import groovyjarjarantlr.collections.AST
 import org.codehaus.groovy.antlr.AntlrASTProcessor
 import org.codehaus.groovy.antlr.SourceBuffer
@@ -28,14 +30,17 @@ import org.codehaus.groovy.antlr.treewalker.PreOrderTraversal
 import org.codehaus.groovy.antlr.treewalker.SourceCodeTraversal
 import org.codehaus.groovy.antlr.treewalker.Visitor
 import org.gradle.api.Action
+import org.gradle.api.file.FileTree
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.SourceTask
 import org.gradle.api.tasks.TaskAction
 import org.gradle.build.docs.dsl.source.model.ClassMetaData
 import org.gradle.build.docs.dsl.source.model.TypeMetaData
 import org.gradle.build.docs.model.ClassMetaDataRepository
 import org.gradle.build.docs.model.SimpleClassMetaDataRepository
-import org.gradle.util.Clock
 import org.gradle.build.docs.DocGenerationException
 import org.gradle.api.Transformer
 
@@ -43,13 +48,23 @@ import org.gradle.api.Transformer
  * Extracts meta-data from the Groovy and Java source files which make up the Gradle API. Persists the meta-data to a file
  * for later use in generating documentation for the DSL, such as by {@link org.gradle.build.docs.dsl.docbook.AssembleDslDocTask}.
  */
+@CacheableTask
 class ExtractDslMetaDataTask extends SourceTask {
     @OutputFile
     def File destFile
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @PathSensitive(PathSensitivity.NAME_ONLY)
+    public FileTree getSource() {
+        return super.getSource();
+    }
+
     @TaskAction
     def extract() {
-        Clock clock = new Clock()
+        Date start = new Date()
 
         //parsing all input files into metadata
         //and placing them in the repository object
@@ -68,16 +83,18 @@ class ExtractDslMetaDataTask extends SourceTask {
         }
         repository.store(destFile)
 
-        println "Parsed $counter classes in ${clock.time}"
+        Date stop = new Date()
+        TimeDuration elapsedTime = TimeCategory.minus(stop, start)
+        println "Parsed $counter classes in ${elapsedTime}"
     }
 
     def parse(File sourceFile, ClassMetaDataRepository<ClassMetaData> repository) {
         try {
             sourceFile.withReader { reader ->
                 if (sourceFile.name.endsWith('.java')) {
-                    parseJava(sourceFile, reader, repository)
+                    parseJava(reader, repository)
                 } else {
-                    parseGroovy(sourceFile, reader, repository)
+                    parseGroovy(reader, repository)
                 }
             }
         } catch (Exception e) {
@@ -85,7 +102,7 @@ class ExtractDslMetaDataTask extends SourceTask {
         }
     }
 
-    def parseJava(File sourceFile, Reader input, ClassMetaDataRepository<ClassMetaData> repository) {
+    def parseJava(Reader input, ClassMetaDataRepository<ClassMetaData> repository) {
         SourceBuffer sourceBuffer = new SourceBuffer();
         UnicodeEscapingReader unicodeReader = new UnicodeEscapingReader(input, sourceBuffer);
         JavaLexer lexer = new JavaLexer(unicodeReader);
@@ -108,7 +125,7 @@ class ExtractDslMetaDataTask extends SourceTask {
         visitor.complete()
     }
 
-    def parseGroovy(File sourceFile, Reader input, ClassMetaDataRepository<ClassMetaData> repository) {
+    def parseGroovy(Reader input, ClassMetaDataRepository<ClassMetaData> repository) {
         SourceBuffer sourceBuffer = new SourceBuffer();
         UnicodeEscapingReader unicodeReader = new UnicodeEscapingReader(input, sourceBuffer);
         GroovyLexer lexer = new GroovyLexer(unicodeReader);

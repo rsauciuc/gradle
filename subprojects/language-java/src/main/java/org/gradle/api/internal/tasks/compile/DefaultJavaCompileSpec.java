@@ -19,11 +19,13 @@ package org.gradle.api.internal.tasks.compile;
 import org.gradle.api.tasks.compile.CompileOptions;
 
 import java.io.File;
+import java.util.List;
 
 public class DefaultJavaCompileSpec extends DefaultJvmLanguageCompileSpec implements JavaCompileSpec {
     private CompileOptions compileOptions;
-    private File dependencyCacheDir;
+    private List<File> annotationProcessorPath;
 
+    @Override
     public CompileOptions getCompileOptions() {
         return compileOptions;
     }
@@ -32,11 +34,13 @@ public class DefaultJavaCompileSpec extends DefaultJvmLanguageCompileSpec implem
         this.compileOptions = compileOptions;
     }
 
-    public File getDependencyCacheDir() {
-        return dependencyCacheDir;
+    @Override
+    public List<File> getAnnotationProcessorPath() {
+        return annotationProcessorPath;
     }
 
-    public void setDependencyCacheDir(File dependencyCacheDir) {
-        this.dependencyCacheDir = dependencyCacheDir;
+    @Override
+    public void setAnnotationProcessorPath(List<File> annotationProcessorPath) {
+        this.annotationProcessorPath = annotationProcessorPath;
     }
 }

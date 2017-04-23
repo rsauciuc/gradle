@@ -20,25 +20,40 @@ import org.gradle.api.Nullable;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.internal.component.model.DefaultIvyArtifactName;
 import org.gradle.internal.component.model.IvyArtifactName;
-
-import java.util.Collections;
-import java.util.Map;
+import org.gradle.util.GUtil;
 
 public class DefaultModuleComponentArtifactIdentifier implements ModuleComponentArtifactIdentifier {
     private final ModuleComponentIdentifier componentIdentifier;
     private final IvyArtifactName name;
 
     public DefaultModuleComponentArtifactIdentifier(ModuleComponentIdentifier componentIdentifier, String name, String type, @Nullable String extension) {
-        this(componentIdentifier, name, type, extension, Collections.<String, String>emptyMap());
+        this(componentIdentifier, new DefaultIvyArtifactName(name, type, extension));
     }
 
-    public DefaultModuleComponentArtifactIdentifier(ModuleComponentIdentifier componentIdentifier, String name, String type, @Nullable String extension, Map<String, String> attributes) {
-        this(componentIdentifier, new DefaultIvyArtifactName(name, type, extension, attributes));
+    public DefaultModuleComponentArtifactIdentifier(ModuleComponentIdentifier componentIdentifier, String name, String type, @Nullable String extension, @Nullable String classifier) {
+        this(componentIdentifier, new DefaultIvyArtifactName(name, type, extension, classifier));
     }
 
     public DefaultModuleComponentArtifactIdentifier(ModuleComponentIdentifier componentIdentifier, IvyArtifactName artifact) {
         this.componentIdentifier = componentIdentifier;
         this.name = artifact;
+    }
+
+    @Override
+    public String getFileName() {
+        StringBuilder builder = new StringBuilder();
+        builder.append(name.getName());
+        builder.append('-');
+        builder.append(componentIdentifier.getVersion());
+        if (GUtil.isTrue(name.getClassifier())) {
+            builder.append('-');
+            builder.append(name.getClassifier());
+        }
+        if (GUtil.isTrue(name.getExtension())) {
+            builder.append('.');
+            builder.append(name.getExtension());
+        }
+        return builder.toString();
     }
 
     public String getDisplayName() {

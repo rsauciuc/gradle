@@ -46,7 +46,7 @@ public class ProjectDependencyFactoryTest extends Specification {
 
         then:
         projectDependency.getDependencyProject() == projectDummy
-        projectDependency.getConfiguration() == "compile"
+        projectDependency.targetConfiguration == "compile"
         projectDependency.isTransitive() == expectedTransitive
     }
 

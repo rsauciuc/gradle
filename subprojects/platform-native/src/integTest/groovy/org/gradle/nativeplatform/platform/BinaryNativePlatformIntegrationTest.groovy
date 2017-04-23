@@ -15,7 +15,6 @@
  */
 
 package org.gradle.nativeplatform.platform
-
 import net.rubygrapefruit.platform.Native
 import net.rubygrapefruit.platform.SystemInfo
 import org.gradle.internal.os.OperatingSystem
@@ -23,16 +22,16 @@ import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationS
 import org.gradle.nativeplatform.fixtures.ToolChainRequirement
 import org.gradle.nativeplatform.fixtures.app.PlatformDetectingTestApp
 import org.gradle.nativeplatform.fixtures.binaryinfo.DumpbinBinaryInfo
+import org.gradle.nativeplatform.fixtures.binaryinfo.FileArchOnlyBinaryInfo
 import org.gradle.nativeplatform.fixtures.binaryinfo.OtoolBinaryInfo
 import org.gradle.nativeplatform.fixtures.binaryinfo.ReadelfBinaryInfo
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import spock.lang.Issue
 import spock.lang.Unroll
 
 @Requires(TestPrecondition.NOT_UNKNOWN_OS)
-@LeaksFileHandles
 class BinaryNativePlatformIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
     def testApp = new PlatformDetectingTestApp()
     def os = OperatingSystem.current()
@@ -70,9 +69,9 @@ model {
 
         then:
         executedAndNotSkipped(":mainExecutable")
-        executable("build/binaries/mainExecutable/main").binaryInfo.arch.name == arch.name
-        executable("build/binaries/mainExecutable/main").exec().out == "${arch.altName} ${os.familyName}" * 2
-        binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/mainExecutable/mainCpp")).arch.name == arch.name
+        executable("build/exe/main/main").arch.name == arch.name
+        executable("build/exe/main/main").exec().out == "${arch.altName} ${os.familyName}" * 2
+        binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/main/mainCpp")).arch.name == arch.name
     }
 
     def "configure component for a single target platform"() {
@@ -91,7 +90,7 @@ model {
         }
     }
     components {
-        main.targetPlatform "x86"
+        main { targetPlatform "x86" }
     }
 }
 """
@@ -102,8 +101,8 @@ model {
         then:
         // Platform dimension is flattened since there is only one possible value
         executedAndNotSkipped(":mainExecutable")
-        executable("build/binaries/mainExecutable/main").binaryInfo.arch.name == "x86"
-        executable("build/binaries/mainExecutable/main").exec().out == "i386 ${os.familyName}" * 2
+        executable("build/exe/main/main").arch.name == "x86"
+        executable("build/exe/main/main").exec().out == "i386 ${os.familyName}" * 2
     }
 
     def "defaults to current platform when platforms are defined but not targeted"() {
@@ -128,8 +127,8 @@ model {
         then:
         // Platform dimension is flattened since there is only one possible value
         executedAndNotSkipped(":mainExecutable")
-        executable("build/binaries/mainExecutable/main").binaryInfo.arch.name == arch.name
-        executable("build/binaries/mainExecutable/main").exec().out == "${arch.altName} ${os.familyName}" * 2
+        executable("build/exe/main/main").arch.name == arch.name
+        executable("build/exe/main/main").exec().out == "${arch.altName} ${os.familyName}" * 2
     }
 
     def "library with matching platform is enforced by dependency resolution"() {
@@ -170,8 +169,8 @@ model {
         then:
         // Platform dimension is flattened since there is only one possible value
         executedAndNotSkipped(":exeExecutable")
-        executable("build/binaries/exeExecutable/exe").binaryInfo.arch.name == "x86"
-        executable("build/binaries/exeExecutable/exe").exec().out == "i386 ${os.familyName}" * 2
+        executable("build/exe/exe/exe").arch.name == "x86"
+        executable("build/exe/exe/exe").exec().out == "i386 ${os.familyName}" * 2
     }
 
     def "library with no platform defined is correctly chosen by dependency resolution"() {
@@ -199,8 +198,8 @@ model {
 
         then:
         executedAndNotSkipped(":exeExecutable")
-        executable("build/binaries/exeExecutable/exe").binaryInfo.arch.name == arch.name
-        executable("build/binaries/exeExecutable/exe").exec().out == "${arch.altName} ${os.familyName}" * 2
+        executable("build/exe/exe/exe").arch.name == arch.name
+        executable("build/exe/exe/exe").exec().out == "${arch.altName} ${os.familyName}" * 2
     }
 
     def "build binary for multiple target architectures"() {
@@ -233,25 +232,25 @@ model {
         succeeds "assemble"
 
         then:
-        executable("build/binaries/mainExecutable/x86/main").binaryInfo.arch.name == "x86"
-        executable("build/binaries/mainExecutable/x86/main").exec().out == "i386 ${os.familyName}" * 2
-        binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/mainExecutable/x86/mainCpp")).arch.name == "x86"
+        executable("build/exe/main/x86/main").arch.name == "x86"
+        executable("build/exe/main/x86/main").exec().out == "i386 ${os.familyName}" * 2
+        binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/main/x86/mainCpp")).arch.name == "x86"
 
         // x86_64 binaries not supported on MinGW or cygwin
         if (toolChain.id == "mingw" || toolChain.id == "gcccygwin") {
-            executable("build/binaries/mainExecutable/x86_64/main").assertDoesNotExist()
+            executable("build/exe/main/x86_64/main").assertDoesNotExist()
         } else {
-            executable("build/binaries/mainExecutable/x86_64/main").binaryInfo.arch.name == "x86_64"
-            executable("build/binaries/mainExecutable/x86_64/main").exec().out == "amd64 ${os.familyName}" * 2
-            binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/mainExecutable/x86_64/mainCpp")).arch.name == "x86_64"
+            executable("build/exe/main/x86_64/main").arch.name == "x86_64"
+            executable("build/exe/main/x86_64/main").exec().out == "amd64 ${os.familyName}" * 2
+            binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/main/x86_64/mainCpp")).arch.name == "x86_64"
         }
 
-        // ARM only supported on visualCpp 2013
-        if (toolChain.meets(ToolChainRequirement.VisualCpp2013)) {
-            executable("build/binaries/mainExecutable/arm/main").binaryInfo.arch.name == "arm"
-            binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/mainExecutable/arm/mainCpp")).arch.name == "arm"
+        // ARM only supported on visualCpp 2012+
+        if (toolChain.meets(ToolChainRequirement.VISUALCPP_2012_OR_NEWER)) {
+            executable("build/exe/main/arm/main").arch.name == "arm"
+            binaryInfo(objectFileFor(file("src/main/cpp/main.cpp"), "build/objs/main/arm/mainCpp")).arch.name == "arm"
         } else {
-            executable("build/binaries/mainExecutable/arm/main").assertDoesNotExist()
+            executable("build/exe/main/arm/main").assertDoesNotExist()
         }
     }
 
@@ -285,7 +284,7 @@ model {
         }
     }
     components {
-        main.targetPlatform "$currentOs"
+        main { targetPlatform "$currentOs" }
     }
     binaries {
         all {
@@ -301,11 +300,11 @@ model {
 
         then:
         if (os.windows) {
-            executable("build/binaries/mainExecutable/main").exec().out == "i386 windows" * 2
+            executable("build/exe/main/main").exec().out == "i386 windows" * 2
         } else if (os.linux) {
-            executable("build/binaries/mainExecutable/main").exec().out == "i386 linux" * 2
+            executable("build/exe/main/main").exec().out == "i386 linux" * 2
         } else if (os.macOsX) {
-            executable("build/binaries/mainExecutable/main").exec().out == "i386 os x" * 2
+            executable("build/exe/main/main").exec().out == "i386 os x" * 2
         } else {
             throw new AssertionError("Unexpected operating system")
         }
@@ -322,7 +321,7 @@ model {
         }
     }
     components {
-        main.targetPlatform 'unavailable'
+        main { targetPlatform 'unavailable' }
     }
 }
 """
@@ -352,7 +351,7 @@ model {
         main
     }
     components {
-        main.targetPlatform "unknown"
+        main { targetPlatform "unknown" }
     }
 }
 """
@@ -361,7 +360,7 @@ model {
         fails "mainExecutable"
 
         then:
-        failure.assertHasCause("Exception thrown while executing model rule: NativeComponentRules#createBinaries")
+        failure.assertHasCause("Exception thrown while executing model rule: NativeComponentModelPlugin.Rules#createBinaries")
         failure.assertHasCause("Invalid NativePlatform: unknown")
     }
 
@@ -395,15 +394,35 @@ model {
         failure.assertHasDescription("No shared library binary available for library 'hello' with [flavor: 'default', platform: 'one', buildType: 'debug']")
     }
 
+    @Issue("GRADLE-3499")
+    def "can create a binary which name contains dots"() {
+        when:
+        buildFile << '''
+            model {
+                components {
+                    'foo.bar'(NativeLibrarySpec)
+                }
+            }
+        '''
+        then:
+        succeeds 'components'
+
+    }
+
     def binaryInfo(TestFile file) {
+        // Only the arch functionality is needed for this test, so fall back to the file utility if nothing else works.
         file.assertIsFile()
         if (os.macOsX) {
             return new OtoolBinaryInfo(file)
         }
         if (os.windows) {
-            return new DumpbinBinaryInfo(file)
+            return DumpbinBinaryInfo.findVisualStudio() ? new DumpbinBinaryInfo(file) : new FileArchOnlyBinaryInfo(file)
         }
-        return new ReadelfBinaryInfo(file)
+        if (ReadelfBinaryInfo.canUseReadelf()) {
+            return new ReadelfBinaryInfo(file)
+        } else {
+            return new FileArchOnlyBinaryInfo(file)
+        }
     }
 
 }

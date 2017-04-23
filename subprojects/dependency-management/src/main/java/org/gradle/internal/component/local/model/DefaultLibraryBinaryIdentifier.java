@@ -19,7 +19,6 @@ import com.google.common.base.Objects;
 import org.gradle.api.artifacts.component.LibraryBinaryIdentifier;
 
 public class DefaultLibraryBinaryIdentifier implements LibraryBinaryIdentifier {
-    public static final String CONFIGURATION_API = "API";
 
     private final String projectPath;
     private final String libraryName;
@@ -37,7 +36,7 @@ public class DefaultLibraryBinaryIdentifier implements LibraryBinaryIdentifier {
         this.projectPath = projectPath;
         this.libraryName = libraryName;
         this.variant = variant;
-        this.displayName = String.format("project '%s' library '%s' variant '%s'", projectPath, libraryName, variant);
+        this.displayName = "project '" + projectPath + "' library '" + libraryName + "' variant '" + variant + "'";
     }
 
     @Override

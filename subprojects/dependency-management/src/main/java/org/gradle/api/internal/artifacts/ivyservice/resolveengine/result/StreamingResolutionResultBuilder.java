@@ -16,94 +16,118 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.result;
 
-import org.gradle.api.artifacts.ModuleVersionIdentifier;
-import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.result.ResolutionResult;
 import org.gradle.api.artifacts.result.ResolvedComponentResult;
-import org.gradle.api.internal.artifacts.ModuleVersionIdentifierSerializer;
-import org.gradle.internal.resolve.ModuleVersionResolveException;
+import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.ComponentResult;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphComponent;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphEdge;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphNode;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphSelector;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphVisitor;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyResult;
 import org.gradle.api.internal.artifacts.result.DefaultResolutionResult;
 import org.gradle.api.internal.cache.BinaryStore;
 import org.gradle.api.internal.cache.Store;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.Factory;
+import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.internal.serialize.Decoder;
 import org.gradle.internal.serialize.Encoder;
-import org.gradle.util.Clock;
+import org.gradle.internal.time.Timer;
+import org.gradle.internal.time.Timers;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.gradle.internal.UncheckedException.throwAsUncheckedException;
 
-public class StreamingResolutionResultBuilder implements ResolutionResultBuilder {
-
+public class StreamingResolutionResultBuilder implements DependencyGraphVisitor {
     private final static byte ROOT = 1;
-    private final static byte MODULE = 2;
-    private final static byte DEPENDENCY = 3;
-    private final static byte DONE = 4;
+    private final static byte COMPONENT = 2;
+    private final static byte SELECTOR = 4;
+    private final static byte DEPENDENCY = 5;
 
     private final Map<ComponentSelector, ModuleVersionResolveException> failures = new HashMap<ComponentSelector, ModuleVersionResolveException>();
     private final BinaryStore store;
-    private final ModuleVersionIdentifierSerializer moduleVersionIdentifierSerializer = new ModuleVersionIdentifierSerializer();
-    private final ModuleVersionSelectionSerializer moduleVersionSelectionSerializer = new ModuleVersionSelectionSerializer();
+    private final ComponentResultSerializer componentResultSerializer;
     private final Store<ResolvedComponentResult> cache;
-    private final InternalDependencyResultSerializer internalDependencyResultSerializer = new InternalDependencyResultSerializer();
-    private final ComponentIdentifierSerializer componentIdentifierSerializer = new ComponentIdentifierSerializer();
+    private final ComponentSelectorSerializer componentSelectorSerializer = new ComponentSelectorSerializer();
+    private final DependencyResultSerializer dependencyResultSerializer = new DependencyResultSerializer();
+    private final Set<Long> visitedComponents = new HashSet<Long>();
 
-    public StreamingResolutionResultBuilder(BinaryStore store, Store<ResolvedComponentResult> cache) {
+    public StreamingResolutionResultBuilder(BinaryStore store, Store<ResolvedComponentResult> cache, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
+        this.componentResultSerializer = new ComponentResultSerializer(moduleIdentifierFactory);
         this.store = store;
         this.cache = cache;
     }
 
     public ResolutionResult complete() {
-        store.write(new BinaryStore.WriteAction() {
-            public void write(Encoder encoder) throws IOException {
-                encoder.writeByte(DONE);
-            }
-        });
         BinaryStore.BinaryData data = store.done();
-        RootFactory rootSource = new RootFactory(data, failures, cache);
+        RootFactory rootSource = new RootFactory(data, failures, cache, componentSelectorSerializer, dependencyResultSerializer, componentResultSerializer);
         return new DefaultResolutionResult(rootSource);
     }
 
-    public ResolutionResultBuilder start(final ModuleVersionIdentifier root, final ComponentIdentifier componentIdentifier) {
+    @Override
+    public void start(final DependencyGraphNode root) {
+    }
+
+    @Override
+    public void finish(final DependencyGraphNode root) {
         store.write(new BinaryStore.WriteAction() {
             public void write(Encoder encoder) throws IOException {
                 encoder.writeByte(ROOT);
-                moduleVersionIdentifierSerializer.write(encoder, root);
-                componentIdentifierSerializer.write(encoder, componentIdentifier);
+                encoder.writeSmallLong(root.getOwner().getResultId());
             }
         });
-        return this;
     }
 
-    Set<ModuleVersionIdentifier> visitedModules = new HashSet<ModuleVersionIdentifier>();
-
-    public void resolvedModuleVersion(final ModuleVersionSelection moduleVersion) {
-        if (visitedModules.add(moduleVersion.getId())) {
+    @Override
+    public void visitNode(DependencyGraphNode resolvedConfiguration) {
+        final DependencyGraphComponent component = resolvedConfiguration.getOwner();
+        if (visitedComponents.add(component.getResultId())) {
             store.write(new BinaryStore.WriteAction() {
                 public void write(Encoder encoder) throws IOException {
-                    encoder.writeByte(MODULE);
-                    moduleVersionSelectionSerializer.write(encoder, moduleVersion);
+                    encoder.writeByte(COMPONENT);
+                    componentResultSerializer.write(encoder, component);
                 }
             });
         }
     }
 
-    public void resolvedConfiguration(final ModuleVersionIdentifier from, final Collection<? extends InternalDependencyResult> dependencies) {
+    @Override
+    public void visitSelector(final DependencyGraphSelector selector) {
+        store.write(new BinaryStore.WriteAction() {
+            @Override
+            public void write(Encoder encoder) throws IOException {
+                encoder.writeByte(SELECTOR);
+                encoder.writeSmallLong(selector.getResultId());
+                componentSelectorSerializer.write(encoder, selector.getRequested());
+            }
+        });
+    }
+
+    @Override
+    public void visitEdges(DependencyGraphNode resolvedConfiguration) {
+        final Long fromComponent = resolvedConfiguration.getOwner().getResultId();
+        final Set<? extends DependencyGraphEdge> dependencies = resolvedConfiguration.getOutgoingEdges();
         if (!dependencies.isEmpty()) {
             store.write(new BinaryStore.WriteAction() {
                 public void write(Encoder encoder) throws IOException {
                     encoder.writeByte(DEPENDENCY);
-                    moduleVersionIdentifierSerializer.write(encoder, from);
+                    encoder.writeSmallLong(fromComponent);
                     encoder.writeSmallInt(dependencies.size());
-                    for (InternalDependencyResult dependency : dependencies) {
-                        internalDependencyResultSerializer.write(encoder, dependency);
+                    for (DependencyGraphEdge dependency : dependencies) {
+                        dependencyResultSerializer.write(encoder, dependency);
                         if (dependency.getFailure() != null) {
-                            //by keying the failures only be 'requested' we lose some precision
+                            //by keying the failures only by 'requested' we lose some precision
                             //at edge case we'll lose info about a different exception if we have different failure for the same requested version
                             failures.put(dependency.getRequested(), dependency.getFailure());
                         }
@@ -116,21 +140,22 @@ public class StreamingResolutionResultBuilder implements ResolutionResultBuilder
     private static class RootFactory implements Factory<ResolvedComponentResult> {
 
         private final static Logger LOG = Logging.getLogger(RootFactory.class);
-        private final ModuleVersionSelectionSerializer moduleVersionSelectionSerializer = new ModuleVersionSelectionSerializer();
+        private final ComponentResultSerializer componentResultSerializer;
 
         private final BinaryStore.BinaryData data;
         private final Map<ComponentSelector, ModuleVersionResolveException> failures;
         private final Store<ResolvedComponentResult> cache;
         private final Object lock = new Object();
-        private final ModuleVersionIdentifierSerializer moduleVersionIdentifierSerializer = new ModuleVersionIdentifierSerializer();
-        private final InternalDependencyResultSerializer internalDependencyResultSerializer = new InternalDependencyResultSerializer();
-        private final ComponentIdentifierSerializer componentIdentifierSerializer = new ComponentIdentifierSerializer();
+        private final ComponentSelectorSerializer componentSelectorSerializer;
+        private final DependencyResultSerializer dependencyResultSerializer;
 
-        public RootFactory(BinaryStore.BinaryData data, Map<ComponentSelector, ModuleVersionResolveException> failures,
-                           Store<ResolvedComponentResult> cache) {
+        RootFactory(BinaryStore.BinaryData data, Map<ComponentSelector, ModuleVersionResolveException> failures, Store<ResolvedComponentResult> cache, ComponentSelectorSerializer componentSelectorSerializer, DependencyResultSerializer dependencyResultSerializer, ComponentResultSerializer componentResultSerializer) {
             this.data = data;
             this.failures = failures;
             this.cache = cache;
+            this.componentResultSerializer = componentResultSerializer;
+            this.componentSelectorSerializer = componentSelectorSerializer;
+            this.dependencyResultSerializer = dependencyResultSerializer;
         }
 
         public ResolvedComponentResult create() {
@@ -158,41 +183,44 @@ public class StreamingResolutionResultBuilder implements ResolutionResultBuilder
         private ResolvedComponentResult deserialize(Decoder decoder) {
             int valuesRead = 0;
             byte type = -1;
-            Clock clock = new Clock();
+            Timer clock = Timers.startTimer();
             try {
                 DefaultResolutionResultBuilder builder = new DefaultResolutionResultBuilder();
+                Map<Long, ComponentSelector> selectors = new HashMap<Long, ComponentSelector>();
                 while (true) {
                     type = decoder.readByte();
                     valuesRead++;
                     switch (type) {
                         case ROOT:
-                            ModuleVersionIdentifier id = moduleVersionIdentifierSerializer.read(decoder);
-                            ComponentIdentifier componentIdentifier = componentIdentifierSerializer.read(decoder);
-                            builder.start(id, componentIdentifier);
+                            // Last entry, complete the result
+                            Long rootId = decoder.readSmallLong();
+                            ResolvedComponentResult root = builder.complete(rootId).getRoot();
+                            LOG.debug("Loaded resolution results ({}) from {}", clock.getElapsed(), data);
+                            return root;
+                        case COMPONENT:
+                            ComponentResult component = componentResultSerializer.read(decoder);
+                            builder.visitComponent(component);
                             break;
-                        case MODULE:
-                            ModuleVersionSelection sel = moduleVersionSelectionSerializer.read(decoder);
-                            builder.resolvedModuleVersion(sel);
+                        case SELECTOR:
+                            Long id = decoder.readSmallLong();
+                            ComponentSelector selector = componentSelectorSerializer.read(decoder);
+                            selectors.put(id, selector);
                             break;
                         case DEPENDENCY:
-                            id = moduleVersionIdentifierSerializer.read(decoder);
+                            Long fromId = decoder.readSmallLong();
                             int size = decoder.readSmallInt();
-                            List<InternalDependencyResult> deps = new LinkedList<InternalDependencyResult>();
+                            List<DependencyResult> deps = new ArrayList<DependencyResult>(size);
                             for (int i = 0; i < size; i++) {
-                                deps.add(internalDependencyResultSerializer.read(decoder, failures));
+                                deps.add(dependencyResultSerializer.read(decoder, selectors, failures));
                             }
-                            builder.resolvedConfiguration(id, deps);
+                            builder.visitOutgoingEdges(fromId, deps);
                             break;
-                        case DONE:
-                            ResolvedComponentResult root = builder.complete().getRoot();
-                            LOG.debug("Loaded resolution results ({}) from {}", clock.getTime(), data);
-                            return root;
                         default:
                             throw new IOException("Unknown value type read from stream: " + type);
                     }
                 }
             } catch (IOException e) {
-                throw new RuntimeException("Problems loading the resolution results (" + clock.getTime() + "). "
+                throw new RuntimeException("Problems loading the resolution results (" + clock.getElapsed() + "). "
                         + "Read " + valuesRead + " values, last was: " + type, e);
             }
         }

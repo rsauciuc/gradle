@@ -20,18 +20,31 @@ import org.gradle.api.Action;
 import org.gradle.api.Transformer;
 import org.gradle.api.artifacts.ModuleVersionSelector;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
+import org.gradle.api.artifacts.ComponentMetadataSupplier;
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier;
-import org.gradle.internal.component.external.model.ModuleComponentResolveMetaData;
+import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata;
 import org.gradle.internal.component.model.DefaultComponentOverrideMetadata;
-import org.gradle.internal.component.model.DependencyMetaData;
+import org.gradle.internal.component.model.DependencyMetadata;
 import org.gradle.internal.resolve.ModuleVersionNotFoundException;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.internal.resolve.resolver.DependencyToComponentIdResolver;
-import org.gradle.internal.resolve.result.*;
+import org.gradle.internal.resolve.result.BuildableComponentIdResolveResult;
+import org.gradle.internal.resolve.result.BuildableModuleComponentMetaDataResolveResult;
+import org.gradle.internal.resolve.result.DefaultBuildableComponentSelectionResult;
+import org.gradle.internal.resolve.result.DefaultBuildableModuleComponentMetaDataResolveResult;
+import org.gradle.internal.resolve.result.DefaultBuildableModuleVersionListingResolveResult;
+import org.gradle.internal.resolve.result.ResourceAwareResolveResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.gradle.internal.resolve.result.BuildableModuleComponentMetaDataResolveResult.State.Failed;
 import static org.gradle.internal.resolve.result.BuildableModuleComponentMetaDataResolveResult.State.Resolved;
@@ -42,9 +55,9 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
     private final List<ModuleComponentRepository> repositories = new ArrayList<ModuleComponentRepository>();
     private final List<String> repositoryNames = new ArrayList<String>();
     private final VersionedComponentChooser versionedComponentChooser;
-    private final Transformer<ModuleComponentResolveMetaData, RepositoryChainModuleResolution> metaDataFactory;
+    private final Transformer<ModuleComponentResolveMetadata, RepositoryChainModuleResolution> metaDataFactory;
 
-    public DynamicVersionResolver(VersionedComponentChooser versionedComponentChooser, Transformer<ModuleComponentResolveMetaData, RepositoryChainModuleResolution> metaDataFactory) {
+    public DynamicVersionResolver(VersionedComponentChooser versionedComponentChooser, Transformer<ModuleComponentResolveMetadata, RepositoryChainModuleResolution> metaDataFactory) {
         this.versionedComponentChooser = versionedComponentChooser;
         this.metaDataFactory = metaDataFactory;
     }
@@ -54,7 +67,7 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
         repositoryNames.add(repository.getName());
     }
 
-    public void resolve(DependencyMetaData dependency, BuildableComponentIdResolveResult result) {
+    public void resolve(DependencyMetadata dependency, BuildableComponentIdResolveResult result) {
         ModuleVersionSelector requested = dependency.getRequested();
         LOGGER.debug("Attempting to resolve version for {} using repositories {}", requested, repositoryNames);
         List<Throwable> errors = new ArrayList<Throwable>();
@@ -170,10 +183,10 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
         private final VersionListResult versionListingResult;
         private final ModuleComponentRepository repository;
         private final AttemptCollector attemptCollector;
-        private final DependencyMetaData dependency;
+        private final DependencyMetadata dependency;
         private final ModuleVersionSelector selector;
 
-        public RepositoryResolveState(DependencyMetaData dependency, ModuleComponentRepository repository) {
+        public RepositoryResolveState(DependencyMetadata dependency, ModuleComponentRepository repository) {
             this.dependency = dependency;
             this.selector = dependency.getRequested();
             this.repository = repository;
@@ -248,18 +261,18 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
         private final ModuleComponentIdentifier identifier;
         private final ModuleComponentRepository repository;
         private final AttemptCollector attemptCollector;
-        private final DependencyMetaData dependencyMetaData;
+        private final DependencyMetadata dependencyMetadata;
         private final String version;
         private boolean searchedLocally;
         private boolean searchedRemotely;
         private final DefaultBuildableModuleComponentMetaDataResolveResult result = new DefaultBuildableModuleComponentMetaDataResolveResult();
 
-        public CandidateResult(DependencyMetaData dependencyMetaData, String version, ModuleComponentRepository repository, AttemptCollector attemptCollector) {
-            this.dependencyMetaData = dependencyMetaData;
+        public CandidateResult(DependencyMetadata dependencyMetadata, String version, ModuleComponentRepository repository, AttemptCollector attemptCollector) {
+            this.dependencyMetadata = dependencyMetadata;
             this.version = version;
             this.repository = repository;
             this.attemptCollector = attemptCollector;
-            ModuleVersionSelector requested = dependencyMetaData.getRequested();
+            ModuleVersionSelector requested = dependencyMetadata.getRequested();
             this.identifier = DefaultModuleComponentIdentifier.newId(requested.getGroup(), requested.getName(), version);
         }
 
@@ -293,8 +306,13 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
             return result;
         }
 
+        @Override
+        public ComponentMetadataSupplier getComponentMetadataSupplier() {
+            return repository.createMetadataSupplier();
+        }
+
         private void process(ModuleComponentRepositoryAccess access) {
-            DependencyMetaData dependency = dependencyMetaData.withRequestedVersion(version);
+            DependencyMetadata dependency = dependencyMetadata.withRequestedVersion(version);
             access.resolveComponentMetaData(identifier, DefaultComponentOverrideMetadata.forDependency(dependency), result);
             attemptCollector.execute(result);
         }
@@ -323,12 +341,12 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
     private static class VersionListResult {
         private final DefaultBuildableModuleVersionListingResolveResult result = new DefaultBuildableModuleVersionListingResolveResult();
         private final ModuleComponentRepository repository;
-        private final DependencyMetaData dependency;
+        private final DependencyMetadata dependency;
 
         private boolean searchedLocally;
         private boolean searchedRemotely;
 
-        public VersionListResult(DependencyMetaData dependency, ModuleComponentRepository repository) {
+        public VersionListResult(DependencyMetadata dependency, ModuleComponentRepository repository) {
             this.dependency = dependency;
             this.repository = repository;
         }
@@ -362,7 +380,7 @@ public class DynamicVersionResolver implements DependencyToComponentIdResolver {
             result.applyTo(target);
         }
 
-        private void process(DependencyMetaData dynamicVersionDependency, ModuleComponentRepositoryAccess moduleAccess) {
+        private void process(DependencyMetadata dynamicVersionDependency, ModuleComponentRepositoryAccess moduleAccess) {
             moduleAccess.listModuleVersions(dynamicVersionDependency, result);
         }
     }

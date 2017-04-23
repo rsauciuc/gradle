@@ -47,7 +47,7 @@ class InvalidManagedModelRuleIntegrationTest extends AbstractIntegrationSpec {
         fails "tasks"
 
         and:
-        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#createPerson")
+        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#createPerson(Person)")
         failure.assertHasCause("Cannot convert the provided notation to an object of type int")
     }
 
@@ -84,7 +84,7 @@ class InvalidManagedModelRuleIntegrationTest extends AbstractIntegrationSpec {
         fails "tasks"
 
         and:
-        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#createPerson")
+        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#createPerson(Person)")
         failure.assertHasCause("argument type mismatch")
     }
 
@@ -149,7 +149,29 @@ class InvalidManagedModelRuleIntegrationTest extends AbstractIntegrationSpec {
         fails "tasks"
 
         and:
-        failure.assertHasCause("Rules#s is not a valid model rule method: a void returning model element creation rule cannot take a value type as the first parameter, which is the element being created. Return the value from the method.")
+        failure.assertHasCause("Declaration of model rule Rules#s(String) is invalid.")
+        failure.assertHasCause("A model element of type: 'java.lang.String' can not be constructed.")
+    }
+
+    def "cannot use unknown type as subject of void model rule"() {
+        when:
+        buildScript '''
+            interface Thing { }
+
+            class Rules extends RuleSource {
+              @Model
+              void s(Thing s) {}
+            }
+
+            apply type: Rules
+        '''
+
+        then:
+        fails "tasks"
+
+        and:
+        failure.assertHasCause("Declaration of model rule Rules#s(Thing) is invalid.")
+        failure.assertHasCause("A model element of type: 'Thing' can not be constructed.")
     }
 
     def "provides a useful error message when an invalid managed type is used in a rule"() {
@@ -173,7 +195,7 @@ class InvalidManagedModelRuleIntegrationTest extends AbstractIntegrationSpec {
         fails "model"
 
         and:
-        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#createPerson")
+        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#createPerson(Person)")
         failure.assertHasCause("Invalid managed model type 'Person': read only property 'name' has non managed type java.lang.String, only managed types can be used")
     }
 }

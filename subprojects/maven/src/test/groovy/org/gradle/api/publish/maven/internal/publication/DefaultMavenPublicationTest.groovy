@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 package org.gradle.api.publish.maven.internal.publication
-
 import org.gradle.api.Action
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Task
 import org.gradle.api.artifacts.*
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.component.SoftwareComponentInternal
-import org.gradle.api.internal.component.Usage
+import org.gradle.api.internal.component.UsageContext
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.SimpleFileCollection
 import org.gradle.api.publish.internal.ProjectDependencyPublicationResolver
 import org.gradle.api.publish.internal.PublicationInternal
@@ -30,16 +30,15 @@ import org.gradle.api.publish.maven.internal.publisher.MavenProjectIdentity
 import org.gradle.api.tasks.TaskDependency
 import org.gradle.internal.reflect.DirectInstantiator
 import org.gradle.internal.typeconversion.NotationParser
-import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.UsesNativeServices
-import spock.lang.Shared
+import org.junit.Rule
 import spock.lang.Specification
 
-@UsesNativeServices
 public class DefaultMavenPublicationTest extends Specification {
-    @Shared TestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    @Rule
+    final TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+
     def module = Mock(MavenProjectIdentity)
     NotationParser<Object, MavenArtifact> notationParser = Mock(NotationParser)
     def projectDependencyResolver = Mock(ProjectDependencyPublicationResolver)
@@ -203,6 +202,7 @@ public class DefaultMavenPublicationTest extends Specification {
         moduleDependency.version >> "version"
         moduleDependency.artifacts >> [artifact]
         moduleDependency.excludeRules >> [excludeRule]
+        moduleDependency.transitive >> true
 
         and:
         publication.from(componentWithDependency(moduleDependency))
@@ -218,12 +218,45 @@ public class DefaultMavenPublicationTest extends Specification {
         }
     }
 
+    def "adopts non-transitive module dependency from added component"() {
+        given:
+        def publication = createPublication()
+        def moduleDependency = Mock(ModuleDependency)
+        def artifact = Mock(DependencyArtifact)
+        def excludeRule = Mock(ExcludeRule)
+
+        when:
+        moduleDependency.group >> "group"
+        moduleDependency.name >> "name"
+        moduleDependency.version >> "version"
+        moduleDependency.artifacts >> [artifact]
+        moduleDependency.excludeRules >> [excludeRule]
+        moduleDependency.transitive >> false
+
+        and:
+        publication.from(componentWithDependency(moduleDependency))
+
+        then:
+        publication.runtimeDependencies.size() == 1
+        with (publication.runtimeDependencies.asList().first()) {
+                groupId == "group"
+                artifactId == "name"
+                version == "version"
+                artifacts == [artifact]
+                excludeRules != [excludeRule]
+                excludeRules.size() == 1
+                excludeRules[0].group == '*'
+                excludeRules[0].module == '*'
+        }
+    }
+
     def "maps project dependency to ivy dependency"() {
         given:
         def publication = createPublication()
         def projectDependency = Mock(ProjectDependency)
 
         and:
+        projectDependency.excludeRules >> []
         projectDependencyResolver.resolve(projectDependency) >> DefaultModuleVersionIdentifier.newId("pub-group", "pub-name", "pub-version")
 
         when:
@@ -321,7 +354,7 @@ public class DefaultMavenPublicationTest extends Specification {
     }
 
     def createPublication() {
-        def publication = new DefaultMavenPublication("pub-name", module, notationParser, DirectInstantiator.INSTANCE, projectDependencyResolver)
+        def publication = new DefaultMavenPublication("pub-name", module, notationParser, DirectInstantiator.INSTANCE, projectDependencyResolver, TestFiles.fileCollectionFactory())
         publication.setPomFile(new SimpleFileCollection(pomFile))
         return publication;
     }
@@ -342,7 +375,7 @@ public class DefaultMavenPublicationTest extends Specification {
     }
 
     def createComponent(def artifacts, def dependencies) {
-        def usage = Stub(Usage) {
+        def usage = Stub(UsageContext) {
             getName() >> "runtime"
             getArtifacts() >> artifacts
             getDependencies() >> dependencies

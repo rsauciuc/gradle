@@ -17,6 +17,7 @@ package org.gradle.integtests.resolve.maven
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
 import spock.lang.Issue
+import spock.lang.Unroll
 
 class BadPomFileResolveIntegrationTest extends AbstractHttpDependencyResolutionTest {
     @Issue("https://issues.gradle.org/browse/GRADLE-1005")
@@ -33,52 +34,10 @@ class BadPomFileResolveIntegrationTest extends AbstractHttpDependencyResolutionT
             dependencies {
                 compile "group:artifact:1.0"
             }
-            task libs << { assert configurations.compile.files.collect {it.name} == ['artifact-1.0.jar'] }
+            task libs { doLast { assert configurations.compile.files.collect {it.name} == ['artifact-1.0.jar'] } }
         """
 
         expect:
-        succeeds ":libs"
-    }
-
-    @Issue("https://issues.gradle.org/browse/GRADLE-2861")
-    def "can handle pom with placeholders in dependency management"() {
-        given:
-        def parent = mavenHttpRepo.module('group', 'parent', '1.0').publish()
-        parent.pomFile.text = parent.pomFile.text.replace("</project>", """
-<dependencyManagement>
-    <dependencies>
-        <dependency>
-            <groupId>\${some.group}</groupId>
-            <artifactId>\${some.artifact}</artifactId>
-            <version>\${some.version}</version>
-        </dependency>
-    </dependencies>
-</dependencyManagement>
-</project>
-""")
-
-        def module = mavenHttpRepo.module('group', 'artifact', '1.0').parent('group', 'parent', '1.0').publish()
-
-        and:
-        buildFile << """
-            repositories {
-                maven { url "${mavenHttpRepo.uri}" }
-            }
-            configurations { compile }
-            dependencies {
-                compile "group:artifact:1.0"
-            }
-            task libs << { assert configurations.compile.files.collect {it.name} == ['artifact-1.0.jar'] }
-        """
-
-        and:
-        parent.pom.expectGet()
-        module.pom.expectGet()
-        module.artifact.expectGet()
-
-        expect:
-        // have to run twice to trigger the failure, to parse the descriptor from the cache
-        succeeds ":libs"
         succeeds ":libs"
     }
 
@@ -94,7 +53,7 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task showBroken << { println configurations.compile.files }
+task showBroken { doLast { println configurations.compile.files } }
 """
 
         and:
@@ -108,7 +67,35 @@ task showBroken << { println configurations.compile.files }
         fails "showBroken"
         failure.assertResolutionFailure(":compile")
             .assertHasCause("Could not parse POM ${module.pom.uri}")
-            .assertHasCause("null name not allowed")
+            .assertHasCause("Missing required attribute: groupId")
+    }
+
+    def "reports local POM that cannot be parsed"() {
+        given:
+        buildFile << """
+repositories {
+    maven {
+        url "${mavenRepo.uri}"
+    }
+}
+configurations { compile }
+dependencies {
+    compile 'group:projectA:1.2'
+}
+task showBroken { doLast { println configurations.compile.files } }
+"""
+
+        and:
+        def module = mavenRepo.module('group', 'projectA', '1.2').publish()
+        module.pomFile.text = "<project/>"
+
+        when:
+        fails "showBroken"
+
+        then:
+        failure.assertResolutionFailure(":compile")
+            .assertHasCause("Could not parse POM ${module.pomFile}")
+            .assertHasCause("Missing required attribute: groupId")
     }
 
     def "reports missing parent POM"() {
@@ -125,7 +112,7 @@ repositories {
 }
 configurations { compile }
 dependencies { compile 'org:child:1.0' }
-task showBroken << { println configurations.compile.files }
+task showBroken { doLast { println configurations.compile.files } }
 """
 
         when:
@@ -163,7 +150,7 @@ repositories {
 }
 configurations { compile }
 dependencies { compile 'org:child:1.0' }
-task showBroken << { println configurations.compile.files }
+task showBroken { doLast { println configurations.compile.files } }
 """
 
         when:
@@ -177,6 +164,39 @@ task showBroken << { println configurations.compile.files }
         failure.assertResolutionFailure(":compile")
             .assertHasCause("Could not parse POM ${child.pom.uri}")
             .assertHasCause("Could not parse POM ${parent.pom.uri}")
-            .assertHasCause("null name not allowed")
+            .assertHasCause("Missing required attribute: groupId")
+    }
+
+    @Unroll
+    def "reports failure to parse POM due to missing dependency #attribute attribute"() {
+        given:
+        buildFile << """
+repositories {
+    maven {
+        url "${mavenRepo.uri}"
+    }
+}
+configurations { compile }
+dependencies {
+    compile 'group:projectA:1.2'
+}
+task showBroken { doLast { println configurations.compile.files } }
+"""
+
+        and:
+        def module = mavenHttpRepo.module('group', 'projectA', '1.2').dependsOn("other-groupId", "other-artifactId", "1.0").publish()
+        def elementToReplace = "<$attribute>other-$attribute</$attribute>"
+        module.pomFile.text = module.pomFile.text.replace(elementToReplace, "<!--$elementToReplace-->")
+
+        when:
+        fails "showBroken"
+
+        then:
+        failure.assertResolutionFailure(":compile")
+            .assertHasCause("Could not parse POM ${module.pomFile}")
+            .assertHasCause("Missing required attribute: dependency $attribute")
+
+        where:
+        attribute << ["groupId", "artifactId"]
     }
 }

@@ -16,20 +16,22 @@
 package org.gradle.api.tasks.diagnostics
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.test.fixtures.file.LeaksFileHandles
 
 class BuildEnvironmentReportTaskIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
         executer.requireOwnGradleUserHomeDir()
     }
 
+    @LeaksFileHandles("Putting an generated Jar on the classpath of the buildscript")
     def "reports external dependency name and version change"() {
         mavenRepo.module("org", "leaf1").publish()
         mavenRepo.module("org", "leaf2").publish()
         mavenRepo.module("org", "leaf3").publish()
         mavenRepo.module("org", "leaf4").publish()
 
-        mavenRepo.module("org", "toplevel1").dependsOn('leaf1', 'leaf2').publish()
-        mavenRepo.module("org", "toplevel2").dependsOn('leaf3', 'leaf4').publish()
+        mavenRepo.module("org", "toplevel1").dependsOnModules('leaf1', 'leaf2').publish()
+        mavenRepo.module("org", "toplevel2").dependsOnModules('leaf3', 'leaf4').publish()
 
         file("settings.gradle") << "include 'client', 'impl'"
 

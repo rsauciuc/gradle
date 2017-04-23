@@ -16,7 +16,6 @@
 package org.gradle.api.plugins
 
 import org.gradle.api.DefaultTask
-import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.reporting.ReportingExtension
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceSet
@@ -31,20 +30,18 @@ import org.gradle.language.base.plugins.LanguageBasePlugin
 import org.gradle.language.java.JavaSourceSet
 import org.gradle.language.jvm.JvmResourceSet
 import org.gradle.platform.base.BinarySpec
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.SetSystemProperties
-import org.gradle.util.TestUtil
 import org.junit.Rule
-import spock.lang.Specification
 
 import static org.gradle.api.file.FileCollectionMatchers.sameCollection
 import static org.gradle.model.internal.type.ModelTypes.modelMap
 import static org.gradle.util.WrapUtil.toLinkedSet
 
-class JavaBasePluginTest extends Specification {
+class JavaBasePluginTest extends AbstractProjectBuilderSpec {
     @Rule
     public SetSystemProperties sysProperties = new SetSystemProperties()
-    private final DefaultProject project = TestUtil.createRootProject()
 
     void appliesBasePluginsAndAddsConventionObject() {
         when:
@@ -163,20 +160,60 @@ class JavaBasePluginTest extends Specification {
         compile.transitive
         !compile.visible
         compile.extendsFrom == [] as Set
-        compile.description == "Compile classpath for source set 'custom'."
+        compile.description == "Dependencies for source set 'custom' (deprecated, use 'customImplementation ' instead)."
+
+        then:
+        def implementation = project.configurations.customImplementation
+        !implementation.visible
+        implementation.extendsFrom == [compile] as Set
+        implementation.description == "Implementation only dependencies for source set 'custom'."
+        !implementation.canBeConsumed
+        !implementation.canBeResolved
 
         and:
         def runtime = project.configurations.customRuntime
         runtime.transitive
         !runtime.visible
         runtime.extendsFrom == [compile] as Set
-        runtime.description == "Runtime classpath for source set 'custom'."
+        runtime.description == "Runtime dependencies for source set 'custom' (deprecated, use 'customRuntimeOnly ' instead)."
 
         and:
-        def runtimeClasspath = sourceSet.runtimeClasspath
-        def compileClasspath = sourceSet.compileClasspath
-        compileClasspath == compile
-        runtimeClasspath sameCollection(sourceSet.output + runtime)
+        def runtimeOnly = project.configurations.customRuntimeOnly
+        runtimeOnly.transitive
+        !runtimeOnly.visible
+        !runtimeOnly.canBeConsumed
+        !runtimeOnly.canBeResolved
+        runtimeOnly.extendsFrom == [] as Set
+        runtimeOnly.description == "Runtime only dependencies for source set 'custom'."
+
+        and:
+        def runtimeClasspath = project.configurations.customRuntimeClasspath
+        runtimeClasspath.transitive
+        !runtimeClasspath.visible
+        !runtimeClasspath.canBeConsumed
+        runtimeClasspath.canBeResolved
+        runtimeClasspath.extendsFrom == [runtimeOnly, runtime, implementation] as Set
+        runtimeClasspath.description == "Runtime classpath of source set 'custom'."
+
+        and:
+        def compileOnly = project.configurations.customCompileOnly
+        compileOnly.transitive
+        !compileOnly.visible
+        compileOnly.extendsFrom == [] as Set
+        compileOnly.description == "Compile only dependencies for source set 'custom'."
+
+        and:
+        def compileClasspath = project.configurations.customCompileClasspath
+        compileClasspath.transitive
+        !compileClasspath.visible
+        compileClasspath.extendsFrom == [compileOnly, implementation] as Set
+        compileClasspath.description == "Compile classpath for source set 'custom'."
+
+        and:
+        def sourceSetRuntimeClasspath = sourceSet.runtimeClasspath
+        def sourceSetCompileClasspath = sourceSet.compileClasspath
+        sourceSetCompileClasspath == compileClasspath
+        sourceSetRuntimeClasspath sameCollection(sourceSet.output + runtimeClasspath)
     }
 
     void appliesMappingsToTasksDefinedByBuildScript() {
@@ -189,8 +226,8 @@ class JavaBasePluginTest extends Specification {
 
         def test = project.task('customTest', type: Test.class)
         test.workingDir == project.projectDir
-        test.reports.junitXml.destination == project.testResultsDir
-        test.reports.html.destination == project.testReportDir
+        test.reports.junitXml.destination == new File(project.testResultsDir, 'customTest')
+        test.reports.html.destination == new File(project.testReportDir, 'customTest')
         test.reports.junitXml.enabled
         test.reports.html.enabled
 
@@ -222,32 +259,6 @@ class JavaBasePluginTest extends Specification {
 
         def buildNeeded = project.tasks[JavaBasePlugin.BUILD_NEEDED_TASK_NAME]
         TaskDependencyMatchers.dependsOn(JavaBasePlugin.BUILD_TASK_NAME).matches(buildNeeded)
-    }
-
-    def configuresTestTaskWhenDebugSystemPropertyIsSet() {
-        project.pluginManager.apply(JavaBasePlugin)
-        def task = project.tasks.create('test', Test.class)
-
-        when:
-        System.setProperty("test.debug", "true")
-        project.projectEvaluationBroadcaster.afterEvaluate(project, null)
-
-        then:
-        task.debug
-    }
-
-    def "configures test task when test.single is used"() {
-        project.pluginManager.apply(JavaBasePlugin)
-        def task = project.tasks.create('test', Test.class)
-        task.include 'ignoreme'
-
-        when:
-        System.setProperty("test.single", "pattern")
-        project.projectEvaluationBroadcaster.afterEvaluate(project, null)
-
-        then:
-        task.includes == ['**/pattern*.class'] as Set
-        task.inputs.getSourceFiles().empty
     }
 
     def "adds language source sets for each source set added to the 'sourceSets' container"() {
@@ -299,7 +310,7 @@ class JavaBasePluginTest extends Specification {
 
         then:
         binaries.size() == 1
-        def binary = binaries.get("customClasses")
+        def binary = binaries.get("custom")
         binary instanceof ClassDirectoryBinarySpec
         binary.classesDir == project.file("classes")
         binary.resourcesDir == project.file("resources")
@@ -320,7 +331,7 @@ class JavaBasePluginTest extends Specification {
         def binaries = project.modelRegistry.realize("binaries", modelMap(BinarySpec))
 
         then:
-        def binary = binaries.get("customClasses")
+        def binary = binaries.get("custom")
         assert binary instanceof ClassDirectoryBinarySpec
         def classesTask = project.tasks.findByName("customClasses")
         binary.buildTask == classesTask
@@ -328,5 +339,4 @@ class JavaBasePluginTest extends Specification {
         binary.tasks.contains(project.tasks.findByName("compileCustomJava"))
         binary.tasks.contains(project.tasks.findByName("processCustomResources"))
     }
-
 }

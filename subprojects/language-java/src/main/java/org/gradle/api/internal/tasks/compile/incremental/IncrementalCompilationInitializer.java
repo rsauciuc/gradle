@@ -16,16 +16,17 @@
 
 package org.gradle.api.internal.tasks.compile.incremental;
 
-import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.internal.file.collections.SimpleFileCollection;
 import org.gradle.api.internal.tasks.compile.JavaCompileSpec;
 import org.gradle.api.tasks.util.PatternSet;
+import org.gradle.internal.Factory;
 
+import java.io.File;
 import java.util.Collection;
-
-import static java.util.Arrays.asList;
+import java.util.List;
 
 class IncrementalCompilationInitializer {
     private final FileOperations fileOperations;
@@ -40,15 +41,18 @@ class IncrementalCompilationInitializer {
             return; //do nothing. No classes need recompilation.
         }
 
-        PatternSet classesToDelete = new PatternSet();
-        PatternSet sourceToCompile = new PatternSet();
+        Factory<PatternSet> patternSetFactory = fileOperations.getFileResolver().getPatternSetFactory();
+        PatternSet classesToDelete = patternSetFactory.create();
+        PatternSet sourceToCompile = patternSetFactory.create();
 
         preparePatterns(staleClasses, classesToDelete, sourceToCompile);
 
         //selectively configure the source
         spec.setSource(spec.getSource().getAsFileTree().matching(sourceToCompile));
         //since we're compiling selectively we need to include the classes compiled previously
-        spec.setClasspath(Iterables.concat(spec.getClasspath(), asList(spec.getDestinationDir())));
+        List<File> classpath = Lists.newArrayList(spec.getCompileClasspath());
+        classpath.add(spec.getDestinationDir());
+        spec.setCompileClasspath(classpath);
         //get rid of stale files
         FileTree deleteMe = fileOperations.fileTree(spec.getDestinationDir()).matching(classesToDelete);
         fileOperations.delete(deleteMe);

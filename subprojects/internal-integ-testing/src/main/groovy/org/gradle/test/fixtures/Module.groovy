@@ -15,9 +15,14 @@
  */
 package org.gradle.test.fixtures
 
+/**
+ * Represents a module in a repository.
+ */
 public interface Module {
-    // using return type `Module` results in compile error for AbstractMavenModule
-    // at first sight, this looks like a Groovy bug related to covariant return types
-    def publish()
-    def publishWithChangedContent()
+    Module publish()
+    Module publishWithChangedContent()
+
+    String getGroup()
+    String getModule()
+    String getVersion()
 }

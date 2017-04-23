@@ -16,12 +16,12 @@
 package org.gradle.language.java
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.archives.TestReproducibleArchives
 import org.gradle.test.fixtures.archive.JarTestFixture
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
 
 import static org.gradle.language.java.JavaIntegrationTesting.applyJavaPlugin
 
+@TestReproducibleArchives
 class JavaSourceSetIntegrationTest extends AbstractIntegrationSpec {
 
     def "can define dependencies on Java source set"() {
@@ -88,7 +88,7 @@ model {
                 def deps = $('components.main.sources.java').dependencies.dependencies
                 assert deps.size() == 1
                 assert deps[0].libraryName == 'someLib'
-                assert deps[0] instanceof org.gradle.platform.base.internal.DefaultDependencySpec // this guy is immutable
+                assert deps[0] instanceof org.gradle.platform.base.internal.DefaultProjectDependencySpec // this guy is immutable
                 try {
                     deps[0].project('foo')
                     assert false
@@ -107,17 +107,17 @@ model {
         noExceptionThrown()
     }
 
-    def "cannot create a dependency with all null values with library"() {
+    def "reports failure for invalid dependency notation"() {
         given:
         applyJavaPlugin(buildFile)
-        buildFile << '''
+        buildFile << """
 model {
     components {
         main(JvmLibrarySpec) {
             sources {
                 java {
                     dependencies {
-                        library(null)
+                        $notation
                     }
                 }
             }
@@ -125,102 +125,26 @@ model {
     }
 
     tasks {
-        create('checkDependencies') {
+        create('printDependencies') {
             doLast {
-                def libraries = $('components.main.sources.java').dependencies.dependencies*.libraryName
+                println \$('components.main.sources.java').dependencies.dependencies*.displayName
             }
         }
     }
 }
-'''
+"""
         when:
-        fails "checkDependencies"
+        fails "printDependencies"
 
         then:
-        failure.assertHasCause('A dependency spec must have at least one of project or library name not null')
+        failure.assertHasCause(failureMessage)
+
+        where:
+        notation                         | failureMessage
+        "library(null)"                  | 'A project dependency must have at least a project or library name specified.'
+        "group 'group-without-a-module'" | 'A module dependency must have at least a group and a module name specified.'
     }
 
-    def "cannot create a dependency with all null values with project"() {
-        given:
-        applyJavaPlugin(buildFile)
-        buildFile << '''
-model {
-    components {
-        main(JvmLibrarySpec) {
-            sources {
-                java {
-                    dependencies {
-                        project(null)
-                    }
-                }
-            }
-        }
-    }
-
-    tasks {
-        create('checkDependencies') {
-            doLast {
-                def libraries = $('components.main.sources.java').dependencies.dependencies*.libraryName
-            }
-        }
-    }
-}
-'''
-        when:
-        fails "checkDependencies"
-
-        then:
-        failure.assertHasCause('A dependency spec must have at least one of project or library name not null')
-    }
-
-    def "filters duplicate dependencies"() {
-        given:
-        applyJavaPlugin(buildFile)
-        buildFile << '''
-model {
-    components {
-        main(JvmLibrarySpec) {
-            sources {
-                java {
-                    dependencies {
-                        library 'someLib' // Library in same project
-                        project 'otherProject' library 'someLib' // Library in other project
-                        project 'otherProject' // Library in other project, expect exactly one library
-
-                        // explicitly create duplicates
-                        library 'someLib' // Library in same project
-                        project 'otherProject' library 'someLib' // Library in other project
-                        project 'otherProject' // Library in other project, expect exactly one library
-                    }
-                }
-            }
-        }
-    }
-
-    tasks {
-        create('checkDependencies') {
-            doLast {
-                def deps = $('components.main.sources.java').dependencies.dependencies
-                assert deps.size() == 3
-                assert deps[0].projectPath == null
-                assert deps[0].libraryName == 'someLib'
-                assert deps[1].projectPath == 'otherProject'
-                assert deps[1].libraryName == 'someLib'
-                assert deps[2].projectPath == 'otherProject'
-                assert deps[2].libraryName == null
-            }
-        }
-    }
-}
-'''
-        when:
-        succeeds "checkDependencies"
-
-        then:
-        noExceptionThrown()
-    }
-
-    @Requires(TestPrecondition.JDK7_OR_LATER)
     def "can build JAR from multiple source sets"() {
         given:
         file("src/main/java/Main.java") << "public class Main {}"
@@ -258,9 +182,9 @@ model {
         succeeds "assemble"
 
         then:
-        new JarTestFixture(file("build/jars/mainJava6Jar/main.jar")).hasDescendants(
+        new JarTestFixture(file("build/jars/main/java6Jar/main.jar")).hasDescendants(
             "Main.class", "main.properties");
-        new JarTestFixture(file("build/jars/mainJava7Jar/main.jar")).hasDescendants(
+        new JarTestFixture(file("build/jars/main/java7Jar/main.jar")).hasDescendants(
             "Main.class", "main.properties", "Java7.class", "java7.properties");
     }
 

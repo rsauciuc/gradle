@@ -16,12 +16,9 @@
 
 package org.gradle.api.internal.initialization.loadercache
 
-import org.gradle.integtests.fixtures.PersistentBuildProcessIntegrationTest
 import org.gradle.integtests.fixtures.executer.ExecutionResult
-import org.gradle.test.fixtures.file.LeaksFileHandles
-import spock.lang.Ignore
+import org.gradle.integtests.fixtures.longlived.PersistentBuildProcessIntegrationTest
 
-@LeaksFileHandles
 class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrationTest {
 
     def cacheSizePerRun = []
@@ -188,7 +185,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
     def "refreshes when buildscript classpath gets new dependency"() {
         addIsCachedCheck()
-        file("foo.jar") << "foo"
+        createJarWithProperties("foo.jar")
 
         when:
         run()
@@ -209,7 +206,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
     def "cache shrinks as buildscript disappears"() {
         addIsCachedCheck()
-        file("foo.jar") << "foo"
+        createJarWithProperties("foo.jar")
         buildFile << """
             buildscript { dependencies { classpath files("foo.jar") } }
 
@@ -238,7 +235,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
     def "cache shrinks when script with buildscript block is removed"() {
         addIsCachedCheck()
-        file("foo.jar") << "foo"
+        createJarWithProperties("foo.jar")
         buildFile << """
             buildscript { dependencies { classpath files("foo.jar") } }
 
@@ -266,7 +263,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         buildFile << """
             buildscript { dependencies { classpath files("lib") } }
         """
-        file("lib/foo.jar") << "foo"
+        createJarWithProperties("lib/foo.jar", [source: 1])
 
         when:
         run()
@@ -277,7 +274,9 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         isCached(":foo")
 
         when:
-        file("lib/foo.jar") << "bar"
+        sleep(1000)
+        file("lib/foo.jar").delete()
+        createJarWithProperties("lib/foo.jar", [target: 2])
         run()
 
         then:
@@ -296,7 +295,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
     def "refreshes when jar is removed from buildscript classpath"() {
         addIsCachedCheck()
-        file("foo.jar") << "yyy"
+        createJarWithProperties("foo.jar")
         buildFile << """
             buildscript { dependencies { classpath files("foo.jar") }}
         """
@@ -320,7 +319,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
     def "refreshes when dir is removed from buildscript classpath"() {
         addIsCachedCheck()
-        file("lib/foo.jar") << "foo"
+        createJarWithProperties("lib/foo.jar")
         buildFile << """
             buildscript { dependencies { classpath files("lib") }}
         """
@@ -344,7 +343,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
     def "refreshes when buildscript when jar dependency replaced with dir"() {
         addIsCachedCheck()
-        file("foo.jar") << "xxx"
+        createJarWithProperties("foo.jar")
         buildFile << """
             buildscript { dependencies { classpath files("foo.jar") }}
         """
@@ -374,7 +373,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         when:
         run()
         assert file("foo.jar").deleteDir()
-        file("foo.jar") << "xxx"
+        createJarWithProperties("foo.jar")
         run()
 
         then:
@@ -409,7 +408,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
 
         when:
         run()
-        file("settings.gradle") << "println 'settings x'"
+        settingsFile << "println 'settings x'"
         run()
 
         then:
@@ -417,7 +416,7 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         assertCacheSizeChange(1)
 
         when:
-        file("settings.gradle") << "println 'settings y'"
+        settingsFile << "println 'settings y'"
         run()
 
         then:
@@ -561,19 +560,16 @@ class ClassLoadersCachingIntegrationTest extends PersistentBuildProcessIntegrati
         then:
         assertCacheSizeChange(-2)
         isCached("a")
-        isNotCached("a:a")
-    }
+        isCached("a:a") // cached in cross-build cache
 
-    @Ignore
-    //I see that any change to the build script (including adding an empty line)
-    //causes the some of the compiled *.class to be different on a binary level
-    def "change that does not impact bytecode  classloader when settings script changed"() {
         when:
-        run()
-        buildFile << "//comment"
+        file("a/a/build.gradle").text = getIsCachedCheck() + '// add some random chars'
         run()
 
         then:
-        cached
+        assertCacheDidNotGrow()
+        isCached("a")
+        isNotCached("a:a") // cached in cross-build cache
+
     }
 }

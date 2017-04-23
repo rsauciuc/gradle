@@ -17,8 +17,8 @@
 package org.gradle.nativeplatform.toolchain.plugins
 
 import org.gradle.api.Plugin
-import org.gradle.nativeplatform.toolchain.NativeToolChain
 import org.gradle.nativeplatform.toolchain.Clang
+import org.gradle.nativeplatform.toolchain.NativeToolChain
 import org.gradle.nativeplatform.toolchain.internal.clang.ClangToolChain
 
 class ClangCompilerPluginTest extends NativeToolChainPluginTest {
@@ -36,6 +36,14 @@ class ClangCompilerPluginTest extends NativeToolChainPluginTest {
     @Override
     String getToolchainName() {
         "clang"
+    }
+
+    def "can apply plugin by id"() {
+        given:
+        project.apply plugin: 'clang-compiler'
+
+        expect:
+        project.plugins.hasPlugin(pluginClass)
     }
 
     def "makes a Clang tool chain available"() {

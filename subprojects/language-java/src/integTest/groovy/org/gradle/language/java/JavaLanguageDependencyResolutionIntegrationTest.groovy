@@ -47,7 +47,7 @@ model {
         succeeds ':tasks', ':mainJar'
 
         then:
-        executedAndNotSkipped ':tasks', ':compileZdepJarZdepJava', ':createZdepJar', ':zdepJar', ':compileMainJarMainJava'
+        executedAndNotSkipped ':tasks', ':compileZdepJarZdepJava', ':zdepApiJar', ':compileMainJarMainJava', ':mainApiJar', ':mainJar'
 
         where:
         scope << DependencyScope.values()
@@ -86,7 +86,7 @@ model {
         buildFile << '''
 class DependencyResolutionObserver extends RuleSource {
     @Validate
-    void checkThatCyclicDependencyIsDefined(CollectionBuilder<Task> tasks) {
+    void checkThatCyclicDependencyIsDefined(ModelMap<Task> tasks) {
         def mainJar =  tasks.get('compileMainJarMainJava')
         def main2Jar = tasks.get('compileMain2JarMain2Java')
     }
@@ -175,7 +175,7 @@ model {
     tasks {
         mainJar.finalizedBy('checkDependencies')
         create('checkDependencies') {
-            assert compileMainJarMainJava.taskDependencies.getDependencies(compileMainJarMainJava).path.contains(':dep:mainJar')
+            assert compileMainJarMainJava.taskDependencies.getDependencies(compileMainJarMainJava).path.contains(':dep:mainApiJar')
         }
     }
 }
@@ -204,7 +204,7 @@ model {
         succeeds ':mainJar'
 
         then:
-        executedAndNotSkipped ':dep:createMainJar'
+        executedAndNotSkipped ':dep:mainApiJar'
 
         where:
         scope << DependencyScope.values()
@@ -376,7 +376,7 @@ model {
         mainJar.finalizedBy('checkDependencies')
         create('checkDependencies') {
             assert compileMainJarMainJava.taskDependencies.getDependencies(compileMainJarMainJava).path.containsAll(
-            [':otherJar',':dep:mainJar'])
+            [':otherApiJar',':dep:mainApiJar'])
         }
     }
 }
@@ -408,7 +408,7 @@ model {
         succeeds ':mainJar'
 
         then:
-        executedAndNotSkipped ':dep:createMainJar', ':createOtherJar'
+        executedAndNotSkipped ':dep:mainApiJar', ':otherApiJar'
 
         where:
         scope << DependencyScope.values()
@@ -561,8 +561,8 @@ model {
                     create('checkClasspath') {
                         doLast {
                             def cp = compileMainJarMainJava.classpath.files
-                            assert cp.contains(new File(project(':b').createMainApiJar.destinationDir, "main.jar"))
-                            def cJar = new File(project(':c').createMainApiJar.destinationDir, 'main.jar')
+                            assert cp.contains(project(':b').mainApiJar.outputFile)
+                            def cJar = project(':c').mainApiJar.outputFile
                             assert ${excludesOrIncludes == 'excludes' ? '!' : ''}cp.contains(cJar)
                         }
                     }
@@ -610,7 +610,7 @@ model {
         succeeds ':mainJar'
 
         then:
-        executedAndNotSkipped ':c:createMainJar', ':b:createMainJar'
+        executedAndNotSkipped ':c:mainApiJar', ':b:mainApiJar'
 
         where:
         mainScope                 | libScope
@@ -635,12 +635,12 @@ import org.gradle.model.internal.core.ModelPath
 import org.gradle.model.internal.type.ModelType
 
 class DependencyResolutionObserver extends RuleSource {
-    @Mutate void createCheckTask(CollectionBuilder<Task> tasks) {
+    @Mutate void createCheckTask(ModelMap<Task> tasks) {
         tasks.create('checkDependenciesForMainJar') {
             doLast {
                 def task = tasks.get('compileMainJarMainJava')
                 def cp = task.classpath.files
-                assert cp == [new File(task.project.project(':b').modelRegistry.find(ModelPath.path('tasks.createMainApiJar'), ModelType.of(Task)).destinationDir, 'main.jar')] as Set
+                assert cp == [task.project.project(':b').tasks.mainApiJar.outputFile] as Set
             }
         }
     }
@@ -673,7 +673,7 @@ import org.gradle.model.internal.core.ModelPath
 import org.gradle.model.internal.type.ModelType
 
 class DependencyResolutionObserver extends RuleSource {
-    @Mutate void createCheckTask(CollectionBuilder<Task> tasks) {
+    @Mutate void createCheckTask(ModelMap<Task> tasks) {
         tasks.create('checkDependenciesForMainJar') {
             doLast {
                 def task = tasks.get('compileMainJarMainJava')
@@ -743,8 +743,8 @@ model {
         create('checkClasspath') {
             doLast {
                 def cp = compileMainJarMainJava.classpath.files
-                assert cp.contains(new File(project(':b').createMainApiJar.destinationDir, 'main.jar'))
-                assert !cp.contains(new File(project(':c').createMainApiJar.destinationDir, 'main.jar'))
+                assert cp.contains(project(':b').mainApiJar.outputFile)
+                assert !cp.contains(project(':c').mainApiJar.outputFile)
             }
         }
         mainJar.finalizedBy('checkClasspath')
@@ -799,7 +799,7 @@ model {
         succeeds ':mainJar'
 
         then:
-        executedAndNotSkipped ':c:createMainJar', ':b:createMainJar'
+        executedAndNotSkipped ':c:mainApiJar', ':b:mainApiJar'
     }
 
     def "fails if a dependency does not provide any JarBinarySpec"() {
@@ -840,7 +840,7 @@ model {
         failure.assertHasCause("Could not resolve project ':' library 'zdep'")
 
         and:
-        failure.assertHasCause("Project ':' contains a library named 'zdep' but it doesn't have any binary of type JarBinarySpec")
+        failure.assertHasCause("Project ':' contains a library named 'zdep' but it doesn't have any binary of type JvmBinarySpec")
     }
 
     def "successfully selects a JVM library if no library name is provided and 2 components are available"() {
@@ -888,11 +888,10 @@ model {
         succeeds ':mainJar'
 
         then:
-        executedAndNotSkipped(':b:createMainJar')
+        executedAndNotSkipped(':b:mainApiJar')
     }
 
     @Unroll
-    @Requires(TestPrecondition.JDK7_OR_LATER)
     def "should choose appropriate Java variants for #scope level dependency"() {
         given:
         applyJavaPlugin(buildFile)
@@ -916,8 +915,8 @@ model {
         mainJava6Jar.finalizedBy('checkDependencies')
         mainJava7Jar.finalizedBy('checkDependencies')
         create('checkDependencies') {
-            assert compileMainJava6JarMainJava.taskDependencies.getDependencies(compileMainJava6JarMainJava).contains(depJar)
-            assert compileMainJava7JarMainJava.taskDependencies.getDependencies(compileMainJava7JarMainJava).contains(depJar)
+            assert compileMainJava6JarMainJava.taskDependencies.getDependencies(compileMainJava6JarMainJava).contains(depApiJar)
+            assert compileMainJava7JarMainJava.taskDependencies.getDependencies(compileMainJava7JarMainJava).contains(depApiJar)
         }
     }
 }
@@ -1082,7 +1081,6 @@ model {
     }
 
     @Unroll
-    @Requires(TestPrecondition.JDK7_OR_LATER)
     def "should choose matching variants from #scope level dependency"() {
         given:
         applyJavaPlugin(buildFile)
@@ -1107,8 +1105,8 @@ model {
         mainJava6Jar.finalizedBy('checkDependencies')
         mainJava7Jar.finalizedBy('checkDependencies')
         create('checkDependencies') {
-            assert compileMainJava6JarMainJava.taskDependencies.getDependencies(compileMainJava6JarMainJava).contains(depJava6Jar)
-            assert compileMainJava7JarMainJava.taskDependencies.getDependencies(compileMainJava7JarMainJava).contains(depJava7Jar)
+            assert compileMainJava6JarMainJava.taskDependencies.getDependencies(compileMainJava6JarMainJava).contains(depJava6ApiJar)
+            assert compileMainJava7JarMainJava.taskDependencies.getDependencies(compileMainJava7JarMainJava).contains(depJava7ApiJar)
         }
     }
 }
@@ -1159,8 +1157,8 @@ model {
         mainJava6Jar.finalizedBy('checkDependencies')
         mainJava7Jar.finalizedBy('checkDependencies')
         create('checkDependencies') {
-            assert compileMainJava6JarMainJava.taskDependencies.getDependencies(compileMainJava6JarMainJava).contains(depJava6Jar)
-            assert compileMainJava7JarMainJava.taskDependencies.getDependencies(compileMainJava7JarMainJava).contains(depJava7Jar)
+            assert compileMainJava6JarMainJava.taskDependencies.getDependencies(compileMainJava6JarMainJava).contains(depJava6ApiJar)
+            assert compileMainJava7JarMainJava.taskDependencies.getDependencies(compileMainJava7JarMainJava).contains(depJava7ApiJar)
         }
     }
 }
@@ -1181,7 +1179,6 @@ model {
         succeeds 'mainJava7Jar'
     }
 
-    @Requires(TestPrecondition.JDK7_OR_LATER)
     def "should display candidate platforms if no one matches"() {
         given:
         applyJavaPlugin(buildFile)
@@ -1275,7 +1272,7 @@ model {
 
             class ComponentTypeRules extends RuleSource {
                 @ComponentType
-                void registerCustomComponentType(ComponentTypeBuilder<CustomLibrary> builder) {}
+                void registerCustomComponentType(TypeBuilder<CustomLibrary> builder) {}
             }
 
             apply type: ComponentTypeRules

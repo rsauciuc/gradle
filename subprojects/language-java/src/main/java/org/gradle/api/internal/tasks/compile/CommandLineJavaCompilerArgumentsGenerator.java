@@ -17,15 +17,15 @@
 package org.gradle.api.internal.tasks.compile;
 
 import com.google.common.collect.Iterables;
-import org.gradle.api.UncheckedIOException;
-import org.gradle.platform.base.internal.toolchain.ArgCollector;
-import org.gradle.platform.base.internal.toolchain.ArgWriter;
+import org.gradle.internal.process.ArgCollector;
+import org.gradle.internal.process.ArgWriter;
 
-import java.io.*;
-import java.util.Collections;
+import java.io.File;
+import java.io.Serializable;
 import java.util.List;
 
 public class CommandLineJavaCompilerArgumentsGenerator implements CompileSpecToArguments<JavaCompileSpec>, Serializable {
+    @Override
     public void collectArguments(JavaCompileSpec spec, ArgCollector collector) {
         for (String arg : generate(spec)) {
             collector.args(arg);
@@ -33,46 +33,14 @@ public class CommandLineJavaCompilerArgumentsGenerator implements CompileSpecToA
     }
 
     public Iterable<String> generate(JavaCompileSpec spec) {
-        List<String> launcherOptions = new JavaCompilerArgumentsBuilder(spec).includeLauncherOptions(true).includeMainOptions(false).includeClasspath(false).includeCustomizations(false).build();
+        List<String> launcherOptions = new JavaCompilerArgumentsBuilder(spec).includeLauncherOptions(true).includeMainOptions(false).includeClasspath(false).build();
         List<String> remainingArgs = new JavaCompilerArgumentsBuilder(spec).includeSourceFiles(true).build();
-        Iterable<String> allArgs = Iterables.concat(launcherOptions, remainingArgs);
-        if (exceedsWindowsCommandLineLengthLimit(allArgs)) {
-            return Iterables.concat(launcherOptions, shortenArgs(spec.getTempDir(), remainingArgs));
-        }
-        return allArgs;
-    }
-
-    private boolean exceedsWindowsCommandLineLengthLimit(Iterable<String> args) {
-        int length = 0;
-        for (String arg : args) {
-            length += arg.length() + 1;
-            // limit is 2047 on older Windows systems, and 8191 on newer ones
-            // http://support.microsoft.com/kb/830473
-            // let's play it safe, no need to optimize
-            if (length > 1500) {
-                return true;
-            }
-        }
-        return false;
+        return Iterables.concat(launcherOptions, shortenArgs(spec.getTempDir(), remainingArgs));
     }
 
     private Iterable<String> shortenArgs(File tempDir, List<String> args) {
-        File file = new File(tempDir, "java-compiler-args.txt");
         // for command file format, see http://docs.oracle.com/javase/6/docs/technotes/tools/windows/javac.html#commandlineargfile
         // use platform character and line encoding
-        try {
-            PrintWriter writer = new PrintWriter(new FileWriter(file));
-            try {
-                ArgWriter argWriter = ArgWriter.unixStyle(writer);
-                for (String arg : args) {
-                    argWriter.args(arg);
-                }
-            } finally {
-                writer.close();
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return Collections.singleton("@" + file.getPath());
+        return ArgWriter.argsFileGenerator(new File(tempDir, "java-compiler-args.txt"), ArgWriter.unixStyleFactory()).transform(args);
     }
 }

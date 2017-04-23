@@ -17,6 +17,8 @@
 package org.gradle.api.publish.ivy.internal.dependency;
 
 import org.gradle.api.artifacts.DependencyArtifact;
+import org.gradle.api.artifacts.ExcludeRule;
+import org.gradle.api.artifacts.ModuleDependency;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,18 +29,30 @@ public class DefaultIvyDependency implements IvyDependencyInternal {
     private final String module;
     private final String revision;
     private final String confMapping;
+    private final boolean transitive;
     private final List<DependencyArtifact> artifacts = new ArrayList<DependencyArtifact>();
+    private final List<ExcludeRule> excludeRules = new ArrayList<ExcludeRule>();
 
-    public DefaultIvyDependency(String organisation, String module, String revision, String confMapping) {
+    public DefaultIvyDependency(String organisation, String module, String revision, String confMapping, boolean transitive) {
         this.organisation = organisation;
         this.module = module;
         this.revision = revision;
         this.confMapping = confMapping;
+        this.transitive = transitive;
     }
 
-    public DefaultIvyDependency(String organisation, String module, String revision, String confMapping, Collection<DependencyArtifact> artifacts) {
-        this(organisation, module, revision, confMapping);
+    public DefaultIvyDependency(String organisation, String module, String revision, String confMapping, boolean transitive, Collection<DependencyArtifact> artifacts) {
+        this(organisation, module, revision, confMapping, transitive);
         this.artifacts.addAll(artifacts);
+    }
+
+    public DefaultIvyDependency(String organisation, String module, String revision, String confMapping, boolean transitive, Collection<DependencyArtifact> artifacts, Collection<ExcludeRule> excludeRules) {
+        this(organisation, module, revision, confMapping, transitive, artifacts);
+        this.excludeRules.addAll(excludeRules);
+    }
+
+    public DefaultIvyDependency(ModuleDependency dependency, String confMapping) {
+        this(dependency.getGroup(), dependency.getName(), dependency.getVersion(), confMapping, dependency.isTransitive(), dependency.getArtifacts(), dependency.getExcludeRules());
     }
 
     public String getOrganisation() {
@@ -57,7 +71,15 @@ public class DefaultIvyDependency implements IvyDependencyInternal {
         return confMapping;
     }
 
+    public boolean isTransitive() {
+        return transitive;
+    }
+
     public Iterable<DependencyArtifact> getArtifacts() {
         return artifacts;
+    }
+
+    public Iterable<ExcludeRule> getExcludeRules() {
+        return excludeRules;
     }
 }

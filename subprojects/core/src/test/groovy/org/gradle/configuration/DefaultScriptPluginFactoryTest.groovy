@@ -15,28 +15,41 @@
  */
 package org.gradle.configuration
 
+import com.google.common.hash.HashCode
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.initialization.dsl.ScriptHandler
 import org.gradle.api.internal.DocumentationRegistry
-import org.gradle.api.internal.file.FileLookup
+import org.gradle.api.internal.file.TestFiles
+import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory
 import org.gradle.api.internal.initialization.ClassLoaderScope
 import org.gradle.api.internal.initialization.ScriptHandlerFactory
 import org.gradle.api.internal.initialization.ScriptHandlerInternal
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.internal.project.ProjectScript
-import org.gradle.groovy.scripts.*
+import org.gradle.api.provider.ProviderFactory
+import org.gradle.groovy.scripts.BasicScript
+import org.gradle.groovy.scripts.DefaultScript
+import org.gradle.groovy.scripts.ScriptCompiler
+import org.gradle.groovy.scripts.ScriptCompilerFactory
+import org.gradle.groovy.scripts.ScriptRunner
+import org.gradle.groovy.scripts.ScriptSource
 import org.gradle.groovy.scripts.internal.BuildScriptData
 import org.gradle.groovy.scripts.internal.FactoryBackedCompileOperation
 import org.gradle.internal.Factory
+import org.gradle.internal.classloader.ClasspathHasher
+import org.gradle.internal.classpath.ClassPath
+import org.gradle.internal.logging.LoggingManagerInternal
 import org.gradle.internal.reflect.Instantiator
 import org.gradle.internal.service.ServiceRegistry
-import org.gradle.logging.LoggingManagerInternal
 import org.gradle.model.internal.inspect.ModelRuleSourceDetector
+import org.gradle.plugin.repository.internal.PluginRepositoryFactory
+import org.gradle.plugin.repository.internal.PluginRepositoryRegistry
 import org.gradle.plugin.use.internal.PluginRequestApplicator
+import org.gradle.plugin.management.internal.PluginRequests
 import spock.lang.Specification
 
-public class DefaultScriptPluginFactoryTest extends Specification {
+class DefaultScriptPluginFactoryTest extends Specification {
 
     def scriptCompilerFactory = Mock(ScriptCompilerFactory)
     def scriptCompiler = Mock(ScriptCompiler)
@@ -54,27 +67,42 @@ public class DefaultScriptPluginFactoryTest extends Specification {
     def classPathScriptRunner = Mock(ScriptRunner)
     def loggingManagerFactory = Mock(Factory) as Factory<LoggingManagerInternal>
     def loggingManager = Mock(LoggingManagerInternal)
-    def fileLookup = Mock(FileLookup)
+    def fileLookup = TestFiles.fileLookup()
+    def directoryFileTreeFactory = Mock(DirectoryFileTreeFactory)
     def documentationRegistry = Mock(DocumentationRegistry)
+    def classpathHasher = Mock(ClasspathHasher)
+    def pluginRepositoryRegistry = Mock(PluginRepositoryRegistry)
+    def pluginRepositoryFactory = Mock(PluginRepositoryFactory)
+    def providerFactory = Mock(ProviderFactory)
 
     def factory = new DefaultScriptPluginFactory(scriptCompilerFactory, loggingManagerFactory, instantiator, scriptHandlerFactory, pluginRequestApplicator, fileLookup,
-            documentationRegistry, new ModelRuleSourceDetector())
+        directoryFileTreeFactory, documentationRegistry, new ModelRuleSourceDetector(), pluginRepositoryRegistry, pluginRepositoryFactory, providerFactory)
 
     def setup() {
         def configurations = Mock(ConfigurationContainer)
         scriptHandler.configurations >> configurations
+        scriptHandler.scriptClassPath >> Mock(ClassPath)
+        classPathScriptRunner.data >> Mock(PluginRequests) {
+            isEmpty() >> true
+        }
         def configuration = Mock(Configuration)
         configurations.getByName(ScriptHandler.CLASSPATH_CONFIGURATION) >> configuration
         configuration.getFiles() >> Collections.emptySet()
         baseScope.getExportClassLoader() >> baseChildClassLoader
+        classpathHasher.hash(_) >> HashCode.fromInt(123)
 
         1 * targetScope.getLocalClassLoader() >> scopeClassLoader
     }
 
-    void configuresATargetObjectUsingScript() {
-        when:
+    void "configures a target object using script"() {
+        given:
         final Object target = new Object()
 
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, false)
+        configurer.apply(target)
+
+        then:
         1 * loggingManagerFactory.create() >> loggingManager
         1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
         1 * scriptCompiler.compile(DefaultScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
@@ -84,16 +112,17 @@ public class DefaultScriptPluginFactoryTest extends Specification {
         _ * scriptRunner.runDoesSomething >> true
         1 * scriptRunner.run(target, _ as ServiceRegistry)
         0 * scriptRunner._
-
-        then:
-        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, false)
-        configurer.apply(target)
     }
 
-    void configuresAProjectObjectUsingScriptWithImperativeAndInheritableCode() {
-        when:
+    void "configures a project object using script with imperative and inheritable code"() {
+        given:
         def target = Mock(ProjectInternal)
 
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
+        configurer.apply(target)
+
+        then:
         1 * loggingManagerFactory.create() >> loggingManager
         1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
         1 * scriptCompiler.compile(ProjectScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
@@ -107,16 +136,17 @@ public class DefaultScriptPluginFactoryTest extends Specification {
         0 * target.addDeferredConfiguration(_)
         1 * scriptRunner.run(target, _ as ServiceRegistry)
         0 * scriptRunner._
-
-        then:
-        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
-        configurer.apply(target)
     }
 
-    void configuresAProjectObjectUsingScriptWithImperativeCode() {
-        when:
+    void "configures a project object using script with imperative code"() {
+        given:
         def target = Mock(ProjectInternal)
 
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
+        configurer.apply(target)
+
+        then:
         1 * loggingManagerFactory.create() >> loggingManager
         1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
         1 * scriptCompiler.compile(ProjectScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
@@ -129,16 +159,17 @@ public class DefaultScriptPluginFactoryTest extends Specification {
         0 * target.addDeferredConfiguration(_)
         1 * scriptRunner.run(target, _ as ServiceRegistry)
         0 * scriptRunner._
-
-        then:
-        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
-        configurer.apply(target)
     }
 
-    void configuresAProjectObjectUsingScriptWithInheritableAndDeferredCode() {
-        when:
+    void "configures a project object using script with inheritable and deferred code"() {
+        given:
         def target = Mock(ProjectInternal)
 
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
+        configurer.apply(target)
+
+        then:
         1 * loggingManagerFactory.create() >> loggingManager
         1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
         1 * scriptCompiler.compile(ProjectScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
@@ -151,16 +182,17 @@ public class DefaultScriptPluginFactoryTest extends Specification {
         1 * target.setScript(script)
         1 * target.addDeferredConfiguration(_)
         0 * scriptRunner._
-
-        then:
-        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
-        configurer.apply(target)
     }
 
-    void configuresAProjectObjectUsingScriptWithDeferredCode() {
-        when:
+    void "configures a project object using script with deferred code"() {
+        given:
         def target = Mock(ProjectInternal)
 
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
+        configurer.apply(target)
+
+        then:
         1 * loggingManagerFactory.create() >> loggingManager
         1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
         1 * scriptCompiler.compile(ProjectScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
@@ -172,16 +204,17 @@ public class DefaultScriptPluginFactoryTest extends Specification {
         0 * target.setScript(_)
         1 * target.addDeferredConfiguration(_)
         0 * scriptRunner._
-
-        then:
-        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
-        configurer.apply(target)
     }
 
-    void configuresAProjectObjectUsingEmptyScript() {
-        when:
+    void "configures a project object using empty script"() {
+        given:
         def target = Mock(ProjectInternal)
 
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
+        configurer.apply(target)
+
+        then:
         1 * loggingManagerFactory.create() >> loggingManager
         1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
         1 * scriptCompiler.compile(ProjectScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
@@ -191,11 +224,27 @@ public class DefaultScriptPluginFactoryTest extends Specification {
         _ * scriptRunner.runDoesSomething >> false
         _ * scriptRunner.hasMethods >> false
         0 * scriptRunner._
-        0 * target.setScript(_)
-        0 * target.addDeferredConfiguration(_)
+    }
+
+    void "configured target uses given script plugin factory for nested scripts"() {
+        given:
+        def otherScriptPluginFactory = Mock(ScriptPluginFactory)
+        factory.setScriptPluginFactory(otherScriptPluginFactory)
+        final Object target = new Object()
+
+        when:
+        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, false)
+        configurer.apply(target)
 
         then:
-        def configurer = factory.create(scriptSource, scriptHandler, targetScope, baseScope, true)
-        configurer.apply(target)
+        1 * loggingManagerFactory.create() >> loggingManager
+        1 * scriptCompilerFactory.createCompiler(scriptSource) >> scriptCompiler
+        1 * scriptCompiler.compile(DefaultScript, _ as FactoryBackedCompileOperation, baseChildClassLoader, _) >> classPathScriptRunner
+        1 * classPathScriptRunner.run(target, _ as ServiceRegistry)
+        1 * scriptCompiler.compile(DefaultScript, { it.transformer != null }, scopeClassLoader, !null) >> scriptRunner
+        _ * scriptRunner.data >> new BuildScriptData(true)
+        _ * scriptRunner.runDoesSomething >> true
+        1 * scriptRunner.run(target, { scriptServices -> scriptServices.get(ScriptPluginFactory) == otherScriptPluginFactory })
+        0 * scriptRunner._
     }
 }

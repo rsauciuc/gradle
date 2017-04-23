@@ -39,7 +39,7 @@ project(':child') {
 '''
 
         when:
-        HierarchicalEclipseProject project = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject project = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         project.projectDependencies.size() == 1
@@ -52,13 +52,15 @@ apply plugin: 'java'
 
 sourceSets.main.output.dir "$buildDir/foo", builtBy: 'generateResources'
 
-task generateResources << {
-  assert false : 'should not be called when building minimal model'
+task generateResources {
+    doLast {
+        assert false : 'should not be called when building minimal model'
+    }
 }
 '''
 
         when:
-        withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        loadToolingModel(HierarchicalEclipseProject)
 
         then:
         noExceptionThrown()

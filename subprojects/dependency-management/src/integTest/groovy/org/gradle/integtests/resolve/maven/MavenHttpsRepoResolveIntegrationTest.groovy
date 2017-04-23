@@ -17,14 +17,17 @@
 package org.gradle.integtests.resolve.maven
 
 import org.gradle.integtests.resolve.http.AbstractHttpsRepoResolveIntegrationTest
-import org.gradle.test.fixtures.file.LeaksFileHandles
 
-@LeaksFileHandles
 class MavenHttpsRepoResolveIntegrationTest extends AbstractHttpsRepoResolveIntegrationTest {
-    protected String setupRepo() {
+    protected String setupRepo(boolean useAuth = false) {
         def module = mavenRepo().module('my-group', 'my-module').publish()
-        server.allowGetOrHead('/repo1/my-group/my-module/1.0/my-module-1.0.pom', module.pomFile)
-        server.allowGetOrHead('/repo1/my-group/my-module/1.0/my-module-1.0.jar', module.artifactFile)
+        if (useAuth) {
+            server.allowGetOrHead('/repo1/my-group/my-module/1.0/my-module-1.0.pom', 'user', 'secret', module.pomFile)
+            server.allowGetOrHead('/repo1/my-group/my-module/1.0/my-module-1.0.jar', 'user', 'secret', module.artifactFile)
+        } else {
+            server.allowGetOrHead('/repo1/my-group/my-module/1.0/my-module-1.0.pom', module.pomFile)
+            server.allowGetOrHead('/repo1/my-group/my-module/1.0/my-module-1.0.jar', module.artifactFile)
+        }
         "maven"
     }
 }

@@ -18,27 +18,25 @@ package org.gradle.nativeplatform.test.cunit
 import org.gradle.api.reporting.model.ModelReportOutput
 import org.gradle.ide.visualstudio.fixtures.ProjectFile
 import org.gradle.ide.visualstudio.fixtures.SolutionFile
-import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
-import org.gradle.nativeplatform.fixtures.AvailableToolChains
 import org.gradle.nativeplatform.fixtures.app.CHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import org.gradle.util.TextUtil
 import spock.lang.Issue
 
 @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-@LeaksFileHandles
 class CUnitIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
 
-    def prebuiltPath = TextUtil.normaliseFileSeparators(new IntegrationTestBuildContext().getSamplesDir().file("native-binaries/cunit/libs").path)
+    def prebuiltDir = buildContext.getSamplesDir().file("native-binaries/cunit/libs")
+    def prebuiltPath = TextUtil.normaliseFileSeparators(prebuiltDir.path)
     def app = new CHelloWorldApp()
 
     def setup() {
+        prebuiltDir.file("cunit/2.1-2/lib/${toolChain.unitTestPlatform}/${cunitLibName}").assumeExists()
         buildFile << """
-apply plugin: "cunit"
+apply plugin: 'cunit-test-suite'
 
 model {
     repositories {
@@ -46,7 +44,7 @@ model {
             cunit {
                 headers.srcDir "${prebuiltPath}/cunit/2.1-2/include"
                 binaries.withType(StaticLibraryBinary) {
-                    staticLibraryFile = file("${prebuiltPath}/cunit/2.1-2/lib/${cunitPlatform}/${cunitLibName}")
+                    staticLibraryFile = file("${prebuiltPath}/cunit/2.1-2/lib/${toolChain.unitTestPlatform}/${cunitLibName}")
                 }
             }
         }
@@ -69,6 +67,11 @@ model {
             targetPlatform "x86"
         }
     }
+    testSuites {
+        helloTest(CUnitTestSuiteSpec) {
+            testing \$.components.hello
+        }
+    }
     binaries {
         withType(CUnitTestSuiteBinarySpec) {
             lib library: "cunit", linkage: "static"
@@ -76,31 +79,6 @@ model {
     }
 }
 """
-    }
-
-    private def getCunitPlatform() {
-        if (OperatingSystem.current().isMacOsX()) {
-            return "osx"
-        }
-        if (OperatingSystem.current().isLinux()) {
-            return "linux"
-        }
-        if (toolChain.displayName == "mingw") {
-            return "mingw"
-        }
-        if (toolChain.displayName == "gcc cygwin") {
-            return "cygwin"
-        }
-        if (toolChain.visualCpp) {
-            def vcVersion = (toolChain as AvailableToolChains.InstalledVisualCpp).version
-            switch (vcVersion.major) {
-                case "12":
-                    return "vs2013"
-                case "10":
-                    return "vs2010"
-            }
-        }
-        throw new IllegalStateException("No cunit binary available for ${toolChain.displayName}")
     }
 
     private def getCunitLibName() {
@@ -118,14 +96,27 @@ model {
         then:
         executedAndNotSkipped ":compileHelloTestCUnitExeHelloC", ":compileHelloTestCUnitExeHelloTestC",
             ":linkHelloTestCUnitExe", ":helloTestCUnitExe", ":runHelloTestCUnitExe"
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
 
-        def testResults = new CUnitTestResults(file("build/test-results/helloTestCUnitExe/CUnitAutomated-Results.xml"))
+        def testResults = new CUnitTestResults(file("build/test-results/helloTest/CUnitAutomated-Results.xml"))
         testResults.suiteNames == ['hello test']
         testResults.suites['hello test'].passingTests == ['test_sum']
         testResults.suites['hello test'].failingTests == []
         testResults.checkTestCases(1, 1, 0)
         testResults.checkAssertions(3, 3, 0)
+    }
+
+    def "assemble does not build or run tests"() {
+        given:
+        useConventionalSourceLocations()
+        useStandardConfig()
+
+        when:
+        run "assemble"
+
+        then:
+        notExecuted ":compileHelloTestCUnitExeHelloC", ":compileHelloTestCUnitExeHelloTestC",
+            ":linkHelloTestCUnitExe", ":helloTestCUnitExe", ":runHelloTestCUnitExe"
     }
 
     @Issue("GRADLE-3225")
@@ -134,7 +125,7 @@ model {
         useConventionalSourceLocations()
         useStandardConfig()
         buildFile << "apply plugin: 'cpp'"
-        file("src/hello/cpp").createDir().file("foo.cpp").text = "class foobar { };"
+        file("src/hello/cpp/foo.cpp").text = "class foobar { };"
 
         when:
         run "check"
@@ -156,7 +147,8 @@ model {
         }
     }
     testSuites {
-        helloTest {
+        helloTest(CUnitTestSuiteSpec) {
+            testing \$.components.hello
             binaries.all {
                 lib library: "cunit", linkage: "static"
             }
@@ -171,9 +163,9 @@ model {
         then:
         executedAndNotSkipped ":compileHelloTestCUnitExeHelloC", ":compileHelloTestCUnitExeHelloTestC",
             ":linkHelloTestCUnitExe", ":helloTestCUnitExe", ":runHelloTestCUnitExe"
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
 
-        def testResults = new CUnitTestResults(file("build/test-results/helloTestCUnitExe/CUnitAutomated-Results.xml"))
+        def testResults = new CUnitTestResults(file("build/test-results/helloTest/CUnitAutomated-Results.xml"))
         testResults.suiteNames == ['hello test']
         testResults.suites['hello test'].passingTests == ['test_sum']
         testResults.suites['hello test'].failingTests == []
@@ -188,6 +180,14 @@ model {
     components {
         nativeComponentOne(NativeLibrarySpec)
         nativeComponentTwo(NativeLibrarySpec)
+    }
+    testSuites {
+        nativeComponentOneTest(CUnitTestSuiteSpec) {
+            testing \$.components.nativeComponentOne
+        }
+        nativeComponentTwoTest(CUnitTestSuiteSpec) {
+            testing \$.components.nativeComponentTwo
+        }
     }
 }
 """
@@ -246,7 +246,7 @@ model {
         run "runHelloTestCUnitExe"
 
         then:
-        def testResults = new CUnitTestResults(file("build/test-results/helloTestCUnitExe/CUnitAutomated-Results.xml"))
+        def testResults = new CUnitTestResults(file("build/test-results/helloTest/CUnitAutomated-Results.xml"))
         testResults.checkAssertions(1, 1, 0)
     }
 
@@ -273,7 +273,7 @@ model {
 
         then:
         succeeds "check"
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
     }
 
     def "can configure location of cunit test sources before component is declared"() {
@@ -299,7 +299,7 @@ model {
 
         then:
         succeeds "check"
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
     }
 
     def "variant-dependent sources are included in test binary"() {
@@ -324,6 +324,11 @@ model {
             }
         }
     }
+    testSuites {
+        helloTest(CUnitTestSuiteSpec) {
+            testing \$.components.hello
+        }
+    }
     binaries {
         withType(CUnitTestSuiteBinarySpec) {
             lib library: "cunit", linkage: "static"
@@ -334,7 +339,7 @@ model {
 
         then:
         succeeds "check"
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
     }
 
     def "can configure variant-dependent test sources"() {
@@ -364,7 +369,7 @@ model {
 
         then:
         succeeds "check"
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
     }
 
     def "test suite skipped after successful run"() {
@@ -372,6 +377,7 @@ model {
         useStandardConfig()
         useConventionalSourceLocations()
         run "runHelloTestCUnitExe"
+        executed ":helloTestCUnitExe", ":runHelloTestCUnitExe"
 
         when:
         run "runHelloTestCUnitExe"
@@ -396,13 +402,13 @@ model {
         contains "There were test failures:"
 
         and:
-        def testResults = new CUnitTestResults(file("build/test-results/helloTestCUnitExe/CUnitAutomated-Results.xml"))
+        def testResults = new CUnitTestResults(file("build/test-results/helloTest/CUnitAutomated-Results.xml"))
         testResults.suiteNames == ['hello test']
         testResults.suites['hello test'].passingTests == []
         testResults.suites['hello test'].failingTests == ['test_sum']
         testResults.checkTestCases(1, 0, 1)
         testResults.checkAssertions(3, 1, 2)
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
     }
 
     def "build does not break for failing tests if ignoreFailures is true"() {
@@ -421,8 +427,8 @@ tasks.withType(RunTestExecutable) {
         contains "There were failing tests. See the results at: "
 
         and:
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Results.xml").assertExists()
-        file("build/test-results/helloTestCUnitExe/CUnitAutomated-Listing.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Results.xml").assertExists()
+        file("build/test-results/helloTest/CUnitAutomated-Listing.xml").assertExists()
     }
 
     def "test suite not skipped after failing run"() {
@@ -469,6 +475,69 @@ tasks.withType(RunTestExecutable) {
         with(projectFile.projectConfigurations['debug']) {
             includePath == "src/helloTest/headers;build/src/helloTest/cunitLauncher/headers;src/hello/headers;${prebuiltPath}/cunit/2.1-2/include"
         }
+    }
+
+    def "non-buildable binaries are not attached to check task"() {
+        given:
+        useConventionalSourceLocations()
+        useStandardConfig()
+        buildFile << """
+model {
+    components {
+        unbuildable(NativeLibrarySpec)
+    }
+    testSuites {
+        unbuildableTest(CUnitTestSuiteSpec) {
+            testing \$.components.unbuildable
+        }
+    }
+    binaries {
+        unbuildableTestCUnitExe {
+            buildable = false
+        }
+    }
+}
+"""
+
+        when:
+        run "check"
+
+        then:
+        notExecuted ":runUnbuildableTestCUnitExe"
+        executedAndNotSkipped ":runHelloTestCUnitExe"
+    }
+
+    def "cunit run task is properly wired to binaries check tasks and lifecycle check task"() {
+        given:
+        useStandardConfig()
+        useConventionalSourceLocations()
+        buildFile << '''
+            task customHelloCheck()
+            model {
+                components {
+                    hello {
+                        binaries.all {
+                            checkedBy($.tasks.customHelloCheck)
+                        }
+                    }
+                }
+            }
+        '''.stripIndent()
+
+        when:
+        succeeds 'check'
+        then:
+        executed ':customHelloCheck', ':checkHelloSharedLibrary', ':checkHelloStaticLibrary', ':checkHelloTestCUnitExe', ':runHelloTestCUnitExe'
+
+        when:
+        succeeds 'checkHelloTestCUnitExe'
+        then:
+        executed ':runHelloTestCUnitExe'
+
+        when:
+        succeeds 'checkHelloStaticLibrary'
+        then:
+        executed ':customHelloCheck', ':runHelloTestCUnitExe'
     }
 
     private useConventionalSourceLocations() {

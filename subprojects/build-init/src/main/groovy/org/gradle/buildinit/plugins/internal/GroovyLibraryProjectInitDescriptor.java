@@ -16,29 +16,22 @@
 
 package org.gradle.buildinit.plugins.internal;
 
-
+import org.gradle.api.internal.DocumentationRegistry;
 import org.gradle.api.internal.file.FileResolver;
-import org.gradle.util.GUtil;
 
-public class GroovyLibraryProjectInitDescriptor extends LanguageLibraryProjectInitDescriptor{
+public class GroovyLibraryProjectInitDescriptor extends GroovyProjectInitDescriptor {
 
-    public GroovyLibraryProjectInitDescriptor(TemplateOperationFactory templateOperationFactory, final FileResolver fileResolver, TemplateLibraryVersionProvider libraryVersionProvider, TemplateOperation delegate) {
-        super("groovy", templateOperationFactory, fileResolver);
-        register(delegate);
+    public GroovyLibraryProjectInitDescriptor(TemplateOperationFactory templateOperationFactory, FileResolver fileResolver, TemplateLibraryVersionProvider libraryVersionProvider, ProjectInitDescriptor projectInitDescriptor, DocumentationRegistry documentationRegistry) {
+        super(templateOperationFactory, fileResolver, libraryVersionProvider, projectInitDescriptor, documentationRegistry);
+    }
 
-        register(templateOperationFactory.newTemplateOperation()
-                .withTemplate("groovylibrary/build.gradle.template")
-                .withTarget("build.gradle")
-                .withDocumentationBindings(GUtil.map("ref_userguide_groovy_tutorial", "tutorial_groovy_projects"))
-                .withBindings(GUtil.map("groovyVersion", libraryVersionProvider.getVersion("groovy")))
-                .withBindings(GUtil.map("junitVersion", libraryVersionProvider.getVersion("junit")))
-                .withBindings(GUtil.map("spockVersion", libraryVersionProvider.getVersion("spock")))
-                .create()
-        );
+    @Override
+    protected TemplateOperation sourceTemplateOperation() {
+        return fromClazzTemplate("groovylibrary/Library.groovy.template", "main");
+    }
 
-        TemplateOperation groovyLibTemplateOperation = fromClazzTemplate("groovylibrary/Library.groovy.template", "main");
-        TemplateOperation groovyTestTemplateOperation = fromClazzTemplate("groovylibrary/LibraryTest.groovy.template", "test");
-
-        register(whenNoSourcesAvailable(groovyLibTemplateOperation, groovyTestTemplateOperation));
+    @Override
+    protected TemplateOperation testTemplateOperation(BuildInitTestFramework testFramework) {
+        return fromClazzTemplate("groovylibrary/LibraryTest.groovy.template", "test");
     }
 }

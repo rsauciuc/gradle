@@ -15,12 +15,12 @@
  */
 
 package org.gradle.language
+
 import groovy.io.FileType
 import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.CompilationOutputsFixture
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.IncrementalHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.GUtil
 import spock.lang.Unroll
@@ -66,7 +66,7 @@ abstract class AbstractNativeLanguageIncrementalCompileIntegrationTest extends A
         otherHeaderFile = file("src/main/headers/other.h") << """
             // Dummy header file
 """
-        objectFileDir = file("build/objs/mainExecutable")
+        objectFileDir = file("build/objs/main")
         outputs = new CompilationOutputsFixture(objectFileDir)
     }
 
@@ -126,6 +126,104 @@ abstract class AbstractNativeLanguageIncrementalCompileIntegrationTest extends A
 
         and:
         outputs.recompiledFile sourceFile
+    }
+
+    def "does not recompile when fallback mechanism is used and there are empty directories"() {
+        given:
+        file("src/main/headers/empty/directory").mkdirs()
+        sourceFile << """
+            #define MY_HEADER "${otherHeaderFile.name}"
+            #include MY_HEADER
+"""
+
+        and:
+        outputs.snapshot { run "mainExecutable" }
+
+        when:
+        run "mainExecutable"
+        then:
+        skipped compileTask
+    }
+
+    def "does not recompile when included header has the same name as a directory"() {
+        given:
+        buildFile << """
+model {
+    components {
+        main {
+            sources.all {
+                exportedHeaders {
+                    srcDirs = [ "src/other", "src/main/headers" ]
+                }
+            }
+        }
+    }
+}
+"""
+        // This is a directory named 'directory'
+        file("src/other/directory").mkdirs()
+        // This is a header named 'directory'
+        file("src/main/headers/directory") << '#pragma message("including directory named header")'
+        file("src/main/headers/macro.h") << '#pragma message("including macro header")'
+
+        sourceFile << """
+            #include "directory"
+            #define MACRO "macro.h"
+            #include MACRO
+"""
+
+        and:
+        outputs.snapshot { run "mainExecutable" }
+
+        when:
+        run "mainExecutable"
+
+        then:
+        executed compileTask
+        skipped compileTask
+    }
+
+    @NotYetImplemented
+    def "recompiles when included header has the same name as a directory and the directory becomes a file"() {
+        given:
+        buildFile << """
+model {
+    components {
+        main {
+            sources.all {
+                exportedHeaders {
+                    srcDirs = [ "src/other", "src/main/headers" ]
+                }
+            }
+        }
+    }
+}
+"""
+        // directory header starts out as a directory
+        def directoryHeader = file("src/other/directory")
+        directoryHeader.mkdirs()
+        // this is the a header file named 'directory'
+        file("src/main/headers/directory") << '#pragma message("including directory named header")'
+
+        sourceFile << """
+            #include "directory"
+"""
+
+        and:
+        outputs.snapshot { run "mainExecutable" }
+
+        when:
+        directoryHeader.deleteDir()
+        directoryHeader << '#pragma message("NEW directory named header")'
+        and:
+        executer.withArgument("--info")
+        run "mainExecutable"
+        then:
+        executedAndNotSkipped compileTask
+        and:
+        outputs.recompiledFile sourceFile
+        result.assertOutputContains("NEW directory named header")
+
     }
 
     def "source is always recompiled if it includes header via macro"() {
@@ -300,7 +398,10 @@ abstract class AbstractNativeLanguageIncrementalCompileIntegrationTest extends A
         run "mainExecutable"
 
         then:
+        executed compileTask
         skipped compileTask
+
+        and:
         outputs.noneRecompiled()
     }
 
@@ -338,7 +439,10 @@ abstract class AbstractNativeLanguageIncrementalCompileIntegrationTest extends A
         run "mainExecutable"
 
         then:
+        executed compileTask
         skipped compileTask
+
+        and:
         outputs.noneRecompiled()
 
         where:
@@ -381,8 +485,6 @@ model {
         outputs.recompiledFiles allSources
     }
 
-    // We can't implement this because we don't scan the input directories.
-    @NotYetImplemented
     def "recompiles when replacement header file is added before previous header to existing include path"() {
         given:
         buildFile << """
@@ -504,7 +606,6 @@ model {
         objectFileFor(sourceFile).assertDoesNotExist()
     }
 
-    @LeaksFileHandles
     def "removes output file when source file is removed"() {
         given:
         def extraSource = file("src/main/${app.sourceType}/extra.${app.sourceExtension}")
@@ -522,16 +623,18 @@ model {
         run "mainExecutable"
 
         then:
+        executedAndNotSkipped compileTask
+
+        and:
         objectFileFor(extraSource).assertDoesNotExist()
         outputs.noneRecompiled()
     }
 
-    @LeaksFileHandles
     def "removes output files when all source files are removed"() {
         given:
         run "mainExecutable"
 
-        def executable = executable("build/binaries/mainExecutable/main")
+        def executable = executable("build/exe/main/main")
         executable.assertExists()
 
         when:

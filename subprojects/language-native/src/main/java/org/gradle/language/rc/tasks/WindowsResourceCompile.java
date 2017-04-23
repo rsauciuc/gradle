@@ -19,7 +19,14 @@ import org.gradle.api.DefaultTask;
 import org.gradle.api.Incubating;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.tasks.*;
+import org.gradle.api.internal.changedetection.changes.DiscoveredInputRecorder;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.WorkResult;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 import org.gradle.internal.Cast;
 import org.gradle.internal.operations.logging.BuildOperationLogger;
@@ -48,7 +55,6 @@ import java.util.concurrent.Callable;
  * Compiles Windows Resource scripts into .res files.
  */
 @Incubating
-@ParallelizableTask
 public class WindowsResourceCompile extends DefaultTask {
 
     private NativeToolChainInternal toolChain;
@@ -92,7 +98,7 @@ public class WindowsResourceCompile extends DefaultTask {
         spec.setMacros(getMacros());
         spec.args(getCompilerArgs());
         spec.setIncrementalCompile(inputs.isIncremental());
-        spec.setIncrementalInputs(inputs);
+        spec.setDiscoveredInputRecorder((DiscoveredInputRecorder) inputs);
         spec.setOperationLogger(operationLogger);
 
         PlatformToolProvider platformToolProvider = toolChain.select(targetPlatform);
@@ -111,6 +117,7 @@ public class WindowsResourceCompile extends DefaultTask {
     /**
      * The tool chain used for compilation.
      */
+    @Internal
     public NativeToolChain getToolChain() {
         return toolChain;
     }
@@ -122,6 +129,7 @@ public class WindowsResourceCompile extends DefaultTask {
     /**
      * The platform being targeted.
      */
+    @Nested
     public NativePlatform getTargetPlatform() {
         return targetPlatform;
     }

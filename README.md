@@ -1,16 +1,16 @@
-<img src="https://gradle.org/wp-content/uploads/2015/03/GradleLogoReg.png" alt="Gradle Logo" />
+<img src="gradle.png" width="350px" alt="Gradle Logo" />
 
 Gradle is a build tool with a focus on build automation and support for multi-language development. If you are building, testing, publishing, and deploying software on any platform, Gradle offers a flexible model that can support the entire development lifecycle from compiling and packaging code to publishing web sites. Gradle has been designed to support build automation across multiple languages and platforms including Java, Scala, Android, C/C++, and Groovy, and is closely integrated with development tools and continuous integration servers including Eclipse, IntelliJ, and Jenkins.
 
-For more information about Gradle, please visit: http://gradle.org
+For more information about Gradle, please visit: https://gradle.org
 
 ## Downloading
 
-You can download released versions and nightly build artifacts from: http://gradle.org/downloads
+You can download released versions and nightly build artifacts from: https://gradle.org/downloads
 
 ## Building
 
-Naturally, Gradle builds itself with Gradle. Gradle provides an innovative [wrapper](http://gradle.org/docs/current/userguide/gradle_wrapper.html) that allows you to work with a Gradle build without having to manually install Gradle. The wrapper is a batch script on Windows and a shell script on other operating systems.
+Naturally, Gradle builds itself with Gradle. Gradle provides an innovative [wrapper](https://gradle.org/docs/current/userguide/gradle_wrapper.html) that allows you to work with a Gradle build without having to manually install Gradle. The wrapper is a batch script on Windows and a shell script on other operating systems.
 
 You should use the wrapper to build the gradle project. Generally, you should use the wrapper for any wrapper-enabled project because it guarantees building with the Gradle version that the build was intended to use.
 
@@ -20,7 +20,7 @@ To build the entire Gradle project, you should run the following in the root of 
 
 This will compile all the code, generate all the documentation and run all the tests. It can take several hours because we have thousands of tests, including integration tests that exercise virtually every Gradle feature. Among the things we test are: compatibility across versions, validity of samples and Javadoc snippets, daemon process capabilities, etc.
 
-In order to for this build to pass, you will need a supported native tool chain installed. See the [Gradle userguide](https://docs.gradle.org/current/userguide/nativeBinaries.html#native-binaries:tool-chain-support) for a list of supported tool chains.
+In order for this build to pass, you will need a supported native tool chain installed. See the [Gradle userguide](https://docs.gradle.org/current/userguide/native_software.html#native-binaries:tool-chain-support) for a list of supported tool chains.
 
 ### Installing from source
 
@@ -54,7 +54,7 @@ And so on.
 
 ## Contributing
 
-If you're looking to contribute to Gradle or provide a patch/pull request, you can find info on how to get in touch with the developers at http://gradle.org/development.
+If you're looking to contribute to Gradle or provide a patch/pull request, you can find more info [here](https://github.com/gradle/gradle/blob/master/.github/CONTRIBUTING.md).
 
 ### Contributing Code
 
@@ -84,19 +84,12 @@ Note that due to an IDEA glitch, the first build of Gradle from IDEA will fail. 
 
 ### Eclipse
 
-#### Gradle Integration for Eclipse (by Pivotal)
+Building the Gradle project with Eclipse is currently limited due to Eclipse's lacking Groovy support.
+We recommend using IntelliJ IDEA.
 
-The Gradle project is not currently buildable in Eclipse. This is something that will be rectified in the future.
-
-You can try running:
-
-    ./gradlew eclipse
-
-This command generates Eclipse metadata that allows importing the project into Eclipse. However, you will have to do some manual fixes to the project's setup to make it work.
-
-#### Gradle for Eclipse (by Nodeclipse/Enide)
-
-With [Gradle(Enide) Eclipse plugin](http://marketplace.eclipse.org/content/gradle), you can import as general plugin or prepare before with `./gradlew eclipse`.
-
-Build is run via right-click on `build.gradle` <kbd>Run As -> gradle build Gradle Build</kbd>
-
+1. You will need Eclipse 4.5 (Mars)
+2. Install the Groovy Eclipse plugin from http://dist.springsource.org/snapshot/GRECLIPSE/e4.5/
+3. Make sure you have a Java 8 compatible JRE configured in your workspace
+4. In `Window->Preferences->Groovy->Compiler`, check `Enable Script folder support` and add `**/*.gradle`
+5. Run `./gradlew eclipse` from the root directory
+6. Import all projects using the "Import Existing Projects into Workspace" wizard

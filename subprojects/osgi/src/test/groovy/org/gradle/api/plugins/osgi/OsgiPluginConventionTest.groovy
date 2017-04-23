@@ -15,19 +15,19 @@
  */
 package org.gradle.api.plugins.osgi
 
+import org.gradle.api.Action
 import org.gradle.api.internal.plugins.osgi.DefaultOsgiManifest
 import org.gradle.api.internal.plugins.osgi.OsgiHelper
-import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.plugins.JavaBasePlugin
-import org.gradle.util.TestUtil
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import spock.lang.Issue
-import spock.lang.Specification
 
-class OsgiPluginConventionTest extends Specification {
-    DefaultProject project = TestUtil.createRootProject()
-    OsgiPluginConvention osgiPluginConvention = new OsgiPluginConvention(project)
+class OsgiPluginConventionTest extends AbstractProjectBuilderSpec {
+
+    OsgiPluginConvention osgiPluginConvention
 
     def setup() {
+        osgiPluginConvention = new OsgiPluginConvention(project)
         project.pluginManager.apply(JavaBasePlugin)
     }
 
@@ -40,8 +40,18 @@ class OsgiPluginConventionTest extends Specification {
 
     def osgiManifestWithClosure() {
         OsgiManifest osgiManifest = osgiPluginConvention.osgiManifest {
-            description = 'myDescription'    
+            description = 'myDescription'
         }
+
+        expect:
+        matchesExpectedConfig(osgiManifest)
+        osgiManifest.description == 'myDescription'
+    }
+
+    def osgiManifestWithAction() {
+        OsgiManifest osgiManifest = osgiPluginConvention.osgiManifest({ OsgiManifest manifest ->
+            manifest.description = 'myDescription'
+        } as Action<OsgiManifest>)
 
         expect:
         matchesExpectedConfig(osgiManifest)

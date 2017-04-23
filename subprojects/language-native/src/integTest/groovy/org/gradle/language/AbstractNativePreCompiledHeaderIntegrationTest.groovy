@@ -405,7 +405,7 @@ abstract class AbstractNativePreCompiledHeaderIntegrationTest extends AbstractIn
         libAndPCHTasksExecuted()
 
         and:
-        def install = installation("build/install/mainExecutable")
+        def install = installation("build/install/main")
         install.assertInstalled()
         install.exec().out == app.englishOutput
     }
@@ -520,16 +520,8 @@ abstract class AbstractNativePreCompiledHeaderIntegrationTest extends AbstractIn
         true
     }
 
-    private void maybeWait() {
-        if (toolChain.visualCpp) {
-            def now = System.currentTimeMillis()
-            def nextSecond = now % 1000
-            Thread.sleep(1200 - nextSecond)
-        }
-    }
-
     String getSuffix() {
-        return toolChain.displayName == "visual c++" ? "pch" : "h.gch"
+        return toolChain.typeDisplayName == "visual c++" ? "pch" : "h.gch"
     }
 
     String getUniquePragmaOutput(String message) {
@@ -591,6 +583,6 @@ abstract class AbstractNativePreCompiledHeaderIntegrationTest extends AbstractIn
     }
 
     String getPCHHeaderDirName(String lib="hello", String linkage="shared", String sourceSet=app.sourceType) {
-        return "build/objs/${lib}${StringUtils.capitalize(linkage)}Library/${lib}${StringUtils.capitalize(sourceSet)}PCH"
+        return "build/objs/${lib}/${linkage}/${lib}${StringUtils.capitalize(sourceSet)}PCH"
     }
 }

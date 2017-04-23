@@ -18,7 +18,7 @@
     <para>This chapter introduces the basics of the Gradle command-line. You run a build using the
         <command>gradle</command> command, which you have already seen in action in previous chapters.</para>
 
-    <section>
+    <section id="sec:executing_multiple_tasks">
         <title>Executing multiple tasks</title>
         <para>You can execute multiple tasks in a single build by listing each of the tasks on the command-line. For example,
             the command <userinput>gradle compile test</userinput> will execute the <literal>compile</literal> and
@@ -72,7 +72,7 @@
         </para>
     </section>
 
-    <section>
+    <section id="sec:task_name_abbreviation">
         <title>Task name abbreviation</title>
         <para>When you specify tasks on the command-line, you don't have to provide the full name of the task. You only need to provide enough of the
             task name to uniquely identify the task. For example, in the sample build above, you can execute task
@@ -106,6 +106,29 @@
         </sample>
     </section>
 
+    <section id="sec:rerun_tasks">
+        <title>Forcing tasks to execute</title>
+        <para>
+            Many tasks, particularly those provided by Gradle itself, support <link linkend="sec:up_to_date_checks">incremental builds</link>.
+            Such tasks can determine whether they need to run or not based on whether their inputs or outputs have changed since the last
+            time they ran. You can easily identify tasks that take part in incremental build when Gradle displays
+            the text <literal>UP-TO-DATE</literal> next to their name during a build run.
+        </para>
+        <para>
+            You may on occasion want to force Gradle to run all the tasks, ignoring any up-to-date checks. If that's the case, simply use
+            the <literal>--rerun-tasks</literal> option. Here's the output when running a task both without and with <literal>--rerun-tasks</literal>:
+        </para>
+        <sample id="rerunTasks" dir="userguide/tutorial/rerun" title="Forcing tasks to run">
+            <test args="doIt" />
+            <output args="doIt" ignoreExtraLines="y" outputFile="noRerunTasks.out" />
+            <output args="--rerun-tasks doIt" ignoreExtraLines="y" />
+        </sample>
+        <para>
+            Note that this will force <emphasis>all</emphasis> required tasks to execute, not just the ones you specify on the command
+            line. It's a little like running a <literal>clean</literal>, but without the build's generated output being deleted.
+        </para>
+    </section>
+
     <section id="sec:obtaining_information_about_your_build">
         <title>Obtaining information about your build</title>
         <para>Gradle provides several built-in tasks which show particular details of your build. This can be
@@ -115,7 +138,7 @@
             <link linkend="project_reports_plugin">project report plugin</link> to add tasks to your project which will
             generate these reports.
         </para>
-        <section>
+        <section id="sec:listing_projects">
             <title>Listing projects</title>
             <para>Running <userinput>gradle projects</userinput> gives you a list of the sub-projects of the selected project,
                 displayed in a hierarchy. Here is an example:
@@ -139,16 +162,16 @@
             <sample id="taskListReport" dir="userguide/tutorial/projectReports" title="Obtaining information about tasks">
                 <output args="-q tasks"/>
             </sample>
-            <para>By default, this report shows only those tasks which have been assigned to a task group. You can do this
-                by setting the <literal>group</literal> property for the task. You can also set the <literal>description</literal>
-                property, to provide a description to be included in the report.
+            <para>By default, this report shows only those tasks which have been assigned to a task group, so-called <emphasis>visible</emphasis>
+                tasks. You can do this by setting the <literal>group</literal> property for the task. You can also set the
+                <literal>description</literal> property, to provide a description to be included in the report.
             </para>
             <sample id="taskListReport" dir="userguide/tutorial/projectReports" title="Changing the content of the task report">
                 <sourcefile file="build.gradle" snippet="add-task-to-report"/>
             </sample>
             <para>You can obtain more information in the task listing using the <option>--all</option> option. With
-                this option, the task report lists all tasks in the project, grouped by main task, and the dependencies
-                for each task. Here is an example:
+                this option, the task report lists all tasks in the project, including tasks which have not been assigned to a task group,
+                so-called <emphasis>hidden</emphasis> tasks. Here is an example:
             </para>
             <sample id="taskListAllReport" dir="userguide/tutorial/projectReports" title="Obtaining more information about tasks">
                 <output args="-q tasks --all"/>
@@ -157,7 +180,7 @@
         <section id="sec:show_task_details">
             <title>Show task usage details</title>
             <para>Running <userinput>gradle help --task someTask</userinput> gives you detailed information about a specific task or multiple
-                tasks matching the given task name in your multiproject build.
+                tasks matching the given task name in your multi-project build.
                 Below is an example of this detailed information:
             </para>
             <sample id="taskHelp" dir="userguide/tutorial/projectReports" title="Obtaining detailed help for tasks">
@@ -207,11 +230,11 @@
             </para>
             <para>
                 The built-in dependencyInsight task is a part of the 'Help' tasks group.
-                The task needs to configured with the dependency and the configuration.
+                The task needs to be configured with the dependency and the configuration.
                 The report looks for the dependencies that match the specified dependency spec in the specified configuration.
-                If Java related plugin is applied, the dependencyInsight task is pre-configured with 'compile' configuration because typically it's the compile dependencies we are interested in.
+                If Java related plugins are applied, the dependencyInsight task is pre-configured with the 'compile' configuration because typically it's the compile dependencies we are interested in.
                 You should specify the dependency you are interested in via the command line '--dependency' option.
-                If you don't like the defaults you may select the configuration via '--configuration' option.
+                If you don't like the defaults you may select the configuration via the '--configuration' option.
                 For more information see the <apilink class="org.gradle.api.tasks.diagnostics.DependencyInsightReportTask"/> class in the API documentation.
             </para>
         </section>
@@ -255,7 +278,7 @@
             execution.
         </para>
     </section>
-    <section>
+    <section id="sec:cli_tutorial_summary">
         <title>Summary</title>
         <para>In this chapter, you have seen some of the things you can do with Gradle from the command-line. You can
             find out more about the <command>gradle</command> command in <xref linkend="gradle_command_line"/>.</para>

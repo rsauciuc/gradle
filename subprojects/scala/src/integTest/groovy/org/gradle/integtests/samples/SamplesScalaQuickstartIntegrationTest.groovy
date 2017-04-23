@@ -18,7 +18,7 @@ package org.gradle.integtests.samples
 
 import org.gradle.integtests.fixtures.AbstractIntegrationTest
 import org.gradle.integtests.fixtures.DefaultTestExecutionResult
-import org.gradle.integtests.fixtures.ForkScalaCompileInDaemonModeFixture
+import org.gradle.integtests.fixtures.ZincScalaCompileFixture
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.test.fixtures.file.TestFile
@@ -31,7 +31,7 @@ import static org.hamcrest.Matchers.containsString
 class SamplesScalaQuickstartIntegrationTest extends AbstractIntegrationTest {
 
     @Rule public final Sample sample = new Sample(testDirectoryProvider, 'scala/quickstart')
-    @Rule public final ForkScalaCompileInDaemonModeFixture forkScalaCompileInDaemonModeFixture = new ForkScalaCompileInDaemonModeFixture(executer, testDirectoryProvider)
+    @Rule public final ZincScalaCompileFixture zincScalaCompileFixture = new ZincScalaCompileFixture(executer, testDirectoryProvider)
 
     private TestFile projectDir
 
@@ -47,15 +47,15 @@ class SamplesScalaQuickstartIntegrationTest extends AbstractIntegrationTest {
 
         // Check tests have run
         def result = new DefaultTestExecutionResult(projectDir)
-        result.assertTestClassesExecuted('org.gradle.sample.impl.PersonImplTest')
+        result.assertTestClassesExecuted('org.gradle.sample.PersonSpec')
 
         // Check contents of Jar
         TestFile jarContents = file('jar')
         projectDir.file("build/libs/quickstart.jar").unzipTo(jarContents)
         jarContents.assertHasDescendants(
                 'META-INF/MANIFEST.MF',
-                'org/gradle/sample/api/Person.class',
-                'org/gradle/sample/impl/PersonImpl.class'
+                'org/gradle/sample/Named.class',
+                'org/gradle/sample/Person.class'
         )
     }
 
@@ -69,6 +69,7 @@ class SamplesScalaQuickstartIntegrationTest extends AbstractIntegrationTest {
         executer.inDirectory(projectDir).withTasks('clean', 'scaladoc').run()
 
         projectDir.file('build/docs/scaladoc/index.html').assertExists()
-        projectDir.file('build/docs/scaladoc/org/gradle/sample/api/Person.html').assertContents(containsString("Defines the interface for a person."))
+        projectDir.file('build/docs/scaladoc/org/gradle/sample/Named.html')
+            .assertContents(containsString("Defines the traits of one who is named."))
     }
 }

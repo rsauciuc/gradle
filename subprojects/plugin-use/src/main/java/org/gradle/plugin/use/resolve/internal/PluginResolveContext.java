@@ -17,10 +17,12 @@
 package org.gradle.plugin.use.resolve.internal;
 
 import org.gradle.api.internal.plugins.PluginImplementation;
-import org.gradle.plugin.internal.PluginId;
+import org.gradle.plugin.use.PluginId;
 
 public interface PluginResolveContext {
     void addLegacy(PluginId pluginId, String m2RepoUrl, Object dependencyNotation);
+
+    void addLegacy(PluginId pluginId, Object dependencyNotation);
 
     void add(PluginImplementation<?> plugin);
 

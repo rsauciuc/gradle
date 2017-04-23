@@ -23,6 +23,7 @@ import org.gradle.language.fixtures.TestJavaComponent
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import spock.lang.Issue
 
 @Requires(TestPrecondition.JDK8_OR_EARLIER)
 class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
@@ -59,6 +60,52 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
                 }
             }
         """
+        then:
+        succeeds "assemble"
+    }
+
+    @Issue('GRADLE-3483')
+    def "can scan Annotations for public API"() {
+        when:
+        buildFile << """
+            repositories {
+                mavenCentral()
+            }
+
+            model {
+                components {
+                    myLib(JvmLibrarySpec) {
+                        api {
+                            exports 'com.example.p1'
+                        }
+                    }
+                }
+            }
+        """
+
+        app.sources.add(new JvmSourceFile("com/example/p1", "MyCustomAnnotation.java", """
+            package com.example.p1;
+
+            import java.lang.annotation.*;
+
+            @Retention(RetentionPolicy.RUNTIME)
+            public @interface MyCustomAnnotation {
+                String[] names();
+            }
+            """.stripIndent()))
+        app.sources.add(new JvmSourceFile("com/example/p1", "ExampleApi.java",
+            """
+            package com.example.p1;
+
+            public class ExampleApi {
+                @MyCustomAnnotation(names = {"Hello"})
+                public String field;
+
+                public void canRun() { }
+            }
+        """.stripIndent()))
+        app.sources*.writeToDir(file("src/myLib/java"))
+
         then:
         succeeds "assemble"
     }
@@ -143,8 +190,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def apiClassesOnly = (allClasses - resources -
             ["non_api/pkg/InternalPerson.class", "compile/test/internal/Util.class"])
         resources.size() > 0
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants((allClasses + resources) as String[])
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly as String[])
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants((allClasses + resources) as String[])
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly as String[])
     }
 
     def "api jar should not be rebuilt when resource class changes"() {
@@ -176,7 +223,7 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         succeeds "assemble"
 
         and:
-        skipped(':createMyLibApiJar')
+        skipped(':myLibApiJar')
     }
 
     def "api jar should be rebuilt if API spec adds a new exported package"() {
@@ -202,8 +249,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def allClasses = app.sources*.classFile.fullPath
         def apiClassesOnly = (allClasses -
             ["non_api/pkg/InternalPerson.class", "compile/test/internal/Util.class"])
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants((allClasses) as String[])
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly as String[])
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants((allClasses) as String[])
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly as String[])
 
         when:
         buildFile << """
@@ -228,10 +275,10 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         and:
         skipped ':compileMyLibJarMyLibJava'
         skipped ':createMyLibJar'
-        executedAndNotSkipped(':createMyLibApiJar')
+        executedAndNotSkipped(':myLibApiJar')
 
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants((allClasses) as String[])
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly as String[])
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants((allClasses) as String[])
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly as String[])
 
     }
 
@@ -259,8 +306,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def allClasses = app.sources*.classFile.fullPath
         def apiClassesOnly = (allClasses -
             ["non_api/pkg/InternalPerson.class"])
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants((allClasses) as String[])
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly as String[])
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants((allClasses) as String[])
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly as String[])
 
         when:
         buildFile.text = buildFile.text.replace(/exports 'compile.test.internal'/,'')
@@ -275,10 +322,10 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         and:
         skipped ':compileMyLibJarMyLibJava'
         skipped ':createMyLibJar'
-        executedAndNotSkipped(':createMyLibApiJar')
+        executedAndNotSkipped(':myLibApiJar')
 
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants((allClasses) as String[])
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly as String[])
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants((allClasses) as String[])
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly as String[])
 
     }
 
@@ -300,12 +347,12 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         """
         then:
         succeeds "assemble"
-        executedAndNotSkipped(':createMyLibApiJar')
+        executedAndNotSkipped(':myLibApiJar')
 
         def allClasses = app.sources*.classFile.fullPath
         def apiClassesOnly = []
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants((allClasses) as String[])
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly as String[])
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants((allClasses) as String[])
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly as String[])
 
     }
 
@@ -327,8 +374,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
 
         and:
         def allClasses = app.sources*.classFile.fullPath as String[]
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants(allClasses)
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(allClasses)
     }
 
     def "api jar should include all library packages api specification is declared empty"() {
@@ -351,8 +398,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
 
         and:
         def allClasses = app.sources*.classFile.fullPath as String[]
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants(allClasses)
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(allClasses)
     }
 
     def "api jar should be built for each variant and contain only api classes"() {
@@ -380,10 +427,10 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def allClasses = app.sources*.classFile.fullPath as String[]
         def apiClassesOnly = (allClasses -
             ["non_api/pkg/InternalPerson.class", "compile/test/internal/Util.class"]) as String[];
-        jarFile("build/jars/myLibJava5Jar/myLib.jar").hasDescendants(allClasses)
-        jarFile("build/jars/myLibJava5ApiJar/myLib.jar").hasDescendants(apiClassesOnly)
-        jarFile("build/jars/myLibJava6Jar/myLib.jar").hasDescendants(allClasses)
-        jarFile("build/jars/myLibJava6ApiJar/myLib.jar").hasDescendants(apiClassesOnly)
+        jarFile("build/jars/myLib/java5Jar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/java5Jar/api/myLib.jar").hasDescendants(apiClassesOnly)
+        jarFile("build/jars/myLib/java6Jar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/java6Jar/api/myLib.jar").hasDescendants(apiClassesOnly)
     }
 
     def "building api jar should trigger compilation of classes"() {
@@ -409,8 +456,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def allClasses = app.sources*.classFile.fullPath as String[]
         def apiClassesOnly = (allClasses -
             ["non_api/pkg/InternalPerson.class", "compile/test/internal/Util.class"]) as String[];
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly)
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly)
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants(allClasses)
     }
 
     def "should support configuring exported packages from rule method"() {
@@ -441,8 +488,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def allClasses = app.sources*.classFile.fullPath as String[]
         def apiClassesOnly = (allClasses -
             ["non_api/pkg/InternalPerson.class", "compile/test/internal/Util.class"]) as String[];
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly)
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly)
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants(allClasses)
     }
 
     def "should support chained configuration of library api exports"() {
@@ -466,8 +513,8 @@ class JvmApiSpecIntegrationTest extends AbstractJvmLanguageIntegrationTest {
         def allClasses = app.sources*.classFile.fullPath as String[]
         def apiClassesOnly = (allClasses -
             ["non_api/pkg/InternalPerson.class", "compile/test/internal/Util.class"]) as String[];
-        jarFile("build/jars/myLibApiJar/myLib.jar").hasDescendants(apiClassesOnly)
-        jarFile("build/jars/myLibJar/myLib.jar").hasDescendants(allClasses)
+        jarFile("build/jars/myLib/jar/api/myLib.jar").hasDescendants(apiClassesOnly)
+        jarFile("build/jars/myLib/jar/myLib.jar").hasDescendants(allClasses)
     }
 
     def addNonApiClasses() {

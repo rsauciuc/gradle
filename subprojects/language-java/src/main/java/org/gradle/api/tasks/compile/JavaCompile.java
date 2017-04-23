@@ -16,14 +16,23 @@
 
 package org.gradle.api.tasks.compile;
 
+import com.google.common.collect.ImmutableList;
 import org.gradle.api.AntBuilder;
 import org.gradle.api.Incubating;
+import org.gradle.api.JavaVersion;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.FileTree;
 import org.gradle.api.internal.changedetection.changes.IncrementalTaskInputsInternal;
 import org.gradle.api.internal.file.FileOperations;
+import org.gradle.api.internal.hash.FileHasher;
+import org.gradle.api.internal.tasks.CurrentJvmJavaToolChain;
+import org.gradle.api.internal.tasks.JavaHomeBasedJavaToolChain;
+import org.gradle.api.internal.tasks.compile.AnnotationProcessorDetector;
 import org.gradle.api.internal.tasks.compile.CleaningJavaCompiler;
 import org.gradle.api.internal.tasks.compile.DefaultJavaCompileSpec;
 import org.gradle.api.internal.tasks.compile.DefaultJavaCompileSpecFactory;
 import org.gradle.api.internal.tasks.compile.JavaCompileSpec;
+import org.gradle.api.internal.tasks.compile.JavaCompilerFactory;
 import org.gradle.api.internal.tasks.compile.incremental.IncrementalCompilerFactory;
 import org.gradle.api.internal.tasks.compile.incremental.analyzer.ClassAnalysisCache;
 import org.gradle.api.internal.tasks.compile.incremental.cache.CompileCaches;
@@ -31,17 +40,25 @@ import org.gradle.api.internal.tasks.compile.incremental.cache.GeneralCompileCac
 import org.gradle.api.internal.tasks.compile.incremental.deps.LocalClassSetAnalysisStore;
 import org.gradle.api.internal.tasks.compile.incremental.jar.JarSnapshotCache;
 import org.gradle.api.internal.tasks.compile.incremental.jar.LocalJarClasspathSnapshotStore;
-import org.gradle.api.tasks.*;
+import org.gradle.api.tasks.CacheableTask;
+import org.gradle.api.tasks.Classpath;
+import org.gradle.api.tasks.CompileClasspath;
+import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.WorkResult;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 import org.gradle.cache.CacheRepository;
 import org.gradle.internal.Factory;
+import org.gradle.internal.jvm.inspection.JvmVersionDetector;
 import org.gradle.jvm.internal.toolchain.JavaToolChainInternal;
 import org.gradle.jvm.platform.JavaPlatform;
 import org.gradle.jvm.platform.internal.DefaultJavaPlatform;
 import org.gradle.jvm.toolchain.JavaToolChain;
 import org.gradle.language.base.internal.compile.Compiler;
 import org.gradle.language.base.internal.compile.CompilerUtil;
-import org.gradle.util.SingleMessageLogger;
+import org.gradle.process.internal.ExecActionFactory;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -51,7 +68,8 @@ import java.io.File;
  *
  * <pre autoTested=''>
  *     apply plugin: 'java'
- *     compileJava {
+ *
+ *     tasks.withType(JavaCompile) {
  *         //enable compilation in a separate daemon process
  *         options.fork = true
  *
@@ -60,20 +78,39 @@ import java.io.File;
  *     }
  * </pre>
  */
-@ParallelizableTask
+@CacheableTask
 public class JavaCompile extends AbstractCompile {
-    private File dependencyCacheDir;
     private final CompileOptions compileOptions = new CompileOptions();
+    private JavaToolChain toolChain;
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @PathSensitive(PathSensitivity.NAME_ONLY)
+    public FileTree getSource() {
+        return super.getSource();
+    }
 
     /**
      * Returns the tool chain that will be used to compile the Java source.
      *
      * @return The tool chain.
      */
-    @Incubating @Inject
+    @Nested
+    @Incubating
     public JavaToolChain getToolChain() {
-        // Implementation is generated
-        throw new UnsupportedOperationException();
+        if (toolChain != null) {
+            return toolChain;
+        }
+        if (getOptions().isFork()) {
+            ForkOptions forkOptions = getOptions().getForkOptions();
+            File javaHome = forkOptions.getJavaHome();
+            if (javaHome != null) {
+                return new JavaHomeBasedJavaToolChain(javaHome, getJavaCompilerFactory(), getExecActionFactory(), getJvmVersionDetector());
+            }
+        }
+        return new CurrentJvmJavaToolChain(getJavaCompilerFactory(), getExecActionFactory());
     }
 
     /**
@@ -83,8 +120,7 @@ public class JavaCompile extends AbstractCompile {
      */
     @Incubating
     public void setToolChain(JavaToolChain toolChain) {
-        // Implementation is generated
-        throw new UnsupportedOperationException();
+        this.toolChain = toolChain;
     }
 
     @TaskAction
@@ -94,17 +130,19 @@ public class JavaCompile extends AbstractCompile {
             return;
         }
 
-        SingleMessageLogger.incubatingFeatureUsed("Incremental java compilation");
-
         DefaultJavaCompileSpec spec = createSpec();
-        final CacheRepository repository1 = getCacheRepository();
-        final JavaCompile javaCompile1 = this;
-        final GeneralCompileCaches generalCaches1 = getGeneralCompileCaches();
-        CompileCaches compileCaches = new CompileCaches() {
-            private final CacheRepository repository = repository1;
-            private final JavaCompile javaCompile = javaCompile1;
-            private final GeneralCompileCaches generalCaches = generalCaches1;
+        CompileCaches compileCaches = createCompileCaches();
+        IncrementalCompilerFactory factory = new IncrementalCompilerFactory(
+            getFileOperations(), getCachingFileHasher(), getPath(), createCompiler(spec), source, compileCaches, (IncrementalTaskInputsInternal) inputs, getEffectiveAnnotationProcessorPath());
+        Compiler<JavaCompileSpec> compiler = factory.createCompiler();
+        performCompilation(spec, compiler);
+    }
 
+    private CompileCaches createCompileCaches() {
+        final GeneralCompileCaches generalCaches = getGeneralCompileCaches();
+        final LocalClassSetAnalysisStore localClassSetAnalysisStore = generalCaches.createLocalClassSetAnalysisStore(getPath());
+        final LocalJarClasspathSnapshotStore localJarClasspathSnapshotStore = generalCaches.createLocalJarClasspathSnapshotStore(getPath());
+        return new CompileCaches() {
             public ClassAnalysisCache getClassAnalysisCache() {
                 return generalCaches.getClassAnalysisCache();
             }
@@ -114,29 +152,38 @@ public class JavaCompile extends AbstractCompile {
             }
 
             public LocalJarClasspathSnapshotStore getLocalJarClasspathSnapshotStore() {
-                return new LocalJarClasspathSnapshotStore(repository, javaCompile);
+                return localJarClasspathSnapshotStore;
             }
 
             public LocalClassSetAnalysisStore getLocalClassSetAnalysisStore() {
-                return new LocalClassSetAnalysisStore(repository, javaCompile);
+                return localClassSetAnalysisStore;
             }
         };
-        IncrementalCompilerFactory factory = new IncrementalCompilerFactory(
-                (FileOperations) getProject(), getPath(), createCompiler(spec), source, compileCaches, (IncrementalTaskInputsInternal) inputs);
-        Compiler<JavaCompileSpec> compiler = factory.createCompiler();
-        performCompilation(spec, compiler);
     }
 
-    @Inject protected GeneralCompileCaches getGeneralCompileCaches() {
-        throw new UnsupportedOperationException();
-    }
-    @Inject protected CacheRepository getCacheRepository() {
+    @Inject
+    protected FileHasher getCachingFileHasher() {
         throw new UnsupportedOperationException();
     }
 
-    protected void compile() {
-        DefaultJavaCompileSpec spec = createSpec();
-        performCompilation(spec, createCompiler(spec));
+    @Inject
+    protected FileOperations getFileOperations() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected GeneralCompileCaches getGeneralCompileCaches() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected CacheRepository getCacheRepository() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected JavaCompilerFactory getJavaCompilerFactory() {
+        throw new UnsupportedOperationException();
     }
 
     @Inject
@@ -144,13 +191,31 @@ public class JavaCompile extends AbstractCompile {
         throw new UnsupportedOperationException();
     }
 
+    @Inject
+    protected JvmVersionDetector getJvmVersionDetector() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected ExecActionFactory getExecActionFactory() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected void compile() {
+        DefaultJavaCompileSpec spec = createSpec();
+        performCompilation(spec, createCompiler(spec));
+    }
+
+
     private CleaningJavaCompiler createCompiler(JavaCompileSpec spec) {
         Compiler<JavaCompileSpec> javaCompiler = CompilerUtil.castCompiler(((JavaToolChainInternal) getToolChain()).select(getPlatform()).newCompiler(spec.getClass()));
         return new CleaningJavaCompiler(javaCompiler, getAntBuilderFactory(), getOutputs());
     }
 
+    @Nested
     protected JavaPlatform getPlatform() {
-        return DefaultJavaPlatform.current();
+        return new DefaultJavaPlatform(JavaVersion.toVersion(getTargetCompatibility()));
     }
 
     private void performCompilation(JavaCompileSpec spec, Compiler<JavaCompileSpec> compiler) {
@@ -159,26 +224,17 @@ public class JavaCompile extends AbstractCompile {
     }
 
     private DefaultJavaCompileSpec createSpec() {
-        DefaultJavaCompileSpec spec = new DefaultJavaCompileSpecFactory(compileOptions).create();
+        final DefaultJavaCompileSpec spec = new DefaultJavaCompileSpecFactory(compileOptions).create();
         spec.setSource(getSource());
         spec.setDestinationDir(getDestinationDir());
         spec.setWorkingDir(getProject().getProjectDir());
         spec.setTempDir(getTemporaryDir());
-        spec.setClasspath(getClasspath());
-        spec.setDependencyCacheDir(getDependencyCacheDir());
+        spec.setCompileClasspath(ImmutableList.copyOf(getClasspath()));
+        spec.setAnnotationProcessorPath(ImmutableList.copyOf(getEffectiveAnnotationProcessorPath()));
         spec.setTargetCompatibility(getTargetCompatibility());
         spec.setSourceCompatibility(getSourceCompatibility());
         spec.setCompileOptions(compileOptions);
         return spec;
-    }
-
-    @OutputDirectory
-    public File getDependencyCacheDir() {
-        return dependencyCacheDir;
-    }
-
-    public void setDependencyCacheDir(File dependencyCacheDir) {
-        this.dependencyCacheDir = dependencyCacheDir;
     }
 
     /**
@@ -189,5 +245,27 @@ public class JavaCompile extends AbstractCompile {
     @Nested
     public CompileOptions getOptions() {
         return compileOptions;
+    }
+
+    @Override
+    @CompileClasspath
+    public FileCollection getClasspath() {
+        return super.getClasspath();
+    }
+
+    /**
+     * Returns the path to use for annotation processor discovery. Returns an empty collection when no processing should be performed, for example when no annotation processors are present in the compile classpath or annotation processing has been disabled.
+     *
+     * <p>You can specify this path using {@link CompileOptions#setAnnotationProcessorPath(FileCollection)} or {@link CompileOptions#setCompilerArgs(java.util.List)}. When not explicitly set using one of the methods on {@link CompileOptions}, the compile classpath will be used when there are annotation processors present in the compile classpath. Otherwise this path will be empty.
+     *
+     * <p>This path is always empty when annotation processing is disabled.</p>
+     *
+     * @since 3.4
+     */
+    @Incubating
+    @Classpath
+    public FileCollection getEffectiveAnnotationProcessorPath() {
+        AnnotationProcessorDetector annotationProcessorDetector = getServices().get(AnnotationProcessorDetector.class);
+        return annotationProcessorDetector.getEffectiveAnnotationProcessorClasspath(compileOptions, getClasspath());
     }
 }

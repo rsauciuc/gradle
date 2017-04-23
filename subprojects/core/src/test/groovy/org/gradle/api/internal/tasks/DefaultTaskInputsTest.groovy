@@ -29,16 +29,26 @@ class DefaultTaskInputsTest extends Specification {
     private final File treeFile = new File('tree')
     private final tree = [getFiles: { [treeFile] as Set}] as FileTreeInternal
     private final FileResolver resolver = [
-            resolve: {new File(it)},
+            resolve: { new File((String) it) },
             resolveFilesAsTree: {tree}
     ] as FileResolver
 
-    private TaskMutator taskStatusNagger = Stub() {
-        mutate(_, _) >> { String method, Runnable action -> action.run() }
+    private def taskStatusNagger = Stub(TaskMutator) {
+        mutate(_, _) >> { String method, Object action ->
+            if (action instanceof Runnable) {
+                action.run()
+            } else if (action instanceof Callable) {
+                return action.call()
+            }
+        }
     }
-    private final DefaultTaskInputs inputs = new DefaultTaskInputs(resolver, {} as TaskInternal, taskStatusNagger)
+    def task = Mock(TaskInternal) {
+        getName() >> "task"
+        toString() >> "task 'task'"
+    }
+    private final DefaultTaskInputs inputs = new DefaultTaskInputs(resolver, task, taskStatusNagger)
 
-    def defaultValues() {
+    def "default values"() {
         expect:
         inputs.files.empty
         inputs.properties.isEmpty()
@@ -47,20 +57,62 @@ class DefaultTaskInputsTest extends Specification {
         inputs.sourceFiles.empty
     }
 
-    def canRegisterInputFiles() {
-        when:
-        inputs.files('a')
-
+    def "can register input file"() {
+        when: inputs.file("a")
         then:
-        inputs.files.files == [new File('a')] as Set
+        inputs.files.files.toList() == [new File('a')]
+        inputs.fileProperties*.propertyName == ['$1']
+        inputs.fileProperties*.propertyFiles*.files.flatten() == [new File("a")]
     }
 
-    def canRegisterInputDir() {
-        when:
-        inputs.dir('a')
-
+    def "can register input file with property name"() {
+        when: inputs.file("a").withPropertyName("prop")
         then:
-        inputs.files.files == [treeFile] as Set
+        inputs.files.files.toList() == [new File('a')]
+        inputs.fileProperties*.propertyName == ['prop']
+        inputs.fileProperties*.propertyFiles*.files.flatten() == [new File("a")]
+    }
+
+    def "can register input files"() {
+        when: inputs.files("a", "b")
+        then:
+        inputs.files.files.toList() == [new File("a"), new File("b")]
+        inputs.fileProperties*.propertyName == ['$1']
+        inputs.fileProperties*.propertyFiles*.files.flatten() == [new File("a"), new File("b")]
+    }
+
+    def "can register input files with property naem"() {
+        when: inputs.files("a", "b").withPropertyName("prop")
+        then:
+        inputs.files.files.sort() == [new File("a"), new File("b")]
+        inputs.fileProperties*.propertyName == ['prop']
+        inputs.fileProperties*.propertyFiles*.files.flatten() == [new File("a"), new File("b")]
+    }
+
+    def "can register input dir"() {
+        when: inputs.dir("a")
+        then:
+        inputs.files.files.toList() == [treeFile]
+        inputs.fileProperties*.propertyName == ['$1']
+        inputs.fileProperties*.propertyFiles*.files.flatten() == [treeFile]
+    }
+
+    def "can register input dir with property name"() {
+        when: inputs.dir("a").withPropertyName("prop")
+        then:
+        inputs.files.files.toList() == [treeFile]
+        inputs.fileProperties*.propertyName == ['prop']
+        inputs.fileProperties*.propertyFiles*.files.flatten() == [treeFile]
+    }
+
+    def "cannot register input file with same property name"() {
+        inputs.file("a").withPropertyName("alma")
+        inputs.file("b").withPropertyName("alma")
+        when:
+        inputs.fileProperties
+        then:
+        def ex = thrown IllegalArgumentException
+        ex.message == "Multiple input file properties with name 'alma'"
     }
 
     def canRegisterInputProperty() {
@@ -122,9 +174,24 @@ class DefaultTaskInputsTest extends Specification {
         String toString() { "Joe" }
     }
 
+    def "can register source files"() {
+        when: inputs.files("a", "b").withPropertyName("prop")
+        then:
+        inputs.hasInputs
+        !inputs.hasSourceFiles
+
+        when: inputs.files(["s1", "s2"]).skipWhenEmpty()
+        then:
+        inputs.hasSourceFiles
+        inputs.files.files.toList() == [new File("a"), new File("b"), new File("s1"), new File("s2")]
+        inputs.sourceFiles.files.toList() == [new File("s1"), new File("s2")]
+        inputs.fileProperties*.propertyName == ['$1', 'prop']
+        inputs.fileProperties*.propertyFiles*.toList() == [[new File("s1"), new File("s2")], [new File("a"), new File("b")]]
+    }
+
     def canRegisterSourceFile() {
         when:
-        inputs.source('file')
+        inputs.file('file').skipWhenEmpty()
 
         then:
         inputs.sourceFiles.files == ([new File('file')] as Set)
@@ -132,7 +199,7 @@ class DefaultTaskInputsTest extends Specification {
 
     def canRegisterSourceFiles() {
         when:
-        inputs.source('file', 'file2')
+        inputs.files('file', 'file2').skipWhenEmpty()
 
         then:
         inputs.sourceFiles.files == ([new File('file'), new File('file2')] as Set)
@@ -140,7 +207,7 @@ class DefaultTaskInputsTest extends Specification {
 
     def canRegisterSourceDir() {
         when:
-        inputs.sourceDir('dir')
+        inputs.dir('dir').skipWhenEmpty()
 
         then:
         inputs.sourceFiles.files == [treeFile] as Set
@@ -148,7 +215,7 @@ class DefaultTaskInputsTest extends Specification {
 
     def sourceFilesAreAlsoInputFiles() {
         when:
-        inputs.source('file')
+        inputs.file('file').skipWhenEmpty()
 
         then:
         inputs.sourceFiles.files == ([new File('file')] as Set)
@@ -184,7 +251,7 @@ class DefaultTaskInputsTest extends Specification {
 
     def hasInputsWhenEmptySourceFilesRegistered() {
         when:
-        inputs.source([])
+        inputs.files([]).skipWhenEmpty()
 
         then:
         inputs.hasInputs
@@ -193,7 +260,7 @@ class DefaultTaskInputsTest extends Specification {
 
     def hasInputsWhenSourceFilesRegistered() {
         when:
-        inputs.source('a')
+        inputs.file('a').skipWhenEmpty()
 
         then:
         inputs.hasInputs

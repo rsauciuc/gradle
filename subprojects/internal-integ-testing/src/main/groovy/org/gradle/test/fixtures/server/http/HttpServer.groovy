@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 package org.gradle.test.fixtures.server.http
-import com.google.common.collect.Sets
+
 import com.google.common.net.UrlEscapers
 import com.google.gson.Gson
 import com.google.gson.JsonElement
@@ -27,46 +27,28 @@ import org.gradle.test.fixtures.server.ServerWithExpectations
 import org.gradle.test.matchers.UserAgentMatcher
 import org.gradle.util.GFileUtils
 import org.hamcrest.Matcher
-import org.mortbay.jetty.*
-import org.mortbay.jetty.bio.SocketConnector
+import org.mortbay.jetty.Handler
+import org.mortbay.jetty.HttpHeaders
+import org.mortbay.jetty.HttpStatus
+import org.mortbay.jetty.MimeTypes
 import org.mortbay.jetty.handler.AbstractHandler
-import org.mortbay.jetty.handler.HandlerCollection
-import org.mortbay.jetty.security.*
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
-import java.security.Principal
 import java.util.zip.GZIPOutputStream
 
-class HttpServer extends ServerWithExpectations {
+class HttpServer extends ServerWithExpectations implements HttpServerFixture {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpServer.class)
-
-    private final Server server = new Server(0)
-    private final HandlerCollection collection = new HandlerCollection()
-    private TestUserRealm realm
-    private SecurityHandler securityHandler
-    private Connector connector
-    private SslSocketConnector sslConnector
-    AuthScheme authenticationScheme = AuthScheme.BASIC
-    boolean logRequests = true
-    final Set<String> authenticationAttempts = Sets.newLinkedHashSet()
 
     protected Matcher expectedUserAgent = null
 
     List<ServerExpectation> expectations = []
 
-    enum AuthScheme {
-        BASIC(new BasicAuthHandler()), DIGEST(new DigestAuthHandler()), HIDE_UNAUTHORIZED(new HideUnauthorizedBasicAuthHandler())
-
-        final AuthSchemeHandler handler;
-
-        AuthScheme(AuthSchemeHandler handler) {
-            this.handler = handler
-        }
-    }
+    org.gradle.api.Action<HttpServletRequest> beforeHandle
+    org.gradle.api.Action<HttpServletRequest> afterHandle
 
     enum EtagStrategy {
         NONE({ null }),
@@ -90,23 +72,17 @@ class HttpServer extends ServerWithExpectations {
     boolean sendLastModified = true
     boolean sendSha1Header = false
 
-    HttpServer() {
-        HandlerCollection handlers = new HandlerCollection()
-        handlers.addHandler(new AbstractHandler() {
-            void handle(String target, HttpServletRequest request, HttpServletResponse response, int dispatch) {
-                String authorization = request.getHeader(HttpHeaders.AUTHORIZATION)
-                if (authorization!=null) {
-                    authenticationAttempts << authorization.split(" ")[0]
-                } else {
-                    authenticationAttempts << "None"
-                }
-                if (logRequests) {
-                    println("handling http request: $request.method $target")
-                }
-            }
-        })
-        handlers.addHandler(collection)
-        handlers.addHandler(new AbstractHandler() {
+    void beforeHandle(org.gradle.api.Action<HttpServletRequest> r) {
+        beforeHandle = r
+    }
+
+    void afterHandle(org.gradle.api.Action<HttpServletRequest> r) {
+        afterHandle = r
+    }
+
+    @Override
+    Handler getCustomHandler() {
+        return new AbstractHandler() {
             void handle(String target, HttpServletRequest request, HttpServletResponse response, int dispatch) {
                 if (request.handled) {
                     return
@@ -114,90 +90,23 @@ class HttpServer extends ServerWithExpectations {
                 onFailure(new AssertionError("Received unexpected ${request.method} request to ${target}."))
                 response.sendError(404, "'$target' does not exist")
             }
-        })
-        server.setHandler(handlers)
+        }
     }
 
     protected Logger getLogger() {
         logger
     }
 
-    String getAddress() {
-        if (!server.started) {
-            server.start()
-        }
-        getUri().toString()
-    }
-
-    URI getUri() {
-        return sslConnector ? URI.create("https://localhost:${sslConnector.localPort}") : URI.create("http://localhost:${connector.localPort}")
-    }
-
-    boolean isRunning() {
-        server.running
-    }
-
-    void start() {
-        connector = new SocketConnector()
-        connector.port = 0
-        server.addConnector(connector)
-        server.start()
-        for (int i = 0; i < 5; i++) {
-            if (connector.localPort > 0) {
-                return;
-            }
-            // Has failed to start for some reason - try again
-            server.removeConnector(connector)
-            connector.stop()
-            connector = new SocketConnector()
-            connector.port = 0
-            server.addConnector(connector)
-            connector.start()
-        }
-        throw new AssertionError("SocketConnector failed to start.");
-    }
-
-    void stop() {
-        server?.stop()
-        if (connector) {
-            server?.removeConnector(connector)
-        }
-        if (sslConnector) {
-            sslConnector.stop()
-            server?.removeConnector(sslConnector)
-        }
-    }
-
-    void enableSsl(String keyStore, String keyPassword, String trustStore = null, String trustPassword = null) {
-        sslConnector = new SslSocketConnector()
-        sslConnector.keystore = keyStore
-        sslConnector.keyPassword = keyPassword
-        if (trustStore) {
-            sslConnector.needClientAuth = true
-            sslConnector.truststore = trustStore
-            sslConnector.trustPassword = trustPassword
-        }
-        server.addConnector(sslConnector)
-        if (server.started) {
-            sslConnector.start()
-        }
-    }
-
-    int getSslPort() {
-        sslConnector.localPort
-    }
-
     void expectUserAgent(UserAgentMatcher userAgent) {
-        this.expectedUserAgent = userAgent;
+        this.expectedUserAgent = userAgent
     }
 
     void resetExpectations() {
         try {
             super.resetExpectations()
         } finally {
-            realm = null
+            reset()
             expectedUserAgent = null
-            collection.setHandlers()
         }
     }
 
@@ -216,6 +125,13 @@ class HttpServer extends ServerWithExpectations {
     }
 
     /**
+     * Adds a given file at the given URL. The source file can be either a file or a directory.
+     */
+    void allowGetOrHeadWithRevalidate(String path, File srcFile) {
+        allow(path, true, ['GET', 'HEAD'], revalidateFileHandler(path, srcFile))
+    }
+
+    /**
      * Adds a given file at the given URL with the given credentials. The source file can be either a file or a directory.
      */
     void allowGetOrHead(String path, String username, String password, File srcFile) {
@@ -230,40 +146,62 @@ class HttpServer extends ServerWithExpectations {
     }
 
     private Action fileHandler(String path, File srcFile) {
-        return new SendFileAction(path, srcFile)
+        return new SendFileAction(path, srcFile, false)
+    }
+
+    private Action revalidateFileHandler(String path, File srcFile) {
+        return new SendFileAction(path, srcFile, true)
     }
 
     class SendFileAction extends ActionSupport {
         private final String path
         private final File srcFile
+        private final boolean revalidate
 
-        SendFileAction(String path, File srcFile) {
+        SendFileAction(String path, File srcFile, boolean revalidate) {
             super("return contents of $srcFile.name")
             this.srcFile = srcFile
             this.path = path
+            this.revalidate = revalidate
         }
 
         void handle(HttpServletRequest request, HttpServletResponse response) {
-            if (expectedUserAgent != null) {
-                String receivedUserAgent = request.getHeader("User-Agent")
-                if (!expectedUserAgent.matches(receivedUserAgent)) {
-                    response.sendError(412, String.format("Precondition Failed: Expected User-Agent: '%s' but was '%s'", expectedUserAgent, receivedUserAgent));
-                    return;
+            if (beforeHandle) {
+                beforeHandle.execute(request)
+            }
+            try {
+                if (expectedUserAgent != null) {
+                    String receivedUserAgent = request.getHeader("User-Agent")
+                    if (!expectedUserAgent.matches(receivedUserAgent)) {
+                        response.sendError(412, String.format("Precondition Failed: Expected User-Agent: '%s' but was '%s'", expectedUserAgent, receivedUserAgent))
+                        return
+                    }
                 }
-            }
-            def file
-            if (request.pathInfo == path) {
-                file = srcFile
-            } else {
-                def relativePath = request.pathInfo.substring(path.length() + 1)
-                file = new File(srcFile, relativePath)
-            }
-            if (file.isFile()) {
-                sendFile(response, file, null, null, interaction.contentType)
-            } else if (file.isDirectory()) {
-                sendDirectoryListing(response, file)
-            } else {
-                response.sendError(404, "'$request.pathInfo' does not exist")
+                if (revalidate) {
+                    String cacheControl = request.getHeader("Cache-Control")
+                    if (!cacheControl.equals("max-age=0")) {
+                        response.sendError(412, String.format("Precondition Failed: Expected Cache-Control:max-age=0 but was '%s'", cacheControl))
+                        return
+                    }
+                }
+                def file
+                if (request.pathInfo == path) {
+                    file = srcFile
+                } else {
+                    def relativePath = request.pathInfo.substring(path.length() + 1)
+                    file = new File(srcFile, relativePath)
+                }
+                if (file.isFile()) {
+                    sendFile(response, file, null, null, interaction.contentType)
+                } else if (file.isDirectory()) {
+                    sendDirectoryListing(response, file)
+                } else {
+                    response.sendError(404, "'$request.pathInfo' does not exist")
+                }
+            } finally {
+                if (afterHandle) {
+                    afterHandle.execute(request)
+                }
             }
         }
     }
@@ -331,6 +269,13 @@ class HttpServer extends ServerWithExpectations {
     }
 
     /**
+     * Expects one HEAD request for the given URL, asserting that the request is revalidated.
+     */
+    void expectHeadRevalidate(String path, File srcFile) {
+        expect(path, false, ['HEAD'], revalidateFileHandler(path, srcFile))
+    }
+
+    /**
      * Allows one HEAD request for the given URL with http authentication.
      */
     void expectHead(String path, String username, String password, File srcFile, Long lastModified = null, Long contentLength = null) {
@@ -342,6 +287,13 @@ class HttpServer extends ServerWithExpectations {
      */
     HttpResourceInteraction expectGet(String path, File srcFile) {
         return expect(path, false, ['GET'], fileHandler(path, srcFile))
+    }
+
+    /**
+     * Allows one GET request for the given URL, asserting that the request revalidates. Reads the request content from the given file.
+     */
+    HttpResourceInteraction expectGetRevalidate(String path, File srcFile) {
+        return expect(path, false, ['GET'], revalidateFileHandler(path, srcFile))
     }
 
     /**
@@ -368,7 +320,7 @@ class HttpServer extends ServerWithExpectations {
                     response.sendError(404, "'$target' does not exist")
                 }
             }
-        });
+        })
     }
 
     /**
@@ -430,7 +382,7 @@ class HttpServer extends ServerWithExpectations {
             void handle(HttpServletRequest request, HttpServletResponse response) {
                 sendDirectoryListing(response, directory)
             }
-        }));
+        }))
     }
 
     private sendFile(HttpServletResponse response, File file, Long lastModified, Long contentLength, String contentType) {
@@ -494,7 +446,7 @@ class HttpServer extends ServerWithExpectations {
                     String receivedUserAgent = request.getHeader("User-Agent")
                     if (!expectedUserAgent.matches(receivedUserAgent)) {
                         response.sendError(412, String.format("Precondition Failed: Expected User-Agent: '%s' but was '%s'", expectedUserAgent, receivedUserAgent))
-                        return;
+                        return
                     }
                 }
                 GFileUtils.mkdirs(destFile.parentFile)
@@ -535,17 +487,7 @@ class HttpServer extends ServerWithExpectations {
     }
 
     private Action withAuthentication(String path, String username, String password, Action action) {
-        if (realm != null) {
-            assert realm.username == username
-            assert realm.password == password
-            authenticationScheme.handler.addConstraint(securityHandler, path)
-        } else {
-            realm = new TestUserRealm()
-            realm.username = username
-            realm.password = password
-            securityHandler = authenticationScheme.handler.createSecurityHandler(path, realm)
-            collection.addHandler(securityHandler)
-        }
+        requireAuthentication(path, username, password)
 
         return new Action() {
             @Override
@@ -621,10 +563,6 @@ class HttpServer extends ServerWithExpectations {
         collection.addHandler(handler)
     }
 
-    int getPort() {
-        return connector.localPort
-    }
-
     static class HttpExpectOne extends ExpectOne {
         final Action action
         final Collection<String> methods
@@ -687,124 +625,5 @@ class HttpServer extends ServerWithExpectations {
                 it << sb.toString().getBytes("utf8")
             }
         }
-    }
-
-    abstract static class AuthSchemeHandler {
-        public SecurityHandler createSecurityHandler(String path, TestUserRealm realm) {
-            def constraintMapping = createConstraintMapping(path)
-            def securityHandler = new SecurityHandler()
-            securityHandler.userRealm = realm
-            securityHandler.constraintMappings = [constraintMapping] as ConstraintMapping[]
-            securityHandler.authenticator = authenticator
-            return securityHandler
-        }
-
-        public void addConstraint(SecurityHandler securityHandler, String path) {
-            securityHandler.constraintMappings = (securityHandler.constraintMappings as List) + createConstraintMapping(path)
-        }
-
-        private ConstraintMapping createConstraintMapping(String path) {
-            def constraint = new Constraint()
-            constraint.name = constraintName()
-            constraint.authenticate = true
-            constraint.roles = ['*'] as String[]
-            def constraintMapping = new ConstraintMapping()
-            constraintMapping.pathSpec = path
-            constraintMapping.constraint = constraint
-            return constraintMapping
-        }
-
-        protected abstract String constraintName();
-
-        protected abstract Authenticator getAuthenticator();
-    }
-
-    public static class BasicAuthHandler extends AuthSchemeHandler {
-        @Override
-        protected String constraintName() {
-            return Constraint.__BASIC_AUTH
-        }
-
-        @Override
-        protected Authenticator getAuthenticator() {
-            return new BasicAuthenticator()
-        }
-    }
-
-    public static class HideUnauthorizedBasicAuthHandler extends AuthSchemeHandler {
-        @Override
-        protected String constraintName() {
-            return Constraint.__BASIC_AUTH
-        }
-
-        @Override
-        protected Authenticator getAuthenticator() {
-            return new BasicAuthenticator() {
-                @Override
-                void sendChallenge(UserRealm realm, Response response) throws IOException {
-                    response.sendError(HttpServletResponse.SC_NOT_FOUND);
-                }
-            }
-        }
-    }
-
-    public static class DigestAuthHandler extends AuthSchemeHandler {
-        @Override
-        protected String constraintName() {
-            return Constraint.__DIGEST_AUTH
-        }
-
-        @Override
-        protected Authenticator getAuthenticator() {
-            return new DigestAuthenticator()
-        }
-    }
-
-    static class TestUserRealm implements UserRealm {
-        String username
-        String password
-
-        Principal authenticate(String username, Object credentials, Request request) {
-            Password passwordCred = new Password(password)
-            if (username == this.username && passwordCred.check(credentials)) {
-                return getPrincipal(username)
-            }
-            return null
-        }
-
-        String getName() {
-            return "test"
-        }
-
-        Principal getPrincipal(String username) {
-            return new Principal() {
-                String getName() {
-                    return username
-                }
-            }
-        }
-
-        boolean reauthenticate(Principal user) {
-            return false
-        }
-
-        boolean isUserInRole(Principal user, String role) {
-            return false
-        }
-
-        void disassociate(Principal user) {
-        }
-
-        Principal pushRole(Principal user, String role) {
-            return user
-        }
-
-        Principal popRole(Principal user) {
-            return user
-        }
-
-        void logout(Principal user) {
-        }
-
     }
 }

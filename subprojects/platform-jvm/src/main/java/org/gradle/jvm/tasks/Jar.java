@@ -19,6 +19,7 @@ package org.gradle.jvm.tasks;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.Incubating;
+import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.file.CopySpec;
 import org.gradle.api.file.FileCopyDetails;
 import org.gradle.api.internal.file.collections.FileTreeAdapter;
@@ -26,49 +27,59 @@ import org.gradle.api.internal.file.collections.MapFileTree;
 import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.java.archives.Manifest;
+import org.gradle.api.java.archives.internal.CustomManifestInternalWrapper;
 import org.gradle.api.java.archives.internal.DefaultManifest;
-import org.gradle.api.tasks.ParallelizableTask;
+import org.gradle.api.java.archives.internal.ManifestInternal;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.bundling.Zip;
 import org.gradle.util.ConfigureUtil;
 
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
+import java.nio.charset.Charset;
 import java.util.concurrent.Callable;
 
 /**
  * Assembles a JAR archive.
  */
-@ParallelizableTask
 @Incubating
 public class Jar extends Zip {
 
     public static final String DEFAULT_EXTENSION = "jar";
+    private String manifestContentCharset = DefaultManifest.DEFAULT_CONTENT_CHARSET;
     private Manifest manifest;
     private final CopySpecInternal metaInf;
 
     public Jar() {
         setExtension(DEFAULT_EXTENSION);
+        setMetadataCharset("UTF-8");
 
         manifest = new DefaultManifest(getFileResolver());
         // Add these as separate specs, so they are not affected by the changes to the main spec
         metaInf = (CopySpecInternal) getRootSpec().addFirst().into("META-INF");
         metaInf.addChild().from(new Callable<FileTreeAdapter>() {
             public FileTreeAdapter call() throws Exception {
-                MapFileTree manifestSource = new MapFileTree(getTemporaryDirFactory(), getFileSystem());
+                MapFileTree manifestSource = new MapFileTree(getTemporaryDirFactory(), getFileSystem(), getDirectoryFileTreeFactory());
                 manifestSource.add("MANIFEST.MF", new Action<OutputStream>() {
                     public void execute(OutputStream outputStream) {
                         Manifest manifest = getManifest();
                         if (manifest == null) {
                             manifest = new DefaultManifest(null);
                         }
-                        manifest.writeTo(new OutputStreamWriter(outputStream));
+                        ManifestInternal manifestInternal;
+                        if (manifest instanceof ManifestInternal) {
+                            manifestInternal = (ManifestInternal) manifest;
+                        } else {
+                            manifestInternal = new CustomManifestInternalWrapper(manifest);
+                        }
+                        manifestInternal.setContentCharset(manifestContentCharset);
+                        manifestInternal.writeTo(outputStream);
                     }
-
                 });
                 return new FileTreeAdapter(manifestSource);
             }
         });
-        getMainSpec().eachFile(new Action<FileCopyDetails>() {
+        getMainSpec().appendCachingSafeCopyAction(new Action<FileCopyDetails>() {
             public void execute(FileCopyDetails details) {
                 if (details.getPath().equalsIgnoreCase("META-INF/MANIFEST.MF")) {
                     details.exclude();
@@ -78,10 +89,69 @@ public class Jar extends Zip {
     }
 
     /**
+     * The character set used to encode JAR metadata like file names.
+     * Defaults to UTF-8.
+     * You can change this property but it is not recommended as JVMs expect JAR metadata to be encoded using UTF-8
+     *
+     * @return the character set used to encode JAR metadata like file names
+     * @since 2.14
+     */
+    @Override
+    public String getMetadataCharset() {
+        return super.getMetadataCharset();
+    }
+
+    /**
+     * The character set used to encode JAR metadata like file names.
+     * Defaults to UTF-8.
+     * You can change this property but it is not recommended as JVMs expect JAR metadata to be encoded using UTF-8
+     *
+     * @param metadataCharset the character set used to encode JAR metadata like file names
+     * @since 2.14
+     */
+    @Override
+    public void setMetadataCharset(String metadataCharset) {
+        super.setMetadataCharset(metadataCharset);
+    }
+
+    /**
+     * The character set used to encode the manifest content.
+     * Defaults to UTF-8.
+     * You can change this property but it is not recommended as JVMs expect manifests content to be encoded using UTF-8.
+     *
+     * @return the character set used to encode the manifest content
+     * @since 2.14
+     */
+    @Input
+    @Incubating
+    public String getManifestContentCharset() {
+        return manifestContentCharset;
+    }
+
+    /**
+     * The character set used to encode the manifest content.
+     *
+     * @param manifestContentCharset the character set used to encode the manifest content
+     * @see #getManifestContentCharset()
+     * @since 2.14
+     */
+    @Incubating
+    public void setManifestContentCharset(String manifestContentCharset) {
+        if (manifestContentCharset == null) {
+            throw new InvalidUserDataException("manifestContentCharset must not be null");
+        }
+        if (!Charset.isSupported(manifestContentCharset)) {
+            throw new InvalidUserDataException(String.format("Charset for manifestContentCharset '%s' is not supported by your JVM", manifestContentCharset));
+        }
+        this.manifestContentCharset = manifestContentCharset;
+    }
+
+    /**
      * Returns the manifest for this JAR archive.
      *
      * @return The manifest
      */
+    @Internal
     public Manifest getManifest() {
         return manifest;
     }
@@ -104,14 +174,32 @@ public class Jar extends Zip {
      * @return This.
      */
     public Jar manifest(Closure<?> configureClosure) {
-        if (getManifest() == null) {
-            manifest = new DefaultManifest(((ProjectInternal) getProject()).getFileResolver());
-        }
-
-        ConfigureUtil.configure(configureClosure, getManifest());
+        ConfigureUtil.configure(configureClosure, forceManifest());
         return this;
     }
 
+    /**
+     * Configures the manifest for this JAR archive.
+     *
+     * <p>The given action is executed to configure the manifest.</p>
+     *
+     * @param configureAction The action.
+     * @return This.
+     * @since 3.5
+     */
+    public Jar manifest(Action<? super Manifest> configureAction) {
+        configureAction.execute(forceManifest());
+        return this;
+    }
+
+    private Manifest forceManifest() {
+        if (manifest == null) {
+            manifest = new DefaultManifest(((ProjectInternal) getProject()).getFileResolver());
+        }
+        return manifest;
+    }
+
+    @Internal
     public CopySpec getMetaInf() {
         return metaInf.addChild();
     }
@@ -126,5 +214,20 @@ public class Jar extends Zip {
      */
     public CopySpec metaInf(Closure<?> configureClosure) {
         return ConfigureUtil.configure(configureClosure, getMetaInf());
+    }
+
+    /**
+     * Adds content to this JAR archive's META-INF directory.
+     *
+     * <p>The given action is executed to configure a {@code CopySpec}.</p>
+     *
+     * @param configureAction The action.
+     * @return The created {@code CopySpec}
+     * @since 3.5
+     */
+    public CopySpec metaInf(Action<? super CopySpec> configureAction) {
+        CopySpec metaInf = getMetaInf();
+        configureAction.execute(metaInf);
+        return metaInf;
     }
 }

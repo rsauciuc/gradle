@@ -16,19 +16,16 @@
 package org.gradle.nativeplatform.test.googletest
 
 import org.gradle.api.reporting.components.AbstractNativeComponentReportIntegrationTest
-import org.gradle.nativeplatform.fixtures.NativePlatformsTestFixture
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 
 class TestingNativeComponentReportIntegrationTest extends AbstractNativeComponentReportIntegrationTest {
-    private String currentNative = NativePlatformsTestFixture.defaultPlatformName
-
     @RequiresInstalledToolChain
     def "shows details of native C++ executable with test suite"() {
         given:
         buildFile << """
 plugins {
     id 'cpp'
-    id 'google-test'
+    id 'google-test-test-suite'
 }
 
 model {
@@ -38,13 +35,18 @@ model {
     components {
         someExe(NativeExecutableSpec)
     }
+    testSuites {
+        someExeTest(GoogleTestTestSuiteSpec) {
+            testing \$.components.someExe
+        }
+    }
 }
 """
         when:
         succeeds "components"
 
         then:
-        outputMatches output, """
+        outputMatches """
 Native executable 'someExe'
 ---------------------------
 
@@ -56,14 +58,14 @@ Binaries
     Executable 'someExe:executable'
         build using task: :someExeExecutable
         install using task: :installSomeExeExecutable
-        buildType: build type 'debug'
+        build type: build type 'debug'
         flavor: flavor 'default'
-        targetPlatform: platform '$currentNative'
+        target platform: platform '$currentNative'
         tool chain: Tool chain 'clang' (Clang)
-        executable file: build/binaries/someExeExecutable/someExe
+        executable file: build/exe/someExe/someExe
 
-GoogleTest test suite 'someExeTest'
------------------------------------
+Google test suite 'someExeTest'
+-------------------------------
 
 Source sets
     C++ source 'someExeTest:cpp'
@@ -72,12 +74,15 @@ Source sets
 Binaries
     Google test exe 'someExeTest:googleTestExe'
         build using task: :someExeTestGoogleTestExe
+        install using task: :installSomeExeTestGoogleTestExe
         run using task: :runSomeExeTestGoogleTestExe
-        buildType: build type 'debug'
+        build type: build type 'debug'
         flavor: flavor 'default'
-        targetPlatform: platform '$currentNative'
+        target platform: platform '$currentNative'
+        component under test: native executable 'someExe'
+        binary under test: executable 'someExe:executable'
         tool chain: Tool chain 'clang' (Clang)
-        executable file: build/binaries/someExeTestGoogleTestExe/someExeTest
+        executable file: build/exe/someExeTest/someExeTest
 """
     }
 }

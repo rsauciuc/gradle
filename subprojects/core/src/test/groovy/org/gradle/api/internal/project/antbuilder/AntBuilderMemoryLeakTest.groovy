@@ -15,25 +15,29 @@
  */
 
 package org.gradle.api.internal.project.antbuilder
+
 import org.gradle.api.internal.ClassPathRegistry
 import org.gradle.api.internal.DefaultClassPathProvider
 import org.gradle.api.internal.DefaultClassPathRegistry
 import org.gradle.api.internal.classpath.DefaultModuleRegistry
 import org.gradle.api.internal.classpath.ModuleRegistry
+import org.gradle.internal.time.CountdownTimer
+import org.gradle.internal.time.TimeProvider
+import org.gradle.internal.time.Timers
+import org.gradle.internal.time.TrueTimeProvider
 import org.gradle.internal.classloader.DefaultClassLoaderFactory
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.internal.installation.CurrentGradleInstallation
 import spock.lang.Ignore
 import spock.lang.Shared
 import spock.lang.Specification
 
 import java.lang.reflect.Proxy
+import java.util.concurrent.TimeUnit
 
-@Requires(TestPrecondition.JDK7_OR_LATER)
 class AntBuilderMemoryLeakTest extends Specification {
 
     @Shared
-    private ModuleRegistry moduleRegistry = new DefaultModuleRegistry()
+    private ModuleRegistry moduleRegistry = new DefaultModuleRegistry(CurrentGradleInstallation.get())
 
     @Shared
     private ClassPathRegistry registry = new DefaultClassPathRegistry(new DefaultClassPathProvider(moduleRegistry))
@@ -41,9 +45,12 @@ class AntBuilderMemoryLeakTest extends Specification {
     @Shared
     private DefaultClassLoaderFactory classLoaderFactory = new DefaultClassLoaderFactory()
 
+    @Shared
+    private TimeProvider timeProvider = new TrueTimeProvider()
+
     def "should release cache when cleanup is called"() {
         classLoaderFactory = new DefaultClassLoaderFactory()
-        def builder = new DefaultIsolatedAntBuilder(registry, classLoaderFactory)
+        def builder = new DefaultIsolatedAntBuilder(registry, classLoaderFactory, moduleRegistry)
 
         when:
         builder.withClasspath([new File('foo')]).execute {
@@ -60,7 +67,7 @@ class AntBuilderMemoryLeakTest extends Specification {
         builder.classLoaderCache.isEmpty()
 
         cleanup:
-        builder.stop()
+        builder?.stop()
     }
 
     @Ignore("Test doesn't fail fast enough")
@@ -72,17 +79,17 @@ class AntBuilderMemoryLeakTest extends Specification {
         when:
         int i = 0
         // time out after 10 minutes
-        long maxTime = System.currentTimeMillis() + 10*60*1000
+        CountdownTimer timer = Timers.startTimer(10, TimeUnit.MINUTES)
         try {
-            while (System.currentTimeMillis()<maxTime) {
+            while (!timer.hasExpired()) {
                 builder.withClasspath([new File("foo$i")]).execute {
 
                 }
 
-                classes[classes.length-1] = Proxy.getProxyClass(classLoaderFactory.createIsolatedClassLoader([]), Serializable)
+                classes[classes.length - 1] = Proxy.getProxyClass(classLoaderFactory.createIsolatedClassLoader([]), Serializable)
                 4.times {
                     // exponential grow to make it fail faster
-                    Class[] dup = new Class[classes.length*2]
+                    Class[] dup = new Class[classes.length * 2]
                     System.arraycopy(classes, 0, dup, 0, classes.length)
                     System.arraycopy(classes, 0, dup, classes.length, classes.length)
                     classes = dup
@@ -96,9 +103,9 @@ class AntBuilderMemoryLeakTest extends Specification {
         }
 
         then:
-        assert i>1
+        assert i > 1
         assert classes.length == 0
-        builder.classLoaderCache.empty || builder.classLoaderCache.size() < i-1
+        builder.classLoaderCache.empty || builder.classLoaderCache.size() < i - 1
 
         cleanup:
         builder.stop()

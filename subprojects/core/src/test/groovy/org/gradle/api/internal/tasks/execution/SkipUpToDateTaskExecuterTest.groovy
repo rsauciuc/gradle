@@ -18,55 +18,46 @@ package org.gradle.api.internal.tasks.execution
 
 import org.gradle.api.Action
 import org.gradle.api.Task
-import org.gradle.api.internal.TaskExecutionHistory
 import org.gradle.api.internal.TaskInternal
-import org.gradle.api.internal.TaskOutputsInternal
 import org.gradle.api.internal.changedetection.TaskArtifactState
-import org.gradle.api.internal.changedetection.TaskArtifactStateRepository
 import org.gradle.api.internal.tasks.TaskExecuter
 import org.gradle.api.internal.tasks.TaskExecutionContext
+import org.gradle.api.internal.tasks.TaskExecutionOutcome
 import org.gradle.api.internal.tasks.TaskStateInternal
 import spock.lang.Specification
 
-public class SkipUpToDateTaskExecuterTest extends Specification {
+class SkipUpToDateTaskExecuterTest extends Specification {
     def delegate = Mock(TaskExecuter)
-    def outputs = Mock(TaskOutputsInternal)
     def task = Mock(TaskInternal)
     def taskState = Mock(TaskStateInternal)
     def taskContext = Mock(TaskExecutionContext)
-    def repository = Mock(TaskArtifactStateRepository)
     def taskArtifactState = Mock(TaskArtifactState)
-    def executionHistory = Mock(TaskExecutionHistory)
     Action<Task> action = Mock(Action)
 
-    def executer = new SkipUpToDateTaskExecuter(repository, delegate)
+    def executer = new SkipUpToDateTaskExecuter(delegate)
 
     def skipsTaskWhenOutputsAreUpToDate() {
         when:
         executer.execute(task, taskState, taskContext);
 
         then:
-        1 * repository.getStateFor(task) >> taskArtifactState
-        1 * taskArtifactState.isUpToDate([]) >> true
-        1 * taskState.upToDate()
+        1 * taskContext.taskArtifactState >> taskArtifactState
+        1 * taskArtifactState.isUpToDate(_) >> true
+        1 * taskState.setOutcome(TaskExecutionOutcome.UP_TO_DATE)
         1 * taskArtifactState.finished()
         0 * _
     }
-    
+
     def executesTaskWhenOutputsAreNotUpToDate() {
         when:
         executer.execute(task, taskState, taskContext);
 
         then:
-        1 * repository.getStateFor(task) >> taskArtifactState
-        1 * taskArtifactState.isUpToDate([]) >> false
+        1 * taskContext.taskArtifactState >> taskArtifactState
+        1 * taskArtifactState.isUpToDate(_) >> false
 
         then:
         1 * taskArtifactState.beforeTask()
-        1 * taskArtifactState.getExecutionHistory() >> executionHistory
-        1 * task.outputs >> outputs
-        1 * outputs.setHistory(executionHistory)
-        1 * taskContext.setTaskArtifactState(taskArtifactState)
 
         then:
         1 * delegate.execute(task, taskState, taskContext)
@@ -74,9 +65,6 @@ public class SkipUpToDateTaskExecuterTest extends Specification {
 
         then:
         1 * taskArtifactState.afterTask()
-        1 * task.outputs >> outputs
-        1 * outputs.setHistory(null)
-        1 * taskContext.setTaskArtifactState(null)
         1 * taskArtifactState.finished()
         0 * _
     }
@@ -86,24 +74,17 @@ public class SkipUpToDateTaskExecuterTest extends Specification {
         executer.execute(task, taskState, taskContext)
 
         then:
-        1 * repository.getStateFor(task) >> taskArtifactState
-        1 * taskArtifactState.isUpToDate([]) >> false
+        1 * taskContext.taskArtifactState >> taskArtifactState
+        1 * taskArtifactState.isUpToDate(_) >> false
 
         then:
         1 * taskArtifactState.beforeTask()
-        1 * taskArtifactState.getExecutionHistory() >> executionHistory
-        1 * task.outputs >> outputs
-        1 * outputs.setHistory(executionHistory)
-        1 * taskContext.setTaskArtifactState(taskArtifactState)
 
         then:
         1 * delegate.execute(task, taskState, taskContext)
         1 * taskState.getFailure() >> new RuntimeException()
 
         then:
-        1 * task.outputs >> outputs
-        1 * outputs.setHistory(null)
-        1 * taskContext.setTaskArtifactState(null)
         1 * taskArtifactState.finished()
         0 * _
     }

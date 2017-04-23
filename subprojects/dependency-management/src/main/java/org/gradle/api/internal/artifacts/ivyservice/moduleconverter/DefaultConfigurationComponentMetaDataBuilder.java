@@ -15,12 +15,11 @@
  */
 package org.gradle.api.internal.artifacts.ivyservice.moduleconverter;
 
-import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.internal.artifacts.configurations.ConfigurationInternal;
 import org.gradle.api.internal.artifacts.configurations.Configurations;
-import org.gradle.api.internal.artifacts.configurations.DirectBuildDependencies;
+import org.gradle.api.internal.artifacts.configurations.OutgoingVariant;
 import org.gradle.api.internal.artifacts.ivyservice.moduleconverter.dependencies.DependenciesToModuleDescriptorConverter;
-import org.gradle.api.tasks.TaskDependency;
-import org.gradle.internal.component.local.model.BuildableLocalComponentMetaData;
+import org.gradle.internal.component.local.model.BuildableLocalComponentMetadata;
 
 import java.util.Collection;
 import java.util.Set;
@@ -32,28 +31,31 @@ public class DefaultConfigurationComponentMetaDataBuilder implements Configurati
         this.dependenciesConverter = dependenciesConverter;
     }
 
-    public void addConfigurations(BuildableLocalComponentMetaData metaData, Collection<? extends Configuration> configurations) {
-        for (Configuration configuration : configurations) {
+    public void addConfigurations(BuildableLocalComponentMetadata metaData, Collection<? extends ConfigurationInternal> configurations) {
+        for (ConfigurationInternal configuration : configurations) {
             addConfiguration(metaData, configuration);
+            dependenciesConverter.addDependencyDescriptors(metaData, configuration);
+            OutgoingVariant outgoingVariant = configuration.convertToOutgoingVariant();
+            metaData.addArtifacts(configuration.getName(), outgoingVariant.getArtifacts());
+            for (OutgoingVariant variant : outgoingVariant.getChildren()) {
+                metaData.addVariant(configuration.getName(), variant);
+            }
         }
-        addDependencies(metaData, configurations);
-        addArtifacts(metaData, configurations);
     }
 
-    private void addConfiguration(BuildableLocalComponentMetaData metaData, Configuration configuration) {
+    private void addConfiguration(BuildableLocalComponentMetadata metaData, ConfigurationInternal configuration) {
+        configuration.lockAttributes();
         Set<String> hierarchy = Configurations.getNames(configuration.getHierarchy());
         Set<String> extendsFrom = Configurations.getNames(configuration.getExtendsFrom());
-        TaskDependency directBuildDependencies = DirectBuildDependencies.forDependenciesAndArtifacts(configuration);
-        metaData.addConfiguration(configuration.getName(), configuration.getDescription(), extendsFrom, hierarchy, configuration.isVisible(), configuration.isTransitive(), directBuildDependencies);
+        metaData.addConfiguration(configuration.getName(),
+            configuration.getDescription(),
+            extendsFrom,
+            hierarchy,
+            configuration.isVisible(),
+            configuration.isTransitive(),
+            configuration.getAttributes(),
+            configuration.isCanBeConsumed(),
+            configuration.isCanBeResolved());
     }
 
-    private void addDependencies(BuildableLocalComponentMetaData metaData, Collection<? extends Configuration> configurations) {
-        dependenciesConverter.addDependencyDescriptors(metaData, configurations);
-    }
-
-    private void addArtifacts(BuildableLocalComponentMetaData metaData, Collection<? extends Configuration> configurations) {
-        for (Configuration configuration : configurations) {
-            metaData.addArtifacts(configuration.getName(), configuration.getArtifacts());
-        }
-    }
 }

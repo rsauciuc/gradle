@@ -22,9 +22,14 @@ import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping;
 import org.gradle.tooling.internal.consumer.versioning.VersionDetails;
-import org.gradle.tooling.internal.protocol.*;
+import org.gradle.tooling.internal.protocol.BuildResult;
+import org.gradle.tooling.internal.protocol.ConnectionVersion4;
+import org.gradle.tooling.internal.protocol.InternalBuildActionExecutor;
+import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException;
+import org.gradle.tooling.internal.protocol.ModelBuilder;
 import org.gradle.tooling.model.gradle.BuildInvocations;
-import org.gradle.util.GradleVersion;
+
+import java.io.File;
 
 /**
  * An adapter for {@link InternalBuildActionExecutor}.
@@ -36,14 +41,14 @@ public class ActionAwareConsumerConnection extends AbstractPost12ConsumerConnect
     private final ModelProducer modelProducer;
 
     public ActionAwareConsumerConnection(ConnectionVersion4 delegate, ModelMapping modelMapping, ProtocolToModelAdapter adapter) {
-        super(delegate, getVersionDetails(delegate.getMetaData().getVersion()));
+        super(delegate, VersionDetails.from(delegate.getMetaData().getVersion()));
         ModelProducer modelProducer =  new ModelBuilderBackedModelProducer(adapter, getVersionDetails(), modelMapping, (ModelBuilder) delegate);
         if (!getVersionDetails().maySupportModel(BuildInvocations.class)) {
             modelProducer = new BuildInvocationsAdapterProducer(adapter, getVersionDetails(), modelProducer);
 
         }
         this.modelProducer = modelProducer;
-        this.actionRunner = new InternalBuildActionExecutorBackedActionRunner((InternalBuildActionExecutor) delegate, adapter);
+        this.actionRunner = new InternalBuildActionExecutorBackedActionRunner((InternalBuildActionExecutor) delegate, getVersionDetails());
     }
 
     @Override
@@ -56,55 +61,22 @@ public class ActionAwareConsumerConnection extends AbstractPost12ConsumerConnect
         return actionRunner;
     }
 
-    protected static VersionDetails getVersionDetails(String versionString) {
-        GradleVersion version = GradleVersion.version(versionString);
-        if (version.compareTo(GradleVersion.version("1.11")) > 0) {
-            return new R112VersionDetails(version.getVersion());
-        }
-        return new R18VersionDetails(version.getVersion());
-    }
-
-    static class R18VersionDetails extends VersionDetails {
-        private R18VersionDetails(String version) {
-            super(version);
-        }
-
-        @Override
-        public boolean maySupportModel(Class<?> modelType) {
-            return modelType != BuildInvocations.class;
-        }
-    }
-
-    static class R112VersionDetails extends VersionDetails {
-        private R112VersionDetails(String version) {
-            super(version);
-        }
-
-        @Override
-        public boolean maySupportModel(Class<?> modelType) {
-            return true;
-        }
-
-        @Override
-        public boolean supportsTaskDisplayName() {
-            return true;
-        }
-    }
-
     private static class InternalBuildActionExecutorBackedActionRunner implements ActionRunner {
         private final InternalBuildActionExecutor executor;
-        private final ProtocolToModelAdapter adapter;
+        private final VersionDetails versionDetails;
 
-        private InternalBuildActionExecutorBackedActionRunner(InternalBuildActionExecutor executor, ProtocolToModelAdapter adapter) {
+        private InternalBuildActionExecutorBackedActionRunner(InternalBuildActionExecutor executor, VersionDetails versionDetails) {
             this.executor = executor;
-            this.adapter = adapter;
+            this.versionDetails = versionDetails;
         }
 
         public <T> T run(final BuildAction<T> action, ConsumerOperationParameters operationParameters)
                 throws UnsupportedOperationException, IllegalStateException {
             BuildResult<T> result;
+
+            File rootDir = operationParameters.getProjectDir();
             try {
-                result = executor.run(new InternalBuildActionAdapter<T>(action, adapter), operationParameters);
+                result = executor.run(new InternalBuildActionAdapter<T>(action, rootDir, versionDetails), operationParameters);
             } catch (InternalBuildActionFailureException e) {
                 throw new BuildActionFailureException("The supplied build action failed with an exception.", e.getCause());
             }

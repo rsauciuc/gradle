@@ -16,7 +16,10 @@
 
 package org.gradle.test.fixtures.maven;
 
+import org.gradle.test.fixtures.Module;
 import org.gradle.test.fixtures.file.TestFile;
+
+import java.util.Map;
 
 public abstract class DelegatingMavenModule<T extends MavenModule> implements MavenModule {
     private final MavenModule backingModule;
@@ -30,8 +33,24 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
     }
 
     @Override
+    public String getGroup() {
+        return backingModule.getGroup();
+    }
+
+    @Override
+    public String getModule() {
+        return backingModule.getModule();
+    }
+
+    @Override
     public void assertPublishedAsJavaModule() {
         backingModule.assertPublishedAsJavaModule();
+    }
+
+    @Override
+    public T dependsOnModules(String... dependencyArtifactIds) {
+        backingModule.dependsOnModules(dependencyArtifactIds);
+        return t();
     }
 
     @Override
@@ -41,14 +60,20 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
     }
 
     @Override
-    public T dependsOn(String group, String artifactId, String version, String type, String scope) {
-        backingModule.dependsOn(group, artifactId, version, type, scope);
+    public T dependsOn(String group, String artifactId, String version, String type, String scope, String classifier) {
+        backingModule.dependsOn(group, artifactId, version, type, scope, classifier);
         return t();
     }
 
     @Override
-    public T dependsOn(MavenModule module) {
+    public T dependsOn(Module module) {
         backingModule.dependsOn(module);
+        return t();
+    }
+
+    @Override
+    public T dependsOn(Map<String, ?> attributes, Module module) {
+        backingModule.dependsOn(attributes, module);
         return t();
     }
 
@@ -137,5 +162,10 @@ public abstract class DelegatingMavenModule<T extends MavenModule> implements Ma
     public T withNonUniqueSnapshots() {
         backingModule.withNonUniqueSnapshots();
         return t();
+    }
+
+    @Override
+    public boolean getUniqueSnapshots() {
+        return backingModule.getUniqueSnapshots();
     }
 }

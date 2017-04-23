@@ -13,64 +13,70 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+apply plugin: 'java-library'
+apply from: "$rootDir/gradle/taskProperties.gradle"
+
+sourceCompatibility = javaVersion.java9Compatible ? 1.6 : 1.5
 
 configurations {
     reports
 }
 
+classpathManifest {
+    optionalProjects = ['gradle-script-kotlin']
+}
+
 dependencies {
-    compile libraries.groovy
+    api project(":baseServices")
+    api project(":baseServicesGroovy")
+    api project(":messaging")
+    api project(":logging")
+    api project(":resources")
+    api project(":cli")
+    api project(":native")
 
-    publishCompile libraries.slf4j_api
-    publishCompile project(":baseServices")
-    publishCompile project(":baseServicesGroovy"), {
-        exclude group: "org.codehaus.groovy", module: "groovy-all"
-    }
-    publishCompile project(":messaging")
-    publishCompile project(":resources")
+    api project(":processServices")
+    api project(":jvmServices")
+    api project(":modelCore")
+    api libraries.groovy
+    api libraries.asm // should be implementation, leaks via Java9ClassReader
+    api libraries.ant
+    api libraries.guava
+    api libraries.inject
 
-    compile project(":modelCore")
-    compile project(":modelGroovy")
-    compile libraries.asm
-    compile libraries.ant
-    compile libraries.commons_collections
-    compile libraries.commons_io
-    compile libraries.commons_lang
-    compile libraries.guava
-    compile libraries.jcip
-    compile libraries.jul_to_slf4j
-    compile module('com.googlecode.jarjar:jarjar:1.3')
-    compile libraries.inject
+    implementation project(":modelGroovy")
+    implementation libraries.slf4j_api
+    implementation libraries.commons_collections
+    implementation libraries.commons_io
+    implementation libraries.commons_lang
+    implementation libraries.jcip
+    implementation libraries.nativePlatform
 
-    compile project(":cli")
-    compile project(":native")
+    runtimeOnly project(":docs")
 
-    runtime project(":docs")
+    testImplementation libraries.jsoup
 
-    runtime libraries.log4j_to_slf4j
-    runtime libraries.jcl_to_slf4j
+    testRuntimeOnly libraries.xerces
+    testRuntimeOnly project(":diagnostics")
 
-    testCompile libraries.log4j_to_slf4j
-    testCompile libraries.jcl_to_slf4j
-    testCompile libraries.jsoup
+    testFixturesImplementation project(":internalTesting")
+    testFixturesImplementation libraries.ivy
 
-    testRuntime libraries.xerces
-    testRuntime project(":diagnostics")
-
-    testFixturesCompile project(":internalTesting")
-    testFixturesCompile libraries.ivy
-
+    testFixturesRuntime project(':workers')
     testFixturesRuntime project(':dependencyManagement')
     testFixturesRuntime project(':pluginUse')
+    testFixturesRuntime project(path: ":versionInfo", configuration: "testVersionInfo")
+    testFixturesRuntime project(':runtimeApiInfo')
 
-    integTestCompile project(":internalIntegTesting")
+    integTestImplementation project(":internalIntegTesting")
 
-    integTestRuntime project(":plugins")
+    integTestRuntimeOnly project(":plugins")
 }
 
 useTestFixtures()
 useTestFixtures(project: ":messaging")
 useTestFixtures(project: ":modelCore")
+useTestFixtures(project: ":logging")
 
 test {
     forkEvery = 200
@@ -78,31 +84,28 @@ test {
 
 [compileGroovy, compileTestGroovy]*.groovyOptions*.fork(memoryInitialSize: '128M', memoryMaximumSize: '1G')
 
-task buildReceiptResource(type: Copy, dependsOn: rootProject.createBuildReceipt) {
-    into "$generatedResourcesDir/org/gradle"
-    from rootProject.createBuildReceipt.receiptFile
+// this is a leftover file from a removed task. Delete it for now
+task deleteBuildReceiptResource(type: Delete) {
+    delete = "$generatedResourcesDir/org/gradle/build-receipt.properties"
+}
+sourceSets.main.output.dir generatedResourcesDir, builtBy: deleteBuildReceiptResource
+
+task pluginsManifest(type: WriteProperties) {
+    property("plugins") {
+        project.pluginProjects.collect { it.archivesBaseName }.sort().join(',')
+    }
+    outputFile = new File(project.generatedResourcesDir, "gradle-plugins.properties")
 }
 
-sourceSets.main.output.dir generatedResourcesDir, builtBy: buildReceiptResource
-
-task pluginsManifest(type: PluginsManifest)
 sourceSets.main.output.dir generatedResourcesDir, builtBy: pluginsManifest
 
-class PluginsManifest extends DefaultTask {
-    @OutputFile
-    File getPropertiesFile() {
-        return new File(project.generatedResourcesDir, "gradle-plugins.properties")
+task implementationPluginsManifest(type: WriteProperties) {
+    property("plugins") {
+        project.implementationPluginProjects.collect { it.archivesBaseName }.sort().join(',')
     }
-
-    @Input
-    Properties getPluginProperties() {
-        def properties = new Properties()
-        properties.plugins = project.pluginProjects.collect { it.archivesBaseName }.join(',')
-        return properties
-    }
-
-    @TaskAction
-    def generate() {
-        propertiesFile.withOutputStream { pluginProperties.save(it, 'plugin definitions') }
-    }
+    outputFile = new File(project.generatedResourcesDir, "gradle-implementation-plugins.properties")
 }
+
+sourceSets.main.output.dir generatedResourcesDir, builtBy: implementationPluginsManifest
+
+verifyTestFilesCleanup.errorWhenNotEmpty = false

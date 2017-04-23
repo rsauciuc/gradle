@@ -18,21 +18,31 @@ package org.gradle.plugins.ide.internal.tooling
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.internal.project.DefaultProjectTaskLister
+import org.gradle.test.fixtures.file.CleanupTestDirectory
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.testfixtures.ProjectBuilder
 import org.gradle.tooling.model.gradle.BuildInvocations
 import org.gradle.util.TestUtil
+import org.gradle.util.UsesNativeServices
+import org.junit.ClassRule
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Unroll
 
+@UsesNativeServices
+@CleanupTestDirectory
 class BuildInvocationsBuilderTest extends Specification {
     @Shared
-    def project = TestUtil.builder().withName("root").build()
+    @ClassRule
+    public TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance()
     @Shared
-    def child = TestUtil.builder().withName("child").withParent(project).build()
+    def project = TestUtil.builder(temporaryFolder).withName("root").build()
     @Shared
-    def grandChild1OfChild = TestUtil.builder().withName("grandChild1").withParent(child).build()
+    def child = ProjectBuilder.builder().withName("child").withParent(project).build()
     @Shared
-    def grandChild2OfChild = TestUtil.builder().withName("grandChild2").withParent(child).build()
+    def grandChild1OfChild = ProjectBuilder.builder().withName("grandChild1").withParent(child).build()
+    @Shared
+    def grandChild2OfChild = ProjectBuilder.builder().withName("grandChild2").withParent(child).build()
 
     def setupSpec() {
         // create a project/task tree:
@@ -106,20 +116,6 @@ class BuildInvocationsBuilderTest extends Specification {
         child              | ['t2', 't3', 't4']       | ['t2', 't3',] | ['t2', 't3']       | ['t2']
         grandChild1OfChild | ['t3', 't4']             | ['t3', 't4',] | ['t3']             | ['t3']
         grandChild2OfChild | ['t4']                   | ['t4',]       | []                 | []
-    }
-
-    def "BuildInvocations model is created for root project if implicitProject flag is set"() {
-        given:
-        def builder = new BuildInvocationsBuilder(new DefaultProjectTaskLister())
-
-        when:
-        def model = builder.buildAll("org.gradle.tooling.model.gradle.BuildInvocations", child, true)
-
-        then:
-        model.taskSelectors*.name as Set == ['t1', 't2', 't3', 't4'] as Set
-        model.taskSelectors.each { it ->
-            assert it.projectPath == ':'
-        }
     }
 
     def "TaskSelector description is taken from task that TaskNameComparator considers to be of lowest ordering"() {

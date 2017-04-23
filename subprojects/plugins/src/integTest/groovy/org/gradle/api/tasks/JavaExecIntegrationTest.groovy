@@ -25,7 +25,7 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
 
     def setup() {
         file("src", "main", "java").mkdirs()
-        
+
         file("src", "main", "java", "Driver.java").write """
             package driver;
 
@@ -60,19 +60,18 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
     def "java exec is not incremental by default"() {
         when:
         run "run"
-        
+
         then:
         ":run" in nonSkippedTasks
-        
+
         when:
         run "run"
-        
+
         then:
         ":run" in nonSkippedTasks
     }
 
-    @Issue("GRADLE-1483")
-    @IgnoreIf({GradleContextualExecuter.parallel})
+    @Issue(["GRADLE-1483", "GRADLE-3528"])
     def "when the user declares outputs it becomes incremental"() {
         given:
         buildFile << """
@@ -90,13 +89,13 @@ class JavaExecIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         ":run" in skippedTasks
-        
+
         when:
         file("out.txt").delete()
-        
+
         and:
         run "run"
-        
+
         then:
         ":run" in nonSkippedTasks
     }

@@ -19,7 +19,6 @@ package org.gradle.integtests.tooling.r16
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
 import org.gradle.integtests.tooling.fixture.ToolingApiVersion
-import org.gradle.tooling.GradleConnectionException
 import org.gradle.tooling.UnknownModelException
 
 class UnknownCustomModelFeedbackCrossVersionSpec extends ToolingApiSpecification {
@@ -35,7 +34,7 @@ class UnknownCustomModelFeedbackCrossVersionSpec extends ToolingApiSpecification
     }
 
     @ToolingApiVersion("current")
-    @TargetGradleVersion(">=1.0-milestone-8 <1.6")
+    @TargetGradleVersion(">=1.2 <1.6")
     def "fails gracefully when unknown model requested when custom models are not supported by the target version"() {
         when:
         withConnection { it.getModel(CustomModel.class) }
@@ -52,7 +51,7 @@ class UnknownCustomModelFeedbackCrossVersionSpec extends ToolingApiSpecification
         withConnection { it.getModel(CustomModel.class) }
 
         then:
-        GradleConnectionException e = thrown()
-        e.message.contains('CustomModel')
+        caughtGradleConnectionException = thrown()
+        caughtGradleConnectionException.message.contains('CustomModel')
     }
 }

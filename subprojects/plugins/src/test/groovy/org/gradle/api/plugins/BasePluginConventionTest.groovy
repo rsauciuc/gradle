@@ -16,15 +16,20 @@
 
 package org.gradle.api.plugins
 
-import org.gradle.api.internal.project.DefaultProject
+import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TestUtil
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 import static org.junit.Assert.assertEquals
 
 class BasePluginConventionTest {
-    private DefaultProject project = TestUtil.createRootProject()
+    @Rule
+    public TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance()
+
+    private ProjectInternal project = TestUtil.create(temporaryFolder).rootProject()
     private File testDir = project.projectDir
     private BasePluginConvention convention
 
@@ -46,5 +51,19 @@ class BasePluginConventionTest {
         assertEquals(project.file('mybuild/mydists'), convention.distsDir)
         convention.libsDirName = 'mylibs'
         assertEquals(project.file('mybuild/mylibs'), convention.libsDir)
+    }
+
+    @Test public void dirsAreCachedProperly() {
+        project.buildDir = project.file('mybuild')
+        convention.distsDirName = 'mydists'
+        assertEquals(project.file('mybuild/mydists'), convention.distsDir)
+        convention.libsDirName = 'mylibs'
+        assertEquals(project.file('mybuild/mylibs'), convention.libsDir)
+        convention.distsDirName = 'mydists2'
+        assertEquals(project.file('mybuild/mydists2'), convention.distsDir)
+        convention.libsDirName = 'mylibs2'
+        assertEquals(project.file('mybuild/mylibs2'), convention.libsDir)
+        project.buildDir = project.file('mybuild2')
+        assertEquals(project.file('mybuild2/mylibs2'), convention.libsDir)
     }
 }

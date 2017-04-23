@@ -15,7 +15,9 @@
  */
 
 package org.gradle.api.plugins.quality
+
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.util.TestPrecondition
 
 class PmdPluginDependenciesIntegrationTest extends AbstractIntegrationSpec {
 
@@ -26,6 +28,11 @@ class PmdPluginDependenciesIntegrationTest extends AbstractIntegrationSpec {
 
             repositories {
                 mavenCentral()
+            }
+
+            tasks.withType(Pmd) {
+                // clear the classpath to avoid file locking issues on PMD version < 5.5.1
+                classpath = files()
             }
         """
         badCode()
@@ -43,7 +50,9 @@ class PmdPluginDependenciesIntegrationTest extends AbstractIntegrationSpec {
                 //downgrade version:
                 pmd "$testDependency"
             }
-        """
+
+            ${!TestPrecondition.FIX_TO_WORK_ON_JAVA9.fulfilled ? "sourceCompatibility = 1.6" : ""}
+        """.stripIndent()
 
         then:
         fails("check")

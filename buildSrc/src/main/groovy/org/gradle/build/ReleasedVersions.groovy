@@ -21,21 +21,27 @@ import org.gradle.api.logging.Logger
 import org.gradle.api.logging.Logging
 import org.gradle.util.GradleVersion
 
+import java.util.concurrent.TimeUnit
+
 class ReleasedVersions {
     private static final Logger LOGGER = Logging.getLogger(ReleasedVersions.class)
-    private static final int MILLIS_PER_DAY = 24 * 60 * 60 * 1000
 
     private lowestInterestingVersion = GradleVersion.version("0.8")
+    private lowestTestedVersion = GradleVersion.version("1.0")
+    private currentVersion = GradleVersion.current()
     private def versions
+    private def testedVersions
     private def snapshots
 
     File destFile
     String url = "https://services.gradle.org/versions/all"
     boolean offline
+    boolean alwaysDownload
 
     void prepare() {
         download()
         versions = calculateVersions()
+        testedVersions = calculateVersions(lowestTestedVersion)
         snapshots = calculateSnapshots()
     }
 
@@ -49,7 +55,7 @@ class ReleasedVersions {
                 + "Without the version information certain integration tests may fail or use outdated version details.")
             return
         }
-        if (destFile.isFile() && destFile.lastModified() > System.currentTimeMillis() - MILLIS_PER_DAY) {
+        if (!alwaysDownload && destFile.isFile() && destFile.lastModified() > System.currentTimeMillis() - TimeUnit.HOURS.toMillis(4)) {
             LOGGER.info("Don't download released versions from $url as the output file already exists and is not out-of-date.")
             return
         }
@@ -103,18 +109,39 @@ $standardErr""")
         return versions*.version*.version
     }
 
+    List<String> getTestedVersions() {
+        return testedVersions*.version*.version
+    }
+
     List<String> getAllSnapshots() {
         return snapshots*.version*.version
     }
 
-    List<Map<String, ?>> calculateVersions() {
+    private static boolean isActiveVersion(def version) {
+        // Ignore broken or snapshot versions
+        if (version.broken == true || version.snapshot == true) {
+            return false
+        }
+        // Ignore milestone releases
+        if (version.version.contains('milestone')) {
+            return false;
+        }
+        // Include only active RCs
+        if (version.rcFor != "") {
+            return version.activeRc
+        }
+        // Include all other versions
+        return true
+    }
+
+    List<Map<String, ?>> calculateVersions(def startingAt = lowestInterestingVersion) {
         def versions = new groovy.json.JsonSlurper().parseText(destFile.text).findAll {
-            (it.activeRc == true || it.rcFor == "") && it.broken == false && it.snapshot == false
+            isActiveVersion(it)
         }.collect {
             it.version = GradleVersion.version(it.version)
             it
         }.findAll {
-            it.version >= lowestInterestingVersion
+            it.version >= startingAt && it.version <= currentVersion
         }.sort {
             it.version
         }.reverse()

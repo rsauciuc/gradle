@@ -19,11 +19,13 @@ package org.gradle.api.internal.tasks.compile;
 import org.gradle.api.tasks.compile.GroovyCompileOptions;
 
 import java.io.File;
+import java.util.List;
 
 public class DefaultGroovyJavaJointCompileSpec extends DefaultJavaCompileSpec implements GroovyJavaJointCompileSpec {
     private GroovyCompileOptions compileOptions;
-    private Iterable<File> groovyClasspath;
+    private List<File> groovyClasspath;
 
+    @Override
     public GroovyCompileOptions getGroovyCompileOptions() {
         return compileOptions;
     }
@@ -32,11 +34,13 @@ public class DefaultGroovyJavaJointCompileSpec extends DefaultJavaCompileSpec im
         this.compileOptions = compileOptions;
     }
 
-    public Iterable<File> getGroovyClasspath() {
+    @Override
+    public List<File> getGroovyClasspath() {
         return groovyClasspath;
     }
 
-    public void setGroovyClasspath(Iterable<File> groovyClasspath) {
+    @Override
+    public void setGroovyClasspath(List<File> groovyClasspath) {
         this.groovyClasspath = groovyClasspath;
     }
 }

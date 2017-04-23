@@ -20,11 +20,11 @@ import org.gradle.api.artifacts.ClientModule
 import org.gradle.api.artifacts.ModuleDependency
 import org.gradle.api.artifacts.component.ComponentIdentifier
 import org.gradle.api.internal.artifacts.ivyservice.moduleconverter.dependencies.DependencyDescriptorFactory
-import org.gradle.internal.component.external.model.ModuleComponentArtifactMetaData
-import org.gradle.internal.component.external.model.MutableModuleComponentResolveMetaData
-import org.gradle.internal.component.local.model.DslOriginDependencyMetaData
+import org.gradle.internal.component.external.model.ModuleComponentArtifactMetadata
+import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata
+import org.gradle.internal.component.external.model.MutableModuleComponentResolveMetadata
+import org.gradle.internal.component.local.model.DslOriginDependencyMetadata
 import org.gradle.internal.component.model.ComponentOverrideMetadata
-import org.gradle.internal.component.model.DependencyMetaData
 import org.gradle.internal.resolve.ModuleVersionResolveException
 import org.gradle.internal.resolve.resolver.ComponentMetaDataResolver
 import org.gradle.internal.resolve.result.BuildableComponentResolveResult
@@ -39,15 +39,17 @@ class ClientModuleResolverTest extends Specification {
 
     def id = Mock(ComponentIdentifier)
     def result = Mock(BuildableComponentResolveResult)
-    def metaData = Mock(MutableModuleComponentResolveMetaData)
+    def metaData = Mock(ModuleComponentResolveMetadata)
+    def mutableMetaData = Mock(MutableModuleComponentResolveMetadata)
+    def updatedMetaData = Mock(ModuleComponentResolveMetadata)
     def componentRequestMetaData = Mock(ComponentOverrideMetadata)
-    def dependency = Mock(DslOriginDependencyMetaData)
+    def dependency = Mock(DslOriginDependencyMetadata)
 
     def "replaces meta-data for a client module dependency"() {
         def clientModule = Mock(ClientModule)
         def dep = Mock(ModuleDependency)
-        def dependencyMetaData = Mock(DependencyMetaData)
-        def artifact = Mock(ModuleComponentArtifactMetaData)
+        def dependencyMetaData = Mock(DslOriginDependencyMetadata)
+        def artifact = Mock(ModuleComponentArtifactMetadata)
 
         when:
         resolver.resolve(id, componentRequestMetaData, result)
@@ -57,16 +59,17 @@ class ClientModuleResolverTest extends Specification {
         1 * result.getFailure() >> null
         1 * componentRequestMetaData.clientModule >> clientModule
         1 * result.getMetaData() >> metaData
-        1 * metaData.copy() >> metaData
+        1 * metaData.asMutable() >> mutableMetaData
         1 * clientModule.getDependencies() >> ([dep] as Set)
-        1 * dep.getConfiguration() >> "config"
-        1 * dependencyDescriptorFactory.createDependencyDescriptor("config", dep) >> dependencyMetaData
-        1 * metaData.setDependencies([dependencyMetaData])
-        1 * metaData.artifact('jar', 'jar', null) >> artifact
-        1 * metaData.setArtifacts({
+        1 * dep.getTargetConfiguration() >> "config"
+        1 * dependencyDescriptorFactory.createDependencyDescriptor("config", null, dep) >> dependencyMetaData
+        1 * mutableMetaData.setDependencies([dependencyMetaData])
+        1 * mutableMetaData.artifact('jar', 'jar', null) >> artifact
+        1 * mutableMetaData.setArtifacts({
             (it as List) == [artifact]
         })
-        1 * result.setMetaData(metaData)
+        1 * mutableMetaData.asImmutable() >> updatedMetaData
+        1 * result.setMetaData(updatedMetaData)
         0 * _
     }
 

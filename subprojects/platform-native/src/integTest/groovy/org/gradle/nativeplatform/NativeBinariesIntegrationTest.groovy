@@ -14,20 +14,18 @@
  * limitations under the License.
  */
 package org.gradle.nativeplatform
-
 import org.gradle.api.reporting.model.ModelReportOutput
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.NativePlatformsTestFixture
 import org.gradle.nativeplatform.fixtures.app.CHelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.CppCallingCHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import org.hamcrest.Matchers
+import spock.lang.Ignore
 
 import static org.gradle.util.Matchers.containsText
 
-@LeaksFileHandles
 class NativeBinariesIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
     def helloWorldApp = new CppCallingCHelloWorldApp()
 
@@ -87,8 +85,8 @@ model {
         notExecuted ":mainUnknownExecutable"
 
         and:
-        executable("build/binaries/mainExecutable/${NativePlatformsTestFixture.defaultPlatformName}/main").assertExists()
-        executable("build/binaries/mainExecutable/unknown/main").assertDoesNotExist()
+        executable("build/exe/main/${NativePlatformsTestFixture.defaultPlatformName}/main").assertExists()
+        executable("build/exe/main/unknown/main").assertDoesNotExist()
     }
 
     def "assemble task produces sensible error when there are no buildable binaries" () {
@@ -162,10 +160,9 @@ model {
         succeeds "mainExecutable"
 
         and:
-        executable("build/binaries/mainExecutable/main").exec().out == helloWorldApp.englishOutput
+        executable("build/exe/main/main").exec().out == helloWorldApp.englishOutput
     }
 
-    // TODO:DAZ Should not need a component here
     def "assemble executable binary directly from language source sets"() {
         given:
         useMixedSources()
@@ -202,9 +199,10 @@ model {
         succeeds "mainExecutable"
 
         and:
-        executable("build/binaries/mainExecutable/main").exec().out == helloWorldApp.englishOutput
+        executable("build/exe/main/main").exec().out == helloWorldApp.englishOutput
     }
 
+    @Ignore("this test no longer covers the intended case, which is to fail when there is an input to a binary for which there is no _transformation_ available")
     def "cannot add java sources to native binary"() {
         given:
         useMixedSources()
@@ -216,7 +214,7 @@ model {
         buildFile << """
 apply plugin: "c"
 apply plugin: "cpp"
-apply plugin: "java"
+apply plugin: "java-lang"
 
 model {
     components {
@@ -363,7 +361,7 @@ int main (int argc, char *argv[]) {
         succeeds "installEchoExecutable"
 
         then:
-        def installation = installation("build/install/echoExecutable")
+        def installation = installation("build/install/echo")
         installation.exec().out == "\n"
         installation.exec("foo", "bar").out == "[foo] [bar] \n"
     }

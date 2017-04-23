@@ -16,12 +16,14 @@
 
 package org.gradle.internal;
 
-import com.google.common.collect.Lists;
 import org.gradle.api.GradleException;
+import org.gradle.api.UncheckedIOException;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 
 public class FileUtils {
@@ -69,7 +71,7 @@ public class FileUtils {
      * @return the encompassing roots
      */
     public static Collection<? extends File> calculateRoots(Iterable<? extends File> files) {
-        List<File> roots = Lists.newLinkedList();
+        List<File> roots = new LinkedList<File>();
 
         files:
         for (File file : files) {
@@ -93,6 +95,40 @@ public class FileUtils {
         }
 
         return roots;
+    }
+
+    /**
+     * Checks if the given file path ends with the given extension.
+     * @param file the file
+     * @param extension candidate extension including leading dot
+     * @return true if {@code file.getPath().endsWith(extension)}
+     */
+    public static boolean hasExtension(File file, String extension) {
+        return file.getPath().endsWith(extension);
+    }
+
+    /**
+     * Returns true if the given file name can represent a Jar archive
+     * @param fileName the file name to test
+     * @return true if the file name ends with ".jar", ignoring case
+     */
+    public static boolean isJar(String fileName) {
+        return endsWithIgnoreCase(fileName, ".jar");
+    }
+
+    private static boolean endsWithIgnoreCase(String subject, String suffix) {
+        return subject.regionMatches(true, subject.length() - suffix.length(), suffix, 0, suffix.length());
+    }
+
+    /**
+     * Canonializes the given file.
+     */
+    public static File canonicalize(File src) {
+        try {
+            return src.getCanonicalFile();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
 }

@@ -18,8 +18,8 @@ package org.gradle.initialization;
 
 import org.gradle.StartParameter;
 import org.gradle.api.logging.LogLevel;
-import org.gradle.logging.ConsoleOutput;
-import org.gradle.logging.ShowStacktrace;
+import org.gradle.api.logging.configuration.ConsoleOutput;
+import org.gradle.api.logging.configuration.ShowStacktrace;
 import org.gradle.test.fixtures.file.TestFile;
 import org.gradle.util.WrapUtil;
 
@@ -40,11 +40,11 @@ public class CommandLineConverterTestSupport {
     protected Map<String, String> expectedSystemProperties = new HashMap<String, String>();
     protected Map<String, String> expectedProjectProperties = new HashMap<String, String>();
     protected List<File> expectedInitScripts = new ArrayList<File>();
+    protected List<File> expectedParticipants = new ArrayList<File>();
     protected boolean expectedSearchUpwards = true;
     protected boolean expectedDryRun;
     protected ShowStacktrace expectedShowStackTrace = ShowStacktrace.INTERNAL_EXCEPTIONS;
     protected LogLevel expectedLogLevel = LogLevel.LIFECYCLE;
-    protected boolean expectedColorOutput = true;
     protected ConsoleOutput expectedConsoleOutput = ConsoleOutput.Auto;
     protected StartParameter actualStartParameter;
     protected boolean expectedProfile;
@@ -56,7 +56,6 @@ public class CommandLineConverterTestSupport {
     protected boolean expectedOffline;
     protected boolean expectedRecompileScripts;
     protected boolean expectedParallelProjectExecution;
-    protected int expectedParallelExecutorCount;
     protected int expectedMaxWorkersCount = Runtime.getRuntime().availableProcessors();
     protected boolean expectedConfigureOnDemand;
     protected boolean expectedContinuous;
@@ -82,7 +81,6 @@ public class CommandLineConverterTestSupport {
         assertEquals(expectedSystemProperties, startParameter.getSystemPropertiesArgs());
         assertEquals(expectedGradleUserHome.getAbsoluteFile(), startParameter.getGradleUserHomeDir().getAbsoluteFile());
         assertEquals(expectedLogLevel, startParameter.getLogLevel());
-        assertEquals(expectedColorOutput, startParameter.isColorOutput());
         assertEquals(expectedConsoleOutput, startParameter.getConsoleOutput());
         assertEquals(expectedDryRun, startParameter.isDryRun());
         assertEquals(expectedShowStackTrace, startParameter.getShowStacktrace());
@@ -95,9 +93,9 @@ public class CommandLineConverterTestSupport {
         assertEquals(expectedRerunTasks, startParameter.isRerunTasks());
         assertEquals(expectedRefreshDependencies, startParameter.isRefreshDependencies());
         assertEquals(expectedProjectCacheDir, startParameter.getProjectCacheDir());
-        assertEquals(expectedParallelExecutorCount, startParameter.getParallelThreadCount());
         assertEquals(expectedConfigureOnDemand, startParameter.isConfigureOnDemand());
         assertEquals(expectedMaxWorkersCount, startParameter.getMaxWorkerCount());
         assertEquals(expectedContinuous, startParameter.isContinuous());
+        assertEquals(expectedParticipants, startParameter.getIncludedBuilds());
     }
 }

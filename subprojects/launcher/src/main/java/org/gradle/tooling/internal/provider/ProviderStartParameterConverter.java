@@ -25,20 +25,22 @@ import org.gradle.tooling.internal.protocol.InternalLaunchable;
 import org.gradle.tooling.internal.protocol.exceptions.InternalUnsupportedBuildArgumentException;
 import org.gradle.tooling.internal.provider.connection.ProviderOperationParameters;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 class ProviderStartParameterConverter {
 
-    private List<TaskExecutionRequest> unpack(final List<InternalLaunchable> launchables) {
+    private List<TaskExecutionRequest> unpack(final List<InternalLaunchable> launchables, File projectDir) {
         // Important that the launchables are unpacked on the client side, to avoid sending back any additional internal state that
         // the launchable may hold onto. For example, GradleTask implementations hold onto every task for every project in the build
         List<TaskExecutionRequest> requests = new ArrayList<TaskExecutionRequest>(launchables.size());
         for (InternalLaunchable launchable : launchables) {
             if (launchable instanceof TaskExecutionRequest) {
+
                 TaskExecutionRequest originalLaunchable = (TaskExecutionRequest) launchable;
-                TaskExecutionRequest launchableImpl = new DefaultTaskExecutionRequest(originalLaunchable.getArgs(), originalLaunchable.getProjectPath());
+                TaskExecutionRequest launchableImpl = new DefaultTaskExecutionRequest(originalLaunchable.getArgs(), originalLaunchable.getProjectPath(), originalLaunchable.getRootDir());
                 requests.add(launchableImpl);
             } else {
                 throw new InternalUnsupportedBuildArgumentException(
@@ -61,7 +63,7 @@ class ProviderStartParameterConverter {
 
         List<InternalLaunchable> launchables = parameters.getLaunchables(null);
         if (launchables != null) {
-            startParameter.setTaskRequests(unpack(launchables));
+            startParameter.setTaskRequests(unpack(launchables, parameters.getProjectDir()));
         } else if (parameters.getTasks() != null) {
             startParameter.setTaskNames(parameters.getTasks());
         }

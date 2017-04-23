@@ -19,13 +19,14 @@ package org.gradle.api.publish.ivy
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.executer.ProgressLoggingFixture
+import org.gradle.test.fixtures.ivy.IvyDescriptorDependencyExclusion
 import org.gradle.test.fixtures.ivy.RemoteIvyModule
 import org.gradle.test.fixtures.ivy.RemoteIvyRepository
 import org.gradle.test.fixtures.server.RepositoryServer
-import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.test.fixtures.server.sftp.SFTPServer
 import org.junit.Rule
+import spock.lang.Issue
 
-@LeaksFileHandles
 public abstract class AbstractIvyRemoteLegacyPublishIntegrationTest extends AbstractIntegrationSpec {
     abstract RepositoryServer getServer()
 
@@ -40,6 +41,7 @@ public abstract class AbstractIvyRemoteLegacyPublishIntegrationTest extends Abst
         module = ivyRepo.module("org.gradle", "publish", "2")
     }
 
+    @Issue("GRADLE-3440")
     public void "can publish using uploadArchives"() {
         given:
         settingsFile << 'rootProject.name = "publish"'
@@ -50,6 +52,19 @@ group = 'org.gradle'
 
 dependencies {
     compile "commons-collections:commons-collections:3.2.1"
+    compile ("commons-beanutils:commons-beanutils:1.8.3") {
+        exclude group: 'commons-logging'
+    }
+    compile ("commons-dbcp:commons-dbcp:1.4") {
+       transitive = false
+    }
+    compile ("org.apache.camel:camel-jackson:2.15.3") {
+        exclude module: 'camel-core'
+    }
+    runtime ("com.fasterxml.jackson.core:jackson-databind:2.2.3") {
+        exclude group: 'com.fasterxml.jackson.core', module:'jackson-annotations'
+        exclude group: 'com.fasterxml.jackson.core', module:'jackson-core'
+    }
     runtime "commons-io:commons-io:1.4"
 }
 
@@ -79,12 +94,25 @@ uploadArchives {
         then:
         module.assertIvyAndJarFilePublished()
         module.jarFile.assertIsCopyOf(file('build/libs/publish-2.jar'))
-        module.parsedIvy.expectArtifact("publish", "jar").hasAttributes("jar", "jar", ["archives", "runtime"], null)
+        module.parsedIvy.expectArtifact("publish", "jar").hasAttributes("jar", "jar", ["apiElements", "archives", "runtime", "runtimeElements"], null)
 
         with (module.parsedIvy) {
-            dependencies.size() == 2
+            dependencies.size() == 6
             dependencies["commons-collections:commons-collections:3.2.1"].hasConf("compile->default")
+            dependencies["commons-beanutils:commons-beanutils:1.8.3"].hasConf("compile->default")
+            dependencies["commons-dbcp:commons-dbcp:1.4"].hasConf("compile->default")
+            dependencies["com.fasterxml.jackson.core:jackson-databind:2.2.3"].hasConf("runtime->default")
             dependencies["commons-io:commons-io:1.4"].hasConf("runtime->default")
+
+            dependencies["commons-beanutils:commons-beanutils:1.8.3"].hasExclude(new IvyDescriptorDependencyExclusion('commons-logging','*','*', '*', '*', 'compile', 'exact'))
+            dependencies["com.fasterxml.jackson.core:jackson-databind:2.2.3"].hasExclude(new IvyDescriptorDependencyExclusion('com.fasterxml.jackson.core','jackson-annotations','*', '*', '*', 'runtime', 'exact'))
+            dependencies["com.fasterxml.jackson.core:jackson-databind:2.2.3"].hasExclude(new IvyDescriptorDependencyExclusion('com.fasterxml.jackson.core','jackson-core','*', '*', '*', 'runtime', 'exact'))
+            dependencies["org.apache.camel:camel-jackson:2.15.3"].hasExclude(new IvyDescriptorDependencyExclusion('*','camel-core','*', '*', '*', 'compile', 'exact'))
+
+            dependencies["commons-beanutils:commons-beanutils:1.8.3"].transitiveEnabled()
+            dependencies["com.fasterxml.jackson.core:jackson-databind:2.2.3"].transitiveEnabled()
+            dependencies["org.apache.camel:camel-jackson:2.15.3"].transitiveEnabled()
+            !dependencies["commons-dbcp:commons-dbcp:1.4"].transitiveEnabled()
         }
 
         and:
@@ -120,5 +148,10 @@ uploadArchives {
 
         and:
         progressLogger.uploadProgressLogged(module.jar.uri)
+
+        cleanup:
+        if (server instanceof SFTPServer) {
+            ((SFTPServer) server).clearSessions()
+        }
     }
 }

@@ -16,10 +16,11 @@
 
 package org.gradle.external.javadoc.internal;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.gradle.util.CollectionUtils;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,10 +29,11 @@ import java.util.Map;
  * option.
  */
 public class GroupsJavadocOptionFileOption extends AbstractJavadocOptionFileOption<Map<String, List<String>>> {
-    public GroupsJavadocOptionFileOption(String option) {
-        super(option, new LinkedHashMap<String, List<String>>());
+    public GroupsJavadocOptionFileOption(String option, Map<String, List<String>> value) {
+        super(option, value);
     }
 
+    @Override
     public void write(JavadocOptionFileWriterContext writerContext) throws IOException {
         if (value != null && !value.isEmpty()) {
             for (final String group : value.keySet()) {
@@ -45,5 +47,14 @@ public class GroupsJavadocOptionFileOption extends AbstractJavadocOptionFileOpti
                     .newLine();
             }
         }
+    }
+
+    @Override
+    public GroupsJavadocOptionFileOption duplicate() {
+        Map<String, List<String>> duplicateValue = Maps.newLinkedHashMap();
+        for (Map.Entry<String, List<String>> entry : value.entrySet()) {
+            duplicateValue.put(entry.getKey(), Lists.newArrayList(entry.getValue()));
+        }
+        return new GroupsJavadocOptionFileOption(option, duplicateValue);
     }
 }

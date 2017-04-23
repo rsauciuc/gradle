@@ -18,6 +18,7 @@ package org.gradle.test.fixtures.ivy;
 
 import groovy.lang.Closure;
 import org.gradle.test.fixtures.Module;
+import org.gradle.test.fixtures.ModuleArtifact;
 import org.gradle.test.fixtures.file.TestFile;
 
 import java.util.Map;
@@ -26,6 +27,10 @@ public interface IvyModule extends Module {
     String getOrganisation();
     String getModule();
     String getRevision();
+
+    ModuleArtifact getIvy();
+
+    ModuleArtifact getJar();
 
     TestFile getIvyFile();
 
@@ -42,8 +47,26 @@ public interface IvyModule extends Module {
 
     IvyModule extendsFrom(Map<String, ?> attributes);
 
+    /**
+     * Attributes:
+     *  organisation
+     *  module
+     *  revision
+     *  conf
+     */
     IvyModule dependsOn(Map<String, ?> attributes);
 
+    IvyModule dependsOn(Module target);
+
+    IvyModule dependsOn(Map<String, ?> attributes, Module target);
+
+    /**
+     * Options:
+     *  name
+     *  type
+     *  classifier
+     *  conf
+     */
     IvyModule artifact(Map<String, ?> options);
 
     /**
@@ -55,6 +78,12 @@ public interface IvyModule extends Module {
 
     IvyModule configuration(String name);
 
+    /**
+     * Options:
+     *  extendsFrom
+     *  transitive
+     *  visibility
+     */
     IvyModule configuration(Map<String, ?> options, String name);
 
     /**

@@ -17,8 +17,8 @@
 package org.gradle.internal.resource.transport;
 
 import org.gradle.api.Nullable;
+import org.gradle.api.resources.ResourceException;
 import org.gradle.internal.resource.ExternalResource;
-import org.gradle.internal.resource.ResourceException;
 import org.gradle.internal.resource.local.LocalResource;
 import org.gradle.internal.resource.metadata.ExternalResourceMetaData;
 
@@ -35,11 +35,13 @@ public interface ExternalResourceRepository {
     /**
      * Attempts to fetch the given resource.
      *
+     * @param source The location of the resource to obtain
+     * @param revalidate Ensure the external resource is not stale
      * @return null if the resource is not found.
      * @throws ResourceException On failure to fetch resource.
      */
     @Nullable
-    ExternalResource getResource(URI source) throws ResourceException;
+    ExternalResource getResource(URI source, boolean revalidate) throws ResourceException;
 
     /**
      * Transfer a resource to the repository
@@ -54,11 +56,12 @@ public interface ExternalResourceRepository {
      * Fetches only the metadata for the result.
      *
      * @param source The location of the resource to obtain the metadata for
+     * @param revalidate Ensure the external resource is not stale
      * @return The resource metadata, or null if the resource does not exist
      * @throws ResourceException On failure to fetch resource metadata.
      */
     @Nullable
-    ExternalResourceMetaData getResourceMetaData(URI source) throws ResourceException;
+    ExternalResourceMetaData getResourceMetaData(URI source, boolean revalidate) throws ResourceException;
 
     /**
      * Return a listing of child resources names.

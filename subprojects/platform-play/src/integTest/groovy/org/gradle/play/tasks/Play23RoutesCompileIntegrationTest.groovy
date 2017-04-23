@@ -18,29 +18,26 @@ package org.gradle.play.tasks
 
 import org.gradle.integtests.fixtures.TargetCoverage
 import org.gradle.play.integtest.fixtures.PlayCoverage
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
 
 @TargetCoverage({ PlayCoverage.PLAY23_OR_EARLIER })
-@Requires(TestPrecondition.JDK7_OR_LATER)
 class Play23RoutesCompileIntegrationTest extends AbstractRoutesCompileIntegrationTest {
     @Override
-    def getRoutesJavaFileNameTemplate(String packageName, String namespace) {
+    def getJavaRoutesFileName(String packageName, String namespace) {
         return "${namespace ? namespace + '/' :''}controllers/${packageName ? packageName + '/' :''}routes.java"
     }
 
     @Override
-    def getRoutesReverseFileNameTemplate(String packageName, String namespace) {
+    def getReverseRoutesFileName(String packageName, String namespace) {
         return "${packageName ? packageName + '/' :''}routes_reverseRouting.scala"
     }
 
     @Override
-    def getRoutesScalaFileNameTemplate(String packageName, String namespace) {
+    def getScalaRoutesFileName(String packageName, String namespace) {
         return "${packageName ? packageName + '/' :''}routes_routing.scala"
     }
 
     @Override
-    def getOtherRoutesFilesTemplates() {
+    def getOtherRoutesFileNames() {
         return []
     }
 

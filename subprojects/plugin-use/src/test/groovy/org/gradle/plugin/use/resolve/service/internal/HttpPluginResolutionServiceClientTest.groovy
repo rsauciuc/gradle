@@ -20,17 +20,19 @@ import com.google.gson.Gson
 import org.gradle.api.GradleException
 import org.gradle.internal.resource.transport.http.HttpResourceAccessor
 import org.gradle.internal.resource.transport.http.HttpResponseResource
-import org.gradle.plugin.internal.PluginId
-import org.gradle.plugin.use.internal.PluginRequest
+import org.gradle.internal.resource.transport.http.SslContextFactory
+import org.gradle.plugin.use.internal.DefaultPluginId
+import org.gradle.plugin.management.internal.PluginRequestInternal
 import org.gradle.util.GradleVersion
 import spock.lang.Specification
 
 class HttpPluginResolutionServiceClientTest extends Specification {
     public static final String PLUGIN_PORTAL_URL = "http://plugin.portal"
     private resourceAccessor = Mock(HttpResourceAccessor)
-    private client = new HttpPluginResolutionServiceClient(resourceAccessor)
-    private request = Stub(PluginRequest) {
-        getId() >> PluginId.of("foo")
+    private sslContextFactory = Mock(SslContextFactory)
+    private client = new HttpPluginResolutionServiceClient(sslContextFactory, resourceAccessor)
+    private request = Stub(PluginRequestInternal) {
+        getId() >> DefaultPluginId.of("foo")
     }
 
     def "returns plugin metadata for successful query"() {
@@ -109,8 +111,8 @@ class HttpPluginResolutionServiceClientTest extends Specification {
 
     def "id and version are properly encoded"() {
         given:
-        def customRequest = Stub(PluginRequest) {
-            getId() >> new PluginId("foo/bar")
+        def customRequest = Stub(PluginRequestInternal) {
+            getId() >> new DefaultPluginId("foo/bar")
             getVersion() >> "1/0"
         }
 
@@ -118,17 +120,17 @@ class HttpPluginResolutionServiceClientTest extends Specification {
         client.queryPluginMetadata(PLUGIN_PORTAL_URL, true, customRequest)
 
         then:
-        1 * resourceAccessor.getRawResource(new URI("$PLUGIN_PORTAL_URL/${GradleVersion.current().getVersion()}/plugin/use/foo%2Fbar/1%2F0")) >> Stub(HttpResponseResource) {
+        1 * resourceAccessor.getRawResource(new URI("$PLUGIN_PORTAL_URL/${GradleVersion.current().getVersion()}/plugin/use/foo%2Fbar/1%2F0"), false) >> Stub(HttpResponseResource) {
             getStatusCode() >> 500
             getContentType() >> "application/json"
             openStream() >> new ByteArrayInputStream("{errorCode: 'FOO', message: 'BAR'}".getBytes("utf8"))
         }
-        0 * resourceAccessor.getRawResource(_)
+        0 * resourceAccessor.getRawResource(_, false)
     }
 
     private void stubResponse(int statusCode, String jsonResponse = null) {
         interaction {
-            resourceAccessor.getRawResource(_) >> Stub(HttpResponseResource) {
+            resourceAccessor.getRawResource(_, false) >> Stub(HttpResponseResource) {
                 getStatusCode() >> statusCode
                 if (jsonResponse != null) {
                     getContentType() >> "application/json"

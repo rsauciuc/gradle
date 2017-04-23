@@ -16,72 +16,104 @@
 
 package org.gradle.testkit.runner
 
-import spock.lang.Unroll
+import groovy.transform.NotYetImplemented
+import spock.lang.Issue
 
-import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
-
-class GradleRunnerArgumentsIntegrationTest extends AbstractGradleRunnerIntegrationTest {
+class GradleRunnerArgumentsIntegrationTest extends BaseGradleRunnerIntegrationTest {
 
     def "can execute build without specifying any arguments"() {
-        when:
-        def result = runner().build()
-
-        then:
-        result.task(":help")
-    }
-
-    def "execute build for multiple tasks"() {
         given:
-        buildFile << helloWorldTask()
-        buildFile << """
-            task byeWorld {
+        buildScript """
+            task help {
                 doLast {
-                    println 'Bye world!'
+                    file('out.txt').text = "help"
                 }
             }
         """
 
         when:
-        def result = runner('helloWorld', 'byeWorld').build()
+        runner().build()
 
         then:
-        result.output.contains('Hello world!')
-        result.output.contains('Bye world!')
-        result.taskPaths(SUCCESS) == [':helloWorld', ':byeWorld']
+        file("out.txt").text == "help"
     }
 
-    @Unroll
-    def "can provide arguments #arguments for build execution"() {
+    def "can execute build with multiple tasks"() {
         given:
-        final String debugMessage = 'Some debug message'
-        final String infoMessage = 'My property: ${project.hasProperty("myProp") ? project.getProperty("myProp") : null}'
-        final String quietMessage = 'Log in any case'
-
-        buildFile << """
-            task helloWorld {
+        buildScript """
+            task t1 {
                 doLast {
-                    logger.debug '$debugMessage'
-                    logger.info '$infoMessage'
-                    logger.quiet '$quietMessage'
+                    file("out.txt").text = "t1"
+                }
+            }
+            task t2 {
+                doLast {
+                    file("out.txt") << "t2"
                 }
             }
         """
 
         when:
-        def result = runner(['helloWorld'] + arguments).build()
+        runner('t1', 't2').build()
 
         then:
-        result.output.contains(debugMessage) == hasDebugMessage
-        result.output.contains(infoMessage) == hasInfoMessage
-        result.output.contains(quietMessage) == hasQuietMessage
-        result.taskPaths(SUCCESS) == [':helloWorld']
-
-        where:
-        arguments                | hasDebugMessage | hasInfoMessage | hasQuietMessage
-        []                       | false           | false          | true
-        ['-PmyProp=hello']       | false           | false          | true
-        ['-d', '-PmyProp=hello'] | true            | true           | true
-        ['-i', '-PmyProp=hello'] | false           | true           | true
+        file("out.txt").text == "t1t2"
     }
 
+    def "can provide non task arguments"() {
+        given:
+        buildScript """
+            task writeValue {
+                doLast {
+                    file("out.txt").text = project.value
+                }
+            }
+        """
+
+        when:
+        runner("writeValue", "-Pvalue=foo").build()
+
+        then:
+        file("out.txt").text == "foo"
+    }
+
+    def "can enable parallel execution via --parallel property"() {
+        given:
+        buildScript """
+            task writeValue {
+                doLast {
+                    file("out.txt").text = gradle.startParameter.parallelProjectExecutionEnabled
+                }
+            }
+        """
+
+        when:
+        runner("writeValue", "--parallel")
+            .withGradleVersion("3.1")
+            .build()
+
+        then:
+        file("out.txt").text == "true"
+    }
+
+    @NotYetImplemented
+    @Issue("GRADLE-3563")
+    def "can enable parallel execution via system property"() {
+        given:
+        buildScript """
+            task writeValue {
+                doLast {
+                    file("out.txt").text = gradle.startParameter.parallelProjectExecutionEnabled
+                }
+            }
+        """
+
+        when:
+        runner("writeValue", "-Dorg.gradle.parallel=true")
+            .withGradleVersion("3.1")
+            .build()
+
+        then:
+        file("out.txt").text == "true"
+    }
 }

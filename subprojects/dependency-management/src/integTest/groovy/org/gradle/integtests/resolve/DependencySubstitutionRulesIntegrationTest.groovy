@@ -18,9 +18,16 @@
 package org.gradle.integtests.resolve
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import spock.lang.Unroll
 
 class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec {
+    def resolve = new ResolveTestFixture(buildFile, "conf")
+
+    def setup() {
+        settingsFile << "rootProject.name='depsub'\n"
+        resolve.prepare()
+    }
 
     void "forces multiple modules by rule"()
     {
@@ -57,8 +64,24 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             }
 """
 
-        expect:
-        succeeds "resolveConf"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                module("org.stuff:foo:2.0") {
+                    edge("org.utils:api:1.5", "org.utils:api:1.5") {
+                        selectedByRule()
+                    }
+                }
+                edge("org.utils:impl:1.3", "org.utils:impl:1.5") {
+                    selectedByRule()
+                    module("org.utils:api:1.5")
+                }
+                module("org.utils:optional-lib:5.0")
+            }
+        }
     }
 
     void "module forced by rule has correct selection reason"()
@@ -87,18 +110,22 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     }
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies
-                assert deps*.selected.id.module == ['foo', 'impl', 'api']
-                assert deps*.selected.id.version == ['2.0', '1.5', '1.5']
-                assert deps*.selected.selectionReason.forced         == [false, false, false]
-                assert deps*.selected.selectionReason.selectedByRule == [false, true, true]
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                module("org.stuff:foo:2.0") {
+                    edge("org.utils:impl:1.3", "org.utils:impl:1.5") {
+                        selectedByRule()
+                        module("org.utils:api:1.5").selectedByRule()
+                    }
+                }
+            }
+        }
     }
 
     void "all rules are executed in order and last one wins"()
@@ -134,21 +161,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     }
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies
-                assert deps.size() == 2
-
-                def apiDep = deps.find({ it.selected.id.module == 'api' }).selected
-                assert apiDep.id.version == '1.5'
-                assert !apiDep.selectionReason.forced
-                assert apiDep.selectionReason.selectedByRule
-                assert apiDep.selectionReason.description == 'selected by rule'
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:impl:1.3", "org.utils:impl:1.5") {
+                    selectedByRule()
+                    module("org.utils:api:1.5").selectedByRule()
+                }
+            }
+        }
     }
 
     void "all rules are executed in order and last one wins, including resolution rules"()
@@ -186,20 +212,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     }
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies
-                assert deps.size() == 2
-                deps.each {
-                    assert it.selected.id.version == '1.5'
-                    assert it.selected.selectionReason.selectedByRule
-                    assert it.selected.selectionReason.description == 'selected by rule'
-                }
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:impl:1.3", "org.utils:impl:1.5") {
+                    selectedByRule()
+                    module("org.utils:api:1.5").selectedByRule()
+                }
+            }
+        }
     }
 
     void "can unforce the version"()
@@ -226,21 +252,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     }
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies
-                assert deps.size() == 2
-                deps.each {
-                    assert it.selected.id.version == '1.3'
-                    def reason = it.selected.selectionReason
-                    assert !reason.forced
-                    assert reason.selectedByRule
-                }
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:impl:1.3", "org.utils:impl:1.3") {
+                    selectedByRule()
+                    module("org.utils:api:1.3").selectedByRule()
+                }
+            }
+        }
     }
 
     void "forced modules and rules coexist"()
@@ -265,24 +290,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     substitute module("org.utils:api") with module("org.utils:api:1.6")
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies
-
-                def apiDep = deps.find({ it.selected.id.module == 'api' }).selected
-                assert apiDep.id.version == '1.6'
-                assert !apiDep.selectionReason.forced
-                assert apiDep.selectionReason.selectedByRule
-
-                def implDep = deps.find({ it.selected.id.module == 'impl' }).selected
-                assert implDep.id.version == '1.5'
-                assert implDep.selectionReason.forced
-                assert !implDep.selectionReason.selectedByRule
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:impl:1.3", "org.utils:impl:1.5") {
+                    forced()
+                    edge("org.utils:api:1.5", "org.utils:api:1.6").selectedByRule()
+                }
+            }
+        }
     }
 
     void "rule selects a dynamic version"()
@@ -302,18 +323,27 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                 substitute module('org.utils:api:1.3') with module('org.utils:api:1.+')
             }
 
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                assert deps.size() == 1
-                assert deps[0].requested.version == '1.3'
-                assert deps[0].selected.id.version == '1.5'
-                assert !deps[0].selected.selectionReason.forced
-                assert deps[0].selected.selectionReason.selectedByRule
+            task check {
+                doLast {
+                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
+                    assert deps.size() == 1
+                    assert deps[0].requested.version == '1.3'
+                    assert deps[0].selected.id.version == '1.5'
+                    assert !deps[0].selected.selectionReason.forced
+                    assert deps[0].selected.selectionReason.selectedByRule
+                }
             }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:api:1.3", "org.utils:api:1.5").selectedByRule()
+            }
+        }
     }
 
     void "can substitute modules with project dependency using #name"()
@@ -331,24 +361,25 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     substitute module("$selector") with project(":api")
                 }
 
-                task check(dependsOn: configurations.conf) << {
-                    assert configurations.conf.collect { it.name } == ['api.jar']
-
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
-
-                    assert deps[0].requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
-                    assert deps[0].selected.componentId == projectId(":api")
-
-                    assert !deps[0].selected.selectionReason.forced
-                    assert deps[0].selected.selectionReason.selectedByRule
-                }
+                task("buildConf", dependsOn: configurations.conf)
             }
 """
 
         when:
-        succeeds "impl:check"
+        run ":impl:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                    configuration = "conf"
+                    selectedByRule()
+                }
+            }
+        }
+
+        when:
+        run ":impl:buildConf"
 
         then:
         executedAndNotSkipped ":api:jar"
@@ -367,9 +398,11 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             $common
 
             project(":api") {
-                task build << {
-                    mkdir(projectDir)
-                    file("artifact.txt") << "Lajos"
+                task build {
+                    doLast {
+                        mkdir(projectDir)
+                        file("artifact.txt") << "Lajos"
+                    }
                 }
 
                 artifacts {
@@ -388,10 +421,12 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     substitute module("org.utils:api") with project(":api")
                 }
 
-                task check(dependsOn: configurations.conf) << {
-                    def files = configurations.conf.files
-                    assert files*.name.sort() == ["api.jar", "artifact.txt"]
-                    assert files[1].text == "Lajos"
+                task check(dependsOn: configurations.conf) {
+                    doLast {
+                        def files = configurations.conf.files
+                        assert files*.name.sort() == ["api.jar", "artifact.txt"]
+                        assert files[1].text == "Lajos"
+                    }
                 }
             }
 """
@@ -424,26 +459,22 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                 configurations.conf.resolutionStrategy.dependencySubstitution {
                     substitute project(":api") with module("org.utils:api:1.5")
                 }
-
-                task check(dependsOn: configurations.conf) << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
-
-                    assert deps[0].requested.matchesStrictly(projectId(":api"))
-                    assert deps[0].selected.componentId == moduleId("org.utils", "api", "1.5")
-
-                    assert !deps[0].selected.selectionReason.forced
-                    assert deps[0].selected.selectionReason.selectedByRule
-                }
             }
 """
 
         when:
-        succeeds "impl:check"
+        run ":impl:checkDeps"
 
         then:
         notExecuted ":api:jar"
+
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("project :api", "org.utils:api:1.5") {
+                    selectedByRule()
+                }
+            }
+        }
 
         where:
         projectVersion | projectGroup | scenario
@@ -470,30 +501,27 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     substitute module("org.utils:api") with project(":api")
                 }
 
-                task check(dependsOn: configurations.conf) << {
-                    assert configurations.conf.collect { it.name } == ['impl-1.5.jar', 'api.jar']
-
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 2
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.selected.componentId == moduleId("org.utils", "impl", "1.5")
-                        !it.selected.selectionReason.forced &&
-                        !it.selected.selectionReason.selectedByRule
-                    }
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
-                        it.selected.componentId == projectId(":api")
-                        !it.selected.selectionReason.forced &&
-                        it.selected.selectionReason.selectedByRule
-                    }
-                }
+                task("buildConf", dependsOn: configurations.conf)
             }
 """
 
         when:
-        succeeds "test:check"
+        run ":test:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":test", "depsub:test:") {
+                module("org.utils:impl:1.5") {
+                    edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                        configuration = "conf"
+                        selectedByRule()
+                    }
+                }
+            }
+        }
+
+        when:
+        run ":test:buildConf"
 
         then:
         executedAndNotSkipped ":api:jar"
@@ -515,22 +543,34 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     substitute module("org.utils:api") with project(":api")
                 }
 
-                task check << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
+                task check {
+                    doLast {
+                        def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
+                        assert deps.size() == 1
+                        assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
 
-                    assert deps[0].requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
-                    assert deps[0].selected.componentId == projectId(":api")
+                        assert deps[0].requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
+                        assert deps[0].selected.componentId == projectId(":api")
 
-                    assert !deps[0].selected.selectionReason.forced
-                    assert deps[0].selected.selectionReason.selectedByRule
+                        assert !deps[0].selected.selectionReason.forced
+                        assert deps[0].selected.selectionReason.selectedByRule
+                    }
                 }
             }
 """
 
-        expect:
-        succeeds "impl:check"
+
+        when:
+        run ":impl:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                    selectedByRule()
+                }
+            }
+        }
     }
 
     void "can replace client module's transitive dependency with project dependency"()
@@ -551,29 +591,22 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                 configurations.conf.resolutionStrategy.dependencySubstitution {
                     substitute module("org.utils:api") with project(":api")
                 }
-
-                task check << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 2
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.selected.componentId == moduleId("org.utils", "bela", "1.5") &&
-                        !it.selected.selectionReason.forced &&
-                        !it.selected.selectionReason.selectedByRule
-                    }
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(moduleId("org.utils", "api", "1.5")) &&
-                        it.selected.componentId == projectId(":api") &&
-                        !it.selected.selectionReason.forced &&
-                        it.selected.selectionReason.selectedByRule
-                    }
-                }
             }
 """
 
-        expect:
-        succeeds "impl:check"
+        when:
+        run ":impl:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                module("org.utils:bela:1.5") {
+                    edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                        selectedByRule()
+                    }
+                }
+            }
+        }
     }
 
     void "can replace external dependency declared in extended configuration with project dependency"()
@@ -587,47 +620,31 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 
             project(":impl") {
                 configurations {
-                    testConf.extendsFrom conf
+                    subConf
+                    conf.extendsFrom subConf
                 }
 
                 dependencies {
-                    conf group: "org.utils", name: "api", version: "1.5"
+                    subConf group: "org.utils", name: "api", version: "1.5"
                 }
 
-                configurations.testConf.resolutionStrategy.dependencySubstitution {
+                configurations.conf.resolutionStrategy.dependencySubstitution {
                     substitute module("org.utils:api") with project(":api")
                 }
-
-                task checkConf << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
-
-                    assert deps[0].requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
-                    assert deps[0].selected.componentId == moduleId("org.utils", "api", "1.5")
-
-                    assert !deps[0].selected.selectionReason.forced
-                    assert !deps[0].selected.selectionReason.selectedByRule
-                }
-
-                task checkTestConf << {
-                    def deps = configurations.testConf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
-
-                    assert deps[0].requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
-                    assert deps[0].selected.componentId == projectId(":api")
-
-                    assert !deps[0].selected.selectionReason.forced
-                    assert deps[0].selected.selectionReason.selectedByRule
-                }
-
-                task check(dependsOn: [ checkConf, checkTestConf ])
             }
 """
 
-        expect:
-        succeeds "impl:check"
+        when:
+        run ":impl:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                    selectedByRule()
+                }
+            }
+        }
     }
 
     void "can replace forced external dependency with project dependency"()
@@ -649,23 +666,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                         substitute module("org.utils:api") with project(":api")
                     }
                 }
-
-                task check << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult
-
-                    assert deps[0].requested.matchesStrictly(moduleId("org.utils", "api", "1.5"))
-                    assert deps[0].selected.componentId == projectId(":api")
-
-                    assert !deps[0].selected.selectionReason.forced
-                    assert deps[0].selected.selectionReason.selectedByRule
-                }
             }
 """
 
-        expect:
-        succeeds "impl:check"
+        when:
+        run ":impl:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                    selectedByRule()
+                }
+            }
+        }
     }
 
     void "get useful error message when replacing an external dependency with a project that does not exist"()
@@ -687,20 +701,17 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                         substitute module("org.utils:api") with project(":doesnotexist")
                     }
                 }
-
-                task check << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps[0] instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult
-                }
             }
 """
 
-        expect:
-        fails "impl:check"
-        failure.assertHasDescription("Execution failed for task ':impl:resolveConf'.")
+
+        when:
+        fails ":impl:checkDeps"
+
+        then:
+        failure.assertHasDescription("Execution failed for task ':impl:checkDeps'.")
         failure.assertHasCause("Could not resolve all dependencies for configuration ':impl:conf'.")
-        failure.assertHasCause("project ':doesnotexist' not found.")
+        failure.assertHasCause("project :doesnotexist not found.")
     }
 
     void "replacing external module dependency with project dependency keeps the original configuration"()
@@ -710,42 +721,29 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
         buildFile << """
             $common
 
-            project(":api") {
-                configurations {
-                    archives
-                }
-
-                artifacts {
-                    archives file("archives.txt")
-                    conf file("conf.txt")
-                }
-            }
-
             project(":impl") {
-                configurations {
-                    compile
-                }
-
                 dependencies {
-                    compile group: "org.utils", name: "api", version: "1.5", configuration: "conf"
+                    conf group: "org.utils", name: "api", version: "1.5", configuration: "conf"
                 }
 
-                configurations.compile.resolutionStrategy.dependencySubstitution {
+                configurations.conf.resolutionStrategy.dependencySubstitution {
                     substitute module("org.utils:api:1.5") with project(":api")
-                }
-
-                task check(dependsOn: configurations.compile) << {
-                    def files = configurations.compile.files
-                    assert files*.name.sort() == ["api.jar", "conf.txt"]
                 }
             }
 """
 
         when:
-        succeeds "impl:check"
+        run ":impl:checkDeps"
 
         then:
-        executedAndNotSkipped ":api:jar"
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("org.utils:api:1.5", "project :api", "depsub:api:") {
+                    configuration = 'conf'
+                    selectedByRule()
+                }
+            }
+        }
     }
 
     void "replacing external module dependency with project dependency keeps the original transitivity"()
@@ -764,26 +762,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                 configurations.conf.resolutionStrategy.dependencySubstitution {
                     substitute module("org.utils:impl") with project(":impl")
                 }
-
-                task check(dependsOn: configurations.conf) << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 1
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(moduleId("org.utils", "impl", "1.5"))
-                        it.selected.componentId == projectId(":impl")
-                        !it.selected.selectionReason.forced &&
-                        it.selected.selectionReason.selectedByRule
-                    }
-                }
             }
 """
 
         when:
-        succeeds "test:check"
+        run ":test:checkDeps"
 
         then:
-        notExecuted ":api:jar"
+        resolve.expectGraph {
+            root(":test", "depsub:test:") {
+                edge("org.utils:impl:1.5", "project :impl", "depsub:impl:") {
+                    selectedByRule()
+                }
+            }
+        }
     }
 
     void "external dependency substituted for a project dependency participates in conflict resolution"()
@@ -805,91 +797,100 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     substitute project(":api") with module("org.utils:api:1.6")
                 }
 
-                task check << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 2
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(projectId(":api")) &&
-                        it.selected.componentId == moduleId("org.utils", "api", "2.0") &&
-                        !it.selected.selectionReason.forced &&
-                        !it.selected.selectionReason.selectedByRule &&
-                        it.selected.selectionReason.conflictResolution
-                    }
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(moduleId("org.utils", "api", "2.0")) &&
-                        it.selected.componentId == moduleId("org.utils", "api", "2.0") &&
-                        !it.selected.selectionReason.forced &&
-                        !it.selected.selectionReason.selectedByRule &&
-                        it.selected.selectionReason.conflictResolution
-                    }
+                task check {
+                    doLast {
+                        def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
+                        assert deps.size() == 2
+                        assert deps.find {
+                            it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
+                            it.requested.matchesStrictly(projectId(":api")) &&
+                            it.selected.componentId == moduleId("org.utils", "api", "2.0") &&
+                            !it.selected.selectionReason.forced &&
+                            !it.selected.selectionReason.selectedByRule &&
+                            it.selected.selectionReason.conflictResolution
+                        }
+                        assert deps.find {
+                            it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
+                            it.requested.matchesStrictly(moduleId("org.utils", "api", "2.0")) &&
+                            it.selected.componentId == moduleId("org.utils", "api", "2.0") &&
+                            !it.selected.selectionReason.forced &&
+                            !it.selected.selectionReason.selectedByRule &&
+                            it.selected.selectionReason.conflictResolution
+                        }
 
-                    def resolvedDeps = configurations.conf.resolvedConfiguration.firstLevelModuleDependencies
-                    resolvedDeps.size() == 1
-                    resolvedDeps[0].module.id == moduleId("org.utils", "api", "2.0")
+                        def resolvedDeps = configurations.conf.resolvedConfiguration.firstLevelModuleDependencies
+                        resolvedDeps.size() == 1
+                        resolvedDeps[0].module.id == moduleId("org.utils", "api", "2.0")
+                    }
                 }
             }
 """
 
-        expect:
-        succeeds "impl:check"
+        when:
+        run ":impl:checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                module("org.utils:api:2.0")
+                edge("project :api", "org.utils:api:2.0").byConflictResolution()
+            }
+        }
     }
 
-    @Unroll
-    void "project dependency substituted for an external dependency participates in conflict resolution (version #apiProjectVersion)"()
+    void "project dependency substituted for an external dependency participates in conflict resolution"()
     {
-        mavenRepo.module("org.utils", "api", '2.0').publish()
-        settingsFile << 'include "api", "impl"'
+        mavenRepo.module("org.utils", "dep1", '2.0').publish()
+        mavenRepo.module("org.utils", "dep2", '2.0').publish()
+        settingsFile << 'include "impl", "dep1", "dep2"'
 
         buildFile << """
             $common
 
-            project(":api") {
+            project(":dep1") {
                 group "org.utils"
-                version = $apiProjectVersion
+                version = '1.6'
+            }
+
+            project(":dep2") {
+                group "org.utils"
+                version = '3.0'
+
+                jar.version = '3.0'
             }
 
             project(":impl") {
                 dependencies {
-                    conf "org.utils:api:1.5"
-                    conf "org.utils:api:2.0"
+                    conf "org.utils:dep1:1.5"
+                    conf "org.utils:dep1:2.0"
+
+                    conf "org.utils:dep2:1.5"
+                    conf "org.utils:dep2:2.0"
                 }
 
                 configurations.conf.resolutionStrategy.dependencySubstitution {
-                    substitute module("org.utils:api:1.5") with project(":api")
-                }
-
-                task check << {
-                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                    assert deps.size() == 2
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(moduleId("org.utils", "api", "1.5")) &&
-                        it.selected.componentId == $winner &&
-                        !it.selected.selectionReason.forced &&
-                        it.selected.selectionReason.selectedByRule == $selectedByRule &&
-                        it.selected.selectionReason.conflictResolution
-                    }
-                    assert deps.find {
-                        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
-                        it.requested.matchesStrictly(moduleId("org.utils", "api", "2.0")) &&
-                        it.selected.componentId == $winner &&
-                        !it.selected.selectionReason.forced &&
-                        it.selected.selectionReason.selectedByRule == $selectedByRule &&
-                        it.selected.selectionReason.conflictResolution
-                    }
+                    substitute module("org.utils:dep1:1.5") with project(":dep1")
+                    substitute module("org.utils:dep2:1.5") with project(":dep2")
                 }
             }
 """
 
-        expect:
-        succeeds "impl:check"
+        when:
+        run ":impl:checkDeps"
 
-        where:
-        apiProjectVersion | winner                                | selectedByRule
-        "1.6"             | 'moduleId("org.utils", "api", "2.0")' | false
-        "3.0"             | 'projectId(":api")'                   | true
+        then:
+        resolve.expectGraph {
+            root(":impl", "depsub:impl:") {
+                edge("org.utils:dep1:1.5", "org.utils:dep1:2.0").byConflictResolution()
+                edge("org.utils:dep1:2.0", "org.utils:dep1:2.0")
+
+                edge("org.utils:dep2:1.5", "project :dep2", "org.utils:dep2:3.0") {
+                    selectedByRule().byConflictResolution()
+                }
+                edge("org.utils:dep2:2.0", "org.utils:dep2:3.0")
+
+            }
+        }
     }
 
     void "can blacklist a version"()
@@ -909,20 +910,21 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             configurations.conf.resolutionStrategy.dependencySubstitution {
                 substitute module('org.utils:a:1.2') with module('org.utils:a:1.4')
             }
-
-            task check << {
-                def modules = configurations.conf.incoming.resolutionResult.allComponents.findAll { it.id instanceof ModuleComponentIdentifier } as List
-                def a = modules.find { it.id.module == 'a' }
-                assert a.id.version == '1.4'
-                assert a.selectionReason.conflictResolution
-                assert a.selectionReason.selectedByRule
-                assert !a.selectionReason.forced
-                assert a.selectionReason.description == 'selected by rule and conflict resolution'
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                module("org.utils:b:1.3") {
+                    edge("org.utils:a:1.3", "org.utils:a:1.4").selectedByRule().byConflictResolution()
+                }
+                edge("org.utils:a:1.2", "org.utils:a:1.4")
+
+            }
+        }
     }
 
     void "can blacklist a version that is not used"()
@@ -941,19 +943,20 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             configurations.conf.resolutionStrategy.dependencySubstitution {
                 substitute module('org.utils:a:1.2') with module('org.utils:a:1.2.1')
             }
-
-            task check << {
-                def modules = configurations.conf.incoming.resolutionResult.allComponents.findAll { it.id instanceof ModuleComponentIdentifier } as List
-                def a = modules.find { it.id.module == 'a' }
-                assert a.id.version == '1.3'
-                assert a.selectionReason.conflictResolution
-                assert !a.selectionReason.selectedByRule
-                assert !a.selectionReason.forced
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                module("org.utils:b:1.3") {
+                    module("org.utils:a:1.3")
+                }
+                edge("org.utils:a:1.2", "org.utils:a:1.3").byConflictResolution()
+            }
+        }
     }
 
     def "can use custom versioning scheme"()
@@ -972,18 +975,17 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     it.useTarget group: it.requested.group, name: it.requested.module, version: '1.3'
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                assert deps.size() == 1
-                deps[0].requested.version == 'default'
-                deps[0].selected.id.version == '1.3'
-                deps[0].selected.selectionReason.selectedByRule
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:api:default", "org.utils:api:1.3").selectedByRule()
+            }
+        }
     }
 
     def "can use custom versioning scheme for transitive dependencies"()
@@ -1003,19 +1005,19 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                     it.useTarget group: it.requested.group, name: it.requested.module, version: '1.3'
                 }
             }
-
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                assert deps.size() == 2
-                def api = deps.find { it.requested.module == 'api' }
-                api.requested.version == 'default'
-                api.selected.id.version == '1.3'
-                api.selected.selectionReason.selectedByRule
-            }
 """
 
-        expect:
-        succeeds "check"
+        when:
+        run "checkDeps"
+
+        then:
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                module("org.utils:impl:1.3") {
+                    edge("org.utils:api:default", "org.utils:api:1.3").selectedByRule()
+                }
+            }
+        }
     }
 
     void "rule selects unavailable version"()
@@ -1033,20 +1035,23 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                 substitute module('org.utils:api:1.3') with module('org.utils:api:1.123.15')
             }
 
-            task check << {
-                def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
-                assert deps.size() == 1
-                assert deps[0].attempted.group == 'org.utils'
-                assert deps[0].attempted.module == 'api'
-                assert deps[0].attempted.version == '1.123.15'
-                assert deps[0].attemptedReason.selectedByRule
-                assert deps[0].failure.message.contains('1.123.15')
-                assert deps[0].requested.version == '1.3'
+            task check {
+                doLast {
+                    def deps = configurations.conf.incoming.resolutionResult.allDependencies as List
+                    assert deps.size() == 1
+                    assert deps[0].attempted.group == 'org.utils'
+                    assert deps[0].attempted.module == 'api'
+                    assert deps[0].attempted.version == '1.123.15'
+                    assert deps[0].attemptedReason.selectedByRule
+                    assert deps[0].failure.message.contains('1.123.15')
+                    assert deps[0].requested.version == '1.3'
+                }
             }
 """
 
         when:
-        fails "check", "resolveConf"
+        succeeds "check"
+        fails "checkDeps"
 
         then:
         failure.assertResolutionFailure(":conf")
@@ -1091,9 +1096,11 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
                 }
             }
 
-            task check << {
-                configurations.conf.resolve()
-                assert requested == ['impl:1.3', 'foo:2.0', 'bar:2.0', 'api:1.3', 'api:1.5']
+            task check {
+                doLast {
+                    configurations.conf.resolve()
+                    assert requested == ['impl:1.3', 'foo:2.0', 'bar:2.0', 'api:1.3', 'api:1.5']
+                }
             }
 """
 
@@ -1129,13 +1136,13 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 """
 
         when:
-        fails "resolveConf"
+        fails "checkDeps"
 
         then:
         failure.assertResolutionFailure(":conf")
                 .assertHasCause("Could not resolve org.utils:impl:1.3.")
                 .assertHasCause("Unhappy :(")
-                .assertFailedDependencyRequiredBy(":root:1.0")
+                .assertFailedDependencyRequiredBy("project :")
     }
 
     void "reasonable error message when attempting to substitute with an unversioned module selector"() {
@@ -1155,7 +1162,7 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 """
 
         when:
-        fails "dependencies"
+        fails "checkDeps"
 
         then:
         failure.assertHasCause("Must specify version for target of dependency substitution")
@@ -1178,7 +1185,7 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 """
 
         when:
-        fails "dependencies"
+        fails "checkDeps"
 
         then:
         failure.assertHasCause("Cannot convert the provided notation to an object of type ComponentSelector: :foo:bar:baz:")
@@ -1204,7 +1211,7 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 """
 
         when:
-        fails "dependencies"
+        fails "checkDeps"
 
         then:
         failure.assertHasCause("Must specify version for target of dependency substitution")
@@ -1226,26 +1233,18 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             configurations.conf.resolutionStrategy.dependencySubstitution {
                 substitute module('org.utils:a:1.2') with module('org.utils:b:2.1')
             }
-
-            task check << {
-                def modules = configurations.conf.incoming.resolutionResult.allComponents.findAll { it.id instanceof ModuleComponentIdentifier } as List
-                assert !modules.find { it.id.module == 'a' }
-                def b = modules.find { it.id.module == 'b' }
-                assert b.id.version == '2.1'
-                assert b.selectionReason.conflictResolution
-                assert b.selectionReason.selectedByRule
-                assert !b.selectionReason.forced
-                assert b.selectionReason.description == 'selected by rule and conflict resolution'
-            }
 """
 
         when:
-        succeeds "check", "dependencies"
+        run "checkDeps"
 
         then:
-        output.contains """conf
-+--- org.utils:a:1.2 -> org.utils:b:2.1
-\\--- org.utils:b:2.0 -> 2.1"""
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org.utils:a:1.2", "org.utils:b:2.1").selectedByRule().byConflictResolution()
+                edge("org.utils:b:2.0", "org.utils:b:2.1")
+            }
+        }
     }
 
     def "can substitute module group"()
@@ -1272,14 +1271,21 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 """
 
         when:
-        succeeds "dependencies"
+        run "checkDeps"
 
         then:
-        output.contains """
-+--- org:a:1.0 -> 2.0
-|    \\--- org:c:1.0
-\\--- foo:b:1.0 -> org:b:1.0
-     \\--- org:a:2.0 (*)"""
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org:a:1.0", "org:a:2.0") {
+                    byConflictResolution()
+                    module("org:c:1.0")
+                }
+                edge("foo:b:1.0", "org:b:1.0") {
+                    selectedByRule()
+                    module("org:a:2.0")
+                }
+            }
+        }
     }
 
     def "can substitute module group, name and version"()
@@ -1303,15 +1309,23 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             }
 """
 
+
         when:
-        succeeds "dependencies"
+        run "checkDeps"
 
         then:
-        output.contains """
-+--- org:a:1.0 -> 2.0
-|    \\--- org:c:1.0
-\\--- foo:bar:baz -> org:b:1.0
-     \\--- org:a:2.0 (*)"""
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org:a:1.0", "org:a:2.0") {
+                    byConflictResolution()
+                    module("org:c:1.0")
+                }
+                edge("foo:bar:baz", "org:b:1.0") {
+                    selectedByRule()
+                    module("org:a:2.0")
+                }
+            }
+        }
     }
 
     def "provides decent feedback when target module incorrectly specified"()
@@ -1329,7 +1343,7 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
 """
 
         when:
-        fails "dependencies"
+        fails "checkDeps"
 
         then:
         failure.assertResolutionFailure(":conf").assertHasCause("Invalid format: 'foobar'")
@@ -1353,17 +1367,23 @@ class DependencySubstitutionRulesIntegrationTest extends AbstractIntegrationSpec
             }
 """
 
+
         when:
-        succeeds "dependencies"
+        run "checkDeps"
 
         then:
-        output.contains """
-conf
-+--- org:a:1.0 -> org:c:2.0
-\\--- org:a:2.0
-     \\--- org:b:2.0
-          \\--- org:c:2.0
-"""
+        resolve.expectGraph {
+            root(":", ":depsub:") {
+                edge("org:a:1.0", "org:c:2.0") {
+                    byConflictResolution()
+                }
+                module("org:a:2.0") {
+                    module("org:b:2.0") {
+                        module("org:c:2.0")
+                    }
+                }
+            }
+        }
     }
 
     String getCommon() {
@@ -1380,12 +1400,7 @@ conf
 
             task jar(type: Jar) { baseName = project.name }
             artifacts { conf jar }
-
-            task resolveConf(dependsOn: configurations.conf) << { configurations.conf.files }
         }
-
-        //resolving the configuration at the end:
-        gradle.startParameter.taskNames += 'resolveConf'
 
         def moduleId(String group, String name, String version) {
             return org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier.newId(group, name, version)

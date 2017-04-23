@@ -23,14 +23,11 @@ tasks.remove(jar)
 
 tasks.withType(AbstractArchiveTask) {
     baseName "gradle"
+    version = baseVersion
 
     // The CI server looks for the distributions at this location
     destinationDir = rootProject.distsDir
     clean.delete archivePath
-}
-
-dependencies {
-    testCompile libraries.groovy
 }
 
 configurations {
@@ -40,18 +37,27 @@ configurations {
 daemonIntegTest.enabled = false
 
 evaluationDependsOn ":docs"
+evaluationDependsOn ':versionInfo'
 
 ext {
     zipRootFolder = "gradle-$version"
+    testZipRootFolder = "gradle-$testedVersion"
+
+    versionInfo = copySpec {
+        into('lib') {
+            from(project(':versionInfo').jar)
+        }
+    }
+
+    testVersionInfo = copySpec {
+        into("lib") {
+            from project(':versionInfo').testVersionInfoJar
+        }
+    }
 
     binDistImage = copySpec {
-        from('src/toplevel') {
-            exclude 'media/**'
-            expand(version: version)
-        }
-        from('src/toplevel') {
-            include 'media/**'
-        }
+        from("$rootDir/LICENSE")
+        from('src/toplevel')
         from project(':docs').outputs.distDocs
         into('bin') {
             from { project(':launcher').startScripts.outputs.files }
@@ -60,9 +66,6 @@ ext {
         into('lib') {
             from rootProject.configurations.runtime
             into('plugins') {
-                into('sonar') {
-                    from rootProject.configurations.sonar - rootProject.configurations.runtime
-                }
                 from rootProject.configurations.gradlePlugins - rootProject.configurations.runtime
             }
         }
@@ -70,6 +73,7 @@ ext {
 
     allDistImage = copySpec {
         with binDistImage
+        with versionInfo
         groovyProjects.each { project ->
             into("src/$project.projectDir.name") {
                 from project.sourceSets.main.allSource
@@ -95,6 +99,15 @@ task binZip(type: Zip) {
     classifier = 'bin'
     into(zipRootFolder) {
         with binDistImage
+        with versionInfo
+    }
+}
+
+task testBinZip(type: Zip) {
+    classifier = 'test-bin'
+    into(testZipRootFolder) {
+        with binDistImage
+        with testVersionInfo
     }
 }
 
@@ -123,7 +136,7 @@ task srcZip(type: Zip) {
 
 task outputsZip(type: Zip) {
     archiveName "outputs.zip"
-    from rootProject.createBuildReceipt
+    from project(':versionInfo').createBuildReceipt
     ["all", "bin", "src"].each { from(tasks["${it}Zip"]) }
 }
 
@@ -131,10 +144,6 @@ artifacts {
     dists allZip, binZip, srcZip
 }
 
-integTest {
-    inputs.files allZip, binZip, srcZip
-}
-
-java9IntegTest {
-    inputs.files allZip, binZip, srcZip
+integTestTasks.all {
+    requiresDists = true
 }

@@ -16,21 +16,22 @@
 
 package org.gradle.plugins.ide.eclipse
 
-import org.gradle.api.internal.project.DefaultProject
 import org.gradle.internal.reflect.Instantiator
 import org.gradle.plugins.ide.eclipse.model.Facet
 import org.gradle.plugins.ide.eclipse.model.Facet.FacetType
 import org.gradle.plugins.ide.eclipse.model.WbProperty
 import org.gradle.plugins.ide.eclipse.model.WbResource
-import org.gradle.util.TestUtil
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import spock.lang.Issue
-import spock.lang.Specification
 import spock.lang.Unroll
 
-class EclipseWtpPluginTest extends Specification {
+class EclipseWtpPluginTest extends AbstractProjectBuilderSpec {
 
-    private final DefaultProject project = TestUtil.createRootProject()
-    private final EclipseWtpPlugin wtpPlugin = new EclipseWtpPlugin(project.services.get(Instantiator))
+    private EclipseWtpPlugin wtpPlugin
+
+    def setup() {
+        wtpPlugin = new EclipseWtpPlugin(project.services.get(Instantiator))
+    }
 
     def "has description"() {
         when:
@@ -66,7 +67,7 @@ class EclipseWtpPluginTest extends Specification {
         [project.tasks.cleanEclipseWtpComponent, project.tasks.cleanEclipseWtpFacet].each {
             assert project.tasks.cleanEclipseWtp.dependsOn.contains(it)
         }
-        checkEclipseClasspath([project.configurations.testRuntime])
+        checkEclipseClasspath([project.configurations.compileClasspath, project.configurations.runtimeClasspath, project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath])
         checkEclipseWtpComponentForJava()
         checkEclipseWtpFacet([
                 new Facet(FacetType.fixed, 'jst.java', null),
@@ -84,7 +85,7 @@ class EclipseWtpPluginTest extends Specification {
         [project.tasks.cleanEclipseWtpComponent, project.tasks.cleanEclipseWtpFacet].each {
             assert project.tasks.cleanEclipseWtp.dependsOn.contains(it)
         }
-        checkEclipseClasspath([project.configurations.testRuntime])
+        checkEclipseClasspath([project.configurations.compileClasspath, project.configurations.runtimeClasspath, project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath])
         checkEclipseWtpComponentForJava()
         checkEclipseWtpFacet([
                 new Facet(FacetType.fixed, 'jst.java', null),
@@ -116,14 +117,14 @@ class EclipseWtpPluginTest extends Specification {
         when:
         project.apply(plugin: 'war')
         project.sourceCompatibility = 1.5
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
 
         then:
         [project.cleanEclipseWtpComponent, project.cleanEclipseWtpFacet].each {
             assert project.tasks.cleanEclipseWtp.dependsOn.contains(it)
         }
 
-        checkEclipseClasspath([project.configurations.testRuntime])
+        checkEclipseClasspath([project.configurations.compileClasspath, project.configurations.runtimeClasspath, project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath])
         checkEclipseWtpComponentForWar()
         checkEclipseWtpFacet([
                 new Facet(FacetType.fixed, "jst.java", null),
@@ -134,7 +135,7 @@ class EclipseWtpPluginTest extends Specification {
 
     def applyFirstToWarProject_shouldHaveWebProjectAndClasspathTask() {
         when:
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
         project.apply(plugin: 'war')
         project.sourceCompatibility = 1.8
 
@@ -143,7 +144,7 @@ class EclipseWtpPluginTest extends Specification {
             assert project.tasks.cleanEclipseWtp.dependsOn.contains(it)
         }
 
-        checkEclipseClasspath([project.configurations.testRuntime])
+        checkEclipseClasspath([project.configurations.compileClasspath, project.configurations.runtimeClasspath, project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath])
         checkEclipseWtpComponentForWar()
         checkEclipseWtpFacet([
                 new Facet(FacetType.fixed, "jst.java", null),
@@ -155,7 +156,7 @@ class EclipseWtpPluginTest extends Specification {
     def "can add custom facets to war default facets"() {
         when:
         project.apply(plugin: 'war')
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
         project.sourceCompatibility = 1.4
 
         project.eclipse.wtp {
@@ -177,7 +178,7 @@ class EclipseWtpPluginTest extends Specification {
     def "wb resource honors web app dir even if configured after plugin appliance"() {
         when:
         project.apply(plugin: 'war')
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
         project.webAppDirName = 'foo'
 
         then:
@@ -187,7 +188,7 @@ class EclipseWtpPluginTest extends Specification {
     def "web app dir should not disappear while manually adding a wb resource"() {
         when:
         project.apply(plugin: 'war')
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
         project.webAppDirName = 'foo'
 
         project.eclipse.wtp {
@@ -205,7 +206,7 @@ class EclipseWtpPluginTest extends Specification {
         when:
         plugs.each { p ->
             if (p == 'eclipse-wtp') {
-                wtpPlugin.apply(project)
+                project.apply(plugin: 'eclipse-wtp')
             } else {
                 project.apply(plugin: p)
             }
@@ -217,7 +218,7 @@ class EclipseWtpPluginTest extends Specification {
         }
 
         if (plugs.contains('java')) {
-            checkEclipseClasspath([project.configurations.testRuntime])
+            checkEclipseClasspath([project.configurations.compileClasspath, project.configurations.runtimeClasspath, project.configurations.testCompileClasspath, project.configurations.testRuntimeClasspath])
             checkEclipseWtpComponentForEar(project.sourceSets.main.allSource.srcDirs)
         } else {
             checkEclipseClasspath([])
@@ -245,7 +246,7 @@ class EclipseWtpPluginTest extends Specification {
     def "can add custom facets to ear project"() {
         when:
         project.apply(plugin: 'ear')
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
 
         project.eclipse.wtp {
             facet {
@@ -355,7 +356,7 @@ class EclipseWtpPluginTest extends Specification {
     def applyToEarProjectWithoutJavaPlugin_shouldUseAppDirInWtpComponentSource() {
         when:
         project.apply(plugin: 'ear')
-        wtpPlugin.apply(project)
+        project.apply(plugin: 'eclipse-wtp')
         then:
         project.eclipse.wtp.component.sourceDirs == [project.file(project.appDirName)] as Set
     }

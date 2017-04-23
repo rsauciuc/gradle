@@ -18,14 +18,15 @@ package org.gradle.api.tasks.diagnostics.internal.graph
 
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.SimpleDependency
 import org.gradle.internal.graph.GraphRenderer
-import org.gradle.logging.TestStyledTextOutput
+import org.gradle.internal.logging.text.TestStyledTextOutput
 import spock.lang.Specification
 
 class DependencyGraphRendererSpec extends Specification {
 
     private textOutput = new TestStyledTextOutput().ignoreStyle()
     private graphRenderer = new GraphRenderer(textOutput)
-    private renderer = new DependencyGraphRenderer(graphRenderer, new SimpleNodeRenderer())
+    private legendRenderer = new LegendRenderer(textOutput)
+    private renderer = new DependencyGraphRenderer(graphRenderer, new SimpleNodeRenderer(), legendRenderer)
 
     def "renders graph"() {
         def root = new SimpleDependency("root")
@@ -41,7 +42,7 @@ class DependencyGraphRendererSpec extends Specification {
 
         when:
         renderer.render(root)
-        renderer.printLegend()
+        legendRenderer.printLegend()
 
         then:
         textOutput.value.readLines() == [
@@ -66,7 +67,7 @@ class DependencyGraphRendererSpec extends Specification {
 
         when:
         renderer.render(root)
-        renderer.printLegend()
+        legendRenderer.printLegend()
 
         then:
         textOutput.value.readLines() == [

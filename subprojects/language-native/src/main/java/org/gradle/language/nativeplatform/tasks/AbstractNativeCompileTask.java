@@ -15,11 +15,19 @@
  */
 package org.gradle.language.nativeplatform.tasks;
 
+import com.google.common.collect.Lists;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Incubating;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.tasks.*;
+import org.gradle.api.internal.changedetection.changes.DiscoveredInputRecorder;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.WorkResult;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 import org.gradle.internal.Cast;
 import org.gradle.internal.operations.logging.BuildOperationLogger;
@@ -36,8 +44,10 @@ import org.gradle.nativeplatform.toolchain.internal.PlatformToolProvider;
 
 import javax.inject.Inject;
 import java.io.File;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 /**
@@ -63,6 +73,7 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
                 return NativeToolChainInternal.Identifier.identify(toolChain, targetPlatform);
             }
         });
+        dependsOn(includes);
     }
 
     @Inject
@@ -88,8 +99,8 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
         spec.args(getCompilerArgs());
         spec.setPositionIndependentCode(isPositionIndependentCode());
         spec.setIncrementalCompile(inputs.isIncremental());
+        spec.setDiscoveredInputRecorder((DiscoveredInputRecorder) inputs);
         spec.setOperationLogger(operationLogger);
-        spec.setIncrementalInputs(inputs);
 
         configureSpec(spec);
 
@@ -113,6 +124,7 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
     /**
      * The tool chain used for compilation.
      */
+    @Internal
     public NativeToolChain getToolChain() {
         return toolChain;
     }
@@ -124,6 +136,7 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
     /**
      * The platform being targeted.
      */
+    @Nested
     public NativePlatform getTargetPlatform() {
         return targetPlatform;
     }
@@ -159,17 +172,19 @@ public abstract class AbstractNativeCompileTask extends DefaultTask {
     /**
      * Returns the header directories to be used for compilation.
      */
-    @Input
+    @Internal
     public FileCollection getIncludes() {
         return includes;
     }
 
-    /**
-     * Returns an empty file collection built by all build dependencies from the include path.
-     */
-    @InputFiles
-    public FileCollection getIncludeDependencies() {
-        return getProject().files().builtBy(includes.getBuildDependencies());
+    @Input
+    protected Collection<String> getIncludePaths() {
+        Set<File> roots = includes.getFiles();
+        List<String> includePaths = Lists.newArrayListWithCapacity(roots.size());
+        for (File root : roots) {
+            includePaths.add(root.getAbsolutePath());
+        }
+        return includePaths;
     }
 
     /**

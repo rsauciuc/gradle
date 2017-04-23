@@ -16,11 +16,8 @@
 
 package org.gradle.tooling.internal.consumer.connection;
 
-import org.gradle.api.Action;
 import org.gradle.api.Transformer;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
-import org.gradle.tooling.internal.adapter.SourceObjectMapping;
-import org.gradle.tooling.internal.consumer.converters.TaskPropertyHandlerFactory;
 import org.gradle.tooling.internal.consumer.parameters.BuildCancellationTokenAdapter;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping;
@@ -31,13 +28,12 @@ import org.gradle.tooling.internal.protocol.InternalUnsupportedModelException;
 import org.gradle.tooling.internal.protocol.ModelIdentifier;
 import org.gradle.tooling.model.internal.Exceptions;
 
-public class CancellableModelBuilderBackedModelProducer implements ModelProducer {
-    private final ProtocolToModelAdapter adapter;
-    private final VersionDetails versionDetails;
-    private final ModelMapping modelMapping;
+public class CancellableModelBuilderBackedModelProducer extends HasCompatibilityMapping implements ModelProducer {
+    protected final ProtocolToModelAdapter adapter;
+    protected final VersionDetails versionDetails;
+    protected final ModelMapping modelMapping;
     private final InternalCancellableConnection builder;
-    private final Transformer<RuntimeException, RuntimeException> exceptionTransformer;
-    private final Action<SourceObjectMapping> mapper;
+    protected final Transformer<RuntimeException, RuntimeException> exceptionTransformer;
 
     public CancellableModelBuilderBackedModelProducer(ProtocolToModelAdapter adapter, VersionDetails versionDetails, ModelMapping modelMapping, InternalCancellableConnection builder, Transformer<RuntimeException, RuntimeException> exceptionTransformer) {
         this.adapter = adapter;
@@ -45,7 +41,6 @@ public class CancellableModelBuilderBackedModelProducer implements ModelProducer
         this.modelMapping = modelMapping;
         this.builder = builder;
         this.exceptionTransformer = exceptionTransformer;
-        mapper = new TaskPropertyHandlerFactory().forVersion(versionDetails);
     }
 
     public <T> T produceModel(Class<T> type, ConsumerOperationParameters operationParameters) {
@@ -61,6 +56,6 @@ public class CancellableModelBuilderBackedModelProducer implements ModelProducer
         } catch (RuntimeException e) {
             throw exceptionTransformer.transform(e);
         }
-        return adapter.adapt(type, result.getModel(), mapper);
+        return applyCompatibilityMapping(adapter.builder(type), operationParameters).build(result.getModel());
     }
 }

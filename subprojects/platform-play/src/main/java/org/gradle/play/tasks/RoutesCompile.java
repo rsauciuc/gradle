@@ -18,6 +18,8 @@ package org.gradle.play.tasks;
 
 import org.gradle.api.Incubating;
 import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.SourceTask;
 import org.gradle.api.tasks.TaskAction;
@@ -105,11 +107,13 @@ public class RoutesCompile extends SourceTask {
         new CleaningPlayToolCompiler<RoutesCompileSpec>(getCompiler(), getOutputs()).execute(spec);
     }
 
+    @Internal
     private Compiler<RoutesCompileSpec> getCompiler() {
         ToolProvider select = ((PlayToolChainInternal) getToolChain()).select(platform);
         return select.newCompiler(RoutesCompileSpec.class);
     }
 
+    @Internal
     public boolean isJavaProject() {
         return false;
     }
@@ -123,7 +127,6 @@ public class RoutesCompile extends SourceTask {
      *
      * @return The tool chain.
      */
-    @Incubating
     @Inject
     public PlayToolChain getToolChain() {
         throw new UnsupportedOperationException();
@@ -134,6 +137,7 @@ public class RoutesCompile extends SourceTask {
      *
      * @return The fork options for the Routes compiler.
      */
+    @Nested
     public BaseForkOptions getForkOptions() {
         if (forkOptions == null) {
             forkOptions = new BaseForkOptions();

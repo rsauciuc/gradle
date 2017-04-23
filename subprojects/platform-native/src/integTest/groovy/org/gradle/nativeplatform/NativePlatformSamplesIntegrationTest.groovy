@@ -19,17 +19,15 @@ import org.gradle.integtests.fixtures.Sample
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import org.junit.Rule
 
-import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.GccCompatible
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.GCC_COMPATIBLE
 
 @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-@LeaksFileHandles
 class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
     @Rule final TestNameTestDirectoryProvider testDirProvider = new TestNameTestDirectoryProvider()
     @Rule public final Sample cppLib = sample(testDirProvider, 'cpp-lib')
@@ -41,6 +39,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
     @Rule public final Sample prebuilt = sample(testDirProvider, 'prebuilt')
     @Rule public final Sample targetPlatforms = sample(testDirProvider, 'target-platforms')
     @Rule public final Sample sourcesetVariant = sample(testDirectoryProvider, "sourceset-variant")
+    @Rule public final Sample customCheck = sample(testDirectoryProvider, "custom-check")
 
     private static Sample sample(TestDirectoryProvider testDirectoryProvider, String name) {
         return new Sample(testDirectoryProvider, "native-binaries/${name}", name)
@@ -61,8 +60,8 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         executedAndNotSkipped ":compileMainExecutableMainCpp", ":linkMainExecutable", ":stripMainExecutable", ":mainExecutable"
 
         and:
-        executable(cppExe.dir.file("build/binaries/mainExecutable/main")).exec().out == "Hello, World!\n"
-        installation(cppExe.dir.file("build/install/mainExecutable")).exec().out == "Hello, World!\n"
+        executable(cppExe.dir.file("build/exe/main/main")).exec().out == "Hello, World!\n"
+        installation(cppExe.dir.file("build/install/main")).exec().out == "Hello, World!\n"
 
         cleanup:
         toolChain.resetEnvironment()
@@ -79,7 +78,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         executedAndNotSkipped ":compileMainSharedLibraryMainCpp", ":linkMainSharedLibrary", ":mainSharedLibrary"
 
         and:
-        sharedLibrary(cppLib.dir.file("build/binaries/mainSharedLibrary/main")).assertExists()
+        sharedLibrary(cppLib.dir.file("build/libs/main/shared/main")).assertExists()
 
         when:
         sample cppLib
@@ -89,7 +88,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         executedAndNotSkipped ":compileMainStaticLibraryMainCpp", ":createMainStaticLibrary", ":mainStaticLibrary"
 
         and:
-        staticLibrary(cppLib.dir.file("build/binaries/mainStaticLibrary/main")).assertExists()
+        staticLibrary(cppLib.dir.file("build/libs/main/static/main")).assertExists()
     }
 
     def flavors() {
@@ -97,33 +96,33 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         sample flavors
 
         when:
-        run "installEnglishMainExecutable"
+        run "installMainEnglishExecutable"
 
         then:
-        executedAndNotSkipped ":compileHelloEnglishSharedLibraryHelloCpp", ":linkEnglishHelloSharedLibrary", ":helloEnglishSharedLibrary"
-        executedAndNotSkipped ":compileMainEnglishExecutableMainCpp", ":linkEnglishMainExecutable", ":mainEnglishExecutable"
+        executedAndNotSkipped ":compileHelloEnglishSharedLibraryHelloCpp", ":linkHelloEnglishSharedLibrary", ":helloEnglishSharedLibrary"
+        executedAndNotSkipped ":compileMainEnglishExecutableMainCpp", ":linkMainEnglishExecutable", ":mainEnglishExecutable"
 
         and:
-        executable(flavors.dir.file("build/binaries/mainExecutable/english/main")).assertExists()
-        sharedLibrary(flavors.dir.file("build/binaries/helloSharedLibrary/english/hello")).assertExists()
+        executable(flavors.dir.file("build/exe/main/english/main")).assertExists()
+        sharedLibrary(flavors.dir.file("build/libs/hello/shared/english/hello")).assertExists()
 
         and:
-        installation(flavors.dir.file("build/install/mainExecutable/english")).exec().out == "Hello world!\n"
+        installation(flavors.dir.file("build/install/main/english")).exec().out == "Hello world!\n"
 
         when:
         sample flavors
-        run "installFrenchMainExecutable"
+        run "installMainFrenchExecutable"
 
         then:
-        executedAndNotSkipped ":compileHelloFrenchSharedLibraryHelloCpp", ":linkFrenchHelloSharedLibrary", ":helloFrenchSharedLibrary"
-        executedAndNotSkipped ":compileMainFrenchExecutableMainCpp", ":linkFrenchMainExecutable", ":mainFrenchExecutable"
+        executedAndNotSkipped ":compileHelloFrenchSharedLibraryHelloCpp", ":linkHelloFrenchSharedLibrary", ":helloFrenchSharedLibrary"
+        executedAndNotSkipped ":compileMainFrenchExecutableMainCpp", ":linkMainFrenchExecutable", ":mainFrenchExecutable"
 
         and:
-        executable(flavors.dir.file("build/binaries/mainExecutable/french/main")).assertExists()
-        sharedLibrary(flavors.dir.file("build/binaries/helloSharedLibrary/french/hello")).assertExists()
+        executable(flavors.dir.file("build/exe/main/french/main")).assertExists()
+        sharedLibrary(flavors.dir.file("build/libs/hello/shared/french/hello")).assertExists()
 
         and:
-        installation(flavors.dir.file("build/install/mainExecutable/french")).exec().out == "Bonjour monde!\n"
+        installation(flavors.dir.file("build/install/main/french")).exec().out == "Bonjour monde!\n"
     }
 
     def variants() {
@@ -134,18 +133,18 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         run "assemble"
 
         then:
-        final debugX86 = executable(variants.dir.file("build/binaries/mainExecutable/x86Debug/main"))
-        final releaseX86 = executable(variants.dir.file("build/binaries/mainExecutable/x86Release/main"))
-        final debugX64 = executable(variants.dir.file("build/binaries/mainExecutable/x64Debug/main"))
-        final releaseX64 = executable(variants.dir.file("build/binaries/mainExecutable/x64Release/main"))
-        final debugIA64 = executable(variants.dir.file("build/binaries/mainExecutable/itaniumDebug/main"))
-        final releaseIA64 = executable(variants.dir.file("build/binaries/mainExecutable/itaniumRelease/main"))
+        final debugX86 = executable(variants.dir.file("build/exe/main/x86/debug/main"))
+        final releaseX86 = executable(variants.dir.file("build/exe/main/x86/release/main"))
+        final debugX64 = executable(variants.dir.file("build/exe/main/x64/debug/main"))
+        final releaseX64 = executable(variants.dir.file("build/exe/main/x64/release/main"))
+        final debugIA64 = executable(variants.dir.file("build/exe/main/itanium/debug/main"))
+        final releaseIA64 = executable(variants.dir.file("build/exe/main/itanium/release/main"))
 
-        debugX86.binaryInfo.arch.name == "x86"
+        debugX86.arch.name == "x86"
         debugX86.assertDebugFileExists()
         debugX86.exec().out == "Hello world!\n"
 
-        releaseX86.binaryInfo.arch.name == "x86"
+        releaseX86.arch.name == "x86"
         releaseX86.assertDebugFileDoesNotExist()
         releaseX86.exec().out == "Hello world!\n"
 
@@ -154,8 +153,8 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
             debugX64.assertDoesNotExist()
             releaseX64.assertDoesNotExist()
         } else {
-            debugX64.binaryInfo.arch.name == "x86_64"
-            releaseX64.binaryInfo.arch.name == "x86_64"
+            debugX64.arch.name == "x86_64"
+            releaseX64.arch.name == "x86_64"
         }
 
         // Itanium not built
@@ -171,7 +170,7 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         run "installMainExecutable"
 
         then:
-        executable(toolChains.dir.file("build/binaries/mainExecutable/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
+        executable(toolChains.dir.file("build/exe/main/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
     }
 
     def multiProject() {
@@ -185,12 +184,12 @@ class NativePlatformSamplesIntegrationTest extends AbstractInstalledToolChainInt
         ":exe:mainExecutable" in executedTasks
 
         and:
-        sharedLibrary(multiProject.dir.file("lib/build/binaries/mainSharedLibrary/main")).assertExists()
-        executable(multiProject.dir.file("exe/build/binaries/mainExecutable/main")).assertExists()
-        installation(multiProject.dir.file("exe/build/install/mainExecutable")).exec().out == "Hello, World!\n"
+        sharedLibrary(multiProject.dir.file("lib/build/libs/main/shared/main")).assertExists()
+        executable(multiProject.dir.file("exe/build/exe/main/main")).assertExists()
+        installation(multiProject.dir.file("exe/build/install/main")).exec().out == "Hello, World!\n"
     }
 
-    @RequiresInstalledToolChain(GccCompatible)
+    @RequiresInstalledToolChain(GCC_COMPATIBLE)
     def "target platforms"() {
         given:
         sample targetPlatforms
@@ -215,13 +214,13 @@ model {
 """
 
         when:
-        run "installArmMainExecutable", "installSparcMainExecutable"
+        run "installMainArmExecutable", "installMainSparcExecutable"
 
         then:
-        executable(targetPlatforms.dir.file("build/binaries/mainExecutable/arm/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
-        executable(targetPlatforms.dir.file("build/binaries/mainExecutable/arm/main")).binaryInfo.arch.isI386()
+        executable(targetPlatforms.dir.file("build/exe/main/arm/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
+        executable(targetPlatforms.dir.file("build/exe/main/arm/main")).arch.isI386()
 
-        executable(targetPlatforms.dir.file("build/binaries/mainExecutable/sparc/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
+        executable(targetPlatforms.dir.file("build/exe/main/sparc/main")).exec().out == "Hello from ${toolChain.typeDisplayName}!\n"
     }
 
     def prebuilt() {
@@ -237,11 +236,11 @@ model {
 
         then:
 
-        executable(prebuilt.dir.file("build/binaries/mainExecutable/debug/main")).exec().out ==
+        executable(prebuilt.dir.file("build/exe/main/debug/main")).exec().out ==
 """Built with Boost version: 1_55
 Util build type: DEBUG
 """
-        executable(prebuilt.dir.file("build/binaries/mainExecutable/release/main")).exec().out ==
+        executable(prebuilt.dir.file("build/exe/main/release/main")).exec().out ==
 """Built with Boost version: 1_55
 Util build type: RELEASE
 """
@@ -266,10 +265,30 @@ Util build type: RELEASE
         run "installMainExecutable", "tasks"
 
         then:
-        executedAndNotSkipped(":compileMainExecutableMainPlatform$platformName", ":installMainExecutable")
+        executedAndNotSkipped(":compileMainExecutableMainExecutablePlatform$platformName", ":installMainExecutable")
 
         and:
-        executable(sourcesetVariant.dir.file("build/binaries/mainExecutable/main")).assertExists()
-        installation(sourcesetVariant.dir.file("build/install/mainExecutable")).exec().out.contains("Attributes of '$platformName' platform")
+        executable(sourcesetVariant.dir.file("build/exe/main/main")).assertExists()
+        installation(sourcesetVariant.dir.file("build/install/main")).exec().out.contains("Attributes of '$platformName' platform")
+    }
+
+    def customcheck() {
+        given:
+        sample customCheck
+
+        when:
+        run 'check'
+
+        then:
+        executedAndNotSkipped(':myCustomCheck')
+
+        and:
+        sample customCheck
+
+        when:
+        run ':checkHelloSharedLibrary'
+
+        then:
+        executedAndNotSkipped(':myCustomCheck')
     }
 }

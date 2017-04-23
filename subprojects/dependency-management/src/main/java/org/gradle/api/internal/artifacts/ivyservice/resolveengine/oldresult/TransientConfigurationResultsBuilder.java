@@ -17,26 +17,34 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.oldresult;
 
+import org.gradle.api.artifacts.ModuleDependency;
 import org.gradle.api.internal.artifacts.DefaultResolvedDependency;
+import org.gradle.api.internal.artifacts.DependencyGraphNodeResult;
+import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
 import org.gradle.api.internal.artifacts.ResolvedConfigurationIdentifier;
 import org.gradle.api.internal.artifacts.ResolvedConfigurationIdentifierSerializer;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.SelectedArtifactResults;
 import org.gradle.api.internal.cache.BinaryStore;
 import org.gradle.api.internal.cache.Store;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.Factory;
+import org.gradle.internal.operations.BuildOperationProcessor;
 import org.gradle.internal.serialize.Decoder;
 import org.gradle.internal.serialize.Encoder;
-import org.gradle.util.Clock;
+import org.gradle.internal.time.Timer;
+import org.gradle.internal.time.Timers;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static com.google.common.collect.Sets.newHashSet;
 import static org.gradle.internal.UncheckedException.throwAsUncheckedException;
 
-//TODO SF unit coverage
+/**
+ * Serializes the transient parts of the resolved configuration results.
+ */
 public class TransientConfigurationResultsBuilder {
 
     private final static Logger LOG = Logging.getLogger(TransientConfigurationResultsBuilder.class);
@@ -50,56 +58,69 @@ public class TransientConfigurationResultsBuilder {
 
     private BinaryStore binaryStore;
     private Store<TransientConfigurationResults> cache;
-    private final ResolvedConfigurationIdentifierSerializer resolvedConfigurationIdentifierSerializer = new ResolvedConfigurationIdentifierSerializer();
+    private final BuildOperationProcessor buildOperationProcessor;
+    private final ResolvedConfigurationIdentifierSerializer resolvedConfigurationIdentifierSerializer;
     private BinaryStore.BinaryData binaryData;
 
-    public TransientConfigurationResultsBuilder(BinaryStore binaryStore, Store<TransientConfigurationResults> cache) {
+    public TransientConfigurationResultsBuilder(BinaryStore binaryStore, Store<TransientConfigurationResults> cache, ImmutableModuleIdentifierFactory moduleIdentifierFactory, BuildOperationProcessor buildOperationProcessor) {
+        this.resolvedConfigurationIdentifierSerializer = new ResolvedConfigurationIdentifierSerializer(moduleIdentifierFactory);
         this.binaryStore = binaryStore;
         this.cache = cache;
+        this.buildOperationProcessor = buildOperationProcessor;
     }
 
-    private void writeId(final byte type, final ResolvedConfigurationIdentifier... ids) {
+    public void resolvedDependency(final Long id, final ResolvedConfigurationIdentifier details) {
         binaryStore.write(new BinaryStore.WriteAction() {
+            @Override
             public void write(Encoder encoder) throws IOException {
-                encoder.writeByte(type);
-                for (ResolvedConfigurationIdentifier id : ids) {
-                    resolvedConfigurationIdentifierSerializer.write(encoder, id);
-                }
+                encoder.writeByte(NEW_DEP);
+                encoder.writeSmallLong(id);
+                resolvedConfigurationIdentifierSerializer.write(encoder, details);
             }
         });
     }
 
-    public void resolvedDependency(ResolvedConfigurationIdentifier id) {
-        writeId(NEW_DEP, id);
-    }
-
-    public void done(ResolvedConfigurationIdentifier id) {
-        writeId(ROOT, id);
+    public void done(final Long id) {
+        binaryStore.write(new BinaryStore.WriteAction() {
+            @Override
+            public void write(Encoder encoder) throws IOException {
+                encoder.writeByte(ROOT);
+                encoder.writeSmallLong(id);
+            }
+        });
         LOG.debug("Flushing resolved configuration data in {}. Wrote root {}.", binaryStore, id);
         binaryData = binaryStore.done();
     }
 
-    public void firstLevelDependency(ResolvedConfigurationIdentifier id) {
-        writeId(FIRST_LVL, id);
-    }
-
-    public void parentChildMapping(ResolvedConfigurationIdentifier parent, ResolvedConfigurationIdentifier child, final long artifactId) {
-        writeId(PARENT_CHILD, parent, child);
+    public void firstLevelDependency(final Long id) {
         binaryStore.write(new BinaryStore.WriteAction() {
+            @Override
             public void write(Encoder encoder) throws IOException {
-                encoder.writeLong(artifactId);
+                encoder.writeByte(FIRST_LVL);
+                encoder.writeSmallLong(id);
             }
         });
     }
 
-    public TransientConfigurationResults load(final ResolvedContentsMapping mapping) {
+    public void parentChildMapping(final Long parent, final Long child, final long artifactId) {
+        binaryStore.write(new BinaryStore.WriteAction() {
+            public void write(Encoder encoder) throws IOException {
+                encoder.writeByte(PARENT_CHILD);
+                encoder.writeSmallLong(parent);
+                encoder.writeSmallLong(child);
+                encoder.writeSmallLong(artifactId);
+            }
+        });
+    }
+
+    public TransientConfigurationResults load(final ResolvedGraphResults graphResults, final SelectedArtifactResults artifactResults) {
         synchronized (lock) {
             return cache.load(new Factory<TransientConfigurationResults>() {
                 public TransientConfigurationResults create() {
                     try {
                         return binaryData.read(new BinaryStore.ReadAction<TransientConfigurationResults>() {
                             public TransientConfigurationResults read(Decoder decoder) throws IOException {
-                                return deserialize(decoder, mapping);
+                                return deserialize(decoder, graphResults, artifactResults, buildOperationProcessor);
                             }
                         });
                     } finally {
@@ -114,42 +135,44 @@ public class TransientConfigurationResultsBuilder {
         }
     }
 
-    private TransientConfigurationResults deserialize(Decoder decoder, ResolvedContentsMapping mapping) {
-        Clock clock = new Clock();
-        Map<ResolvedConfigurationIdentifier, DefaultResolvedDependency> allDependencies = new HashMap<ResolvedConfigurationIdentifier, DefaultResolvedDependency>();
-        DefaultTransientConfigurationResults results = new DefaultTransientConfigurationResults();
+    private TransientConfigurationResults deserialize(Decoder decoder, ResolvedGraphResults graphResults, SelectedArtifactResults artifactResults, BuildOperationProcessor buildOperationProcessor) {
+        Timer clock = Timers.startTimer();
+        Map<Long, DefaultResolvedDependency> allDependencies = new HashMap<Long, DefaultResolvedDependency>();
+        Map<ModuleDependency, DependencyGraphNodeResult> firstLevelDependencies = new LinkedHashMap<ModuleDependency, DependencyGraphNodeResult>();
+        DependencyGraphNodeResult root;
         int valuesRead = 0;
         byte type = -1;
         try {
             while (true) {
                 type = decoder.readByte();
-                ResolvedConfigurationIdentifier id;
+                long id;
                 valuesRead++;
                 switch (type) {
                     case NEW_DEP:
-                        id = resolvedConfigurationIdentifierSerializer.read(decoder);
-                        allDependencies.put(id, new DefaultResolvedDependency(id.getId(), id.getConfiguration()));
+                        id = decoder.readSmallLong();
+                        ResolvedConfigurationIdentifier details = resolvedConfigurationIdentifierSerializer.read(decoder);
+                        allDependencies.put(id, new DefaultResolvedDependency(id, details, buildOperationProcessor));
                         break;
                     case ROOT:
-                        id = resolvedConfigurationIdentifierSerializer.read(decoder);
-                        results.root = allDependencies.get(id);
-                        if (results.root == null) {
+                        id = decoder.readSmallLong();
+                        root = allDependencies.get(id);
+                        if (root == null) {
                             throw new IllegalStateException(String.format("Unexpected root id %s. Seen ids: %s", id, allDependencies.keySet()));
                         }
-                        //root should be the last
-                        LOG.debug("Loaded resolved configuration results ({}) from {}", clock.getTime(), binaryStore);
-                        return results;
+                        //root should be the last entry
+                        LOG.debug("Loaded resolved configuration results ({}) from {}", clock.getElapsed(), binaryStore);
+                        return new DefaultTransientConfigurationResults(root, firstLevelDependencies);
                     case FIRST_LVL:
-                        id = resolvedConfigurationIdentifierSerializer.read(decoder);
+                        id = decoder.readSmallLong();
                         DefaultResolvedDependency dependency = allDependencies.get(id);
                         if (dependency == null) {
                             throw new IllegalStateException(String.format("Unexpected first level id %s. Seen ids: %s", id, allDependencies.keySet()));
                         }
-                        results.firstLevelDependencies.put(mapping.getModuleDependency(id), dependency);
+                        firstLevelDependencies.put(graphResults.getModuleDependency(id), dependency);
                         break;
                     case PARENT_CHILD:
-                        ResolvedConfigurationIdentifier parentId = resolvedConfigurationIdentifierSerializer.read(decoder);
-                        ResolvedConfigurationIdentifier childId = resolvedConfigurationIdentifierSerializer.read(decoder);
+                        long parentId = decoder.readSmallLong();
+                        long childId = decoder.readSmallLong();
                         DefaultResolvedDependency parent = allDependencies.get(parentId);
                         DefaultResolvedDependency child = allDependencies.get(childId);
                         if (parent == null) {
@@ -159,7 +182,7 @@ public class TransientConfigurationResultsBuilder {
                             throw new IllegalStateException(String.format("Unexpected child dependency id %s. Seen ids: %s", childId, allDependencies.keySet()));
                         }
                         parent.addChild(child);
-                        child.addParentSpecificArtifacts(parent, newHashSet(mapping.getArtifacts(decoder.readLong())));
+                        child.addParentSpecificArtifacts(parent, artifactResults.getArtifacts(decoder.readSmallLong()));
                         break;
                     default:
                         throw new IOException("Unknown value type read from stream: " + type);

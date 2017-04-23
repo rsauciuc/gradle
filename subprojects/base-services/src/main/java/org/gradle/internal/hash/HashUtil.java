@@ -15,10 +15,16 @@
  */
 package org.gradle.internal.hash;
 
+import com.google.common.hash.HashCode;
 import org.gradle.api.UncheckedIOException;
 import org.gradle.internal.UncheckedException;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
@@ -74,6 +80,14 @@ public class HashUtil {
         return createHash(scriptText, "MD5").asCompactString();
     }
 
+    public static String compactStringFor(HashCode hashCode) {
+        return compactStringFor(hashCode.asBytes());
+    }
+
+    public static String compactStringFor(byte[] digest) {
+        return new HashValue(digest).asCompactString();
+    }
+
     public static HashValue sha1(byte[] bytes) {
         return createHash(new ByteArrayInputStream(bytes), "SHA1");
     }
@@ -96,5 +110,24 @@ public class HashUtil {
 
     public static HashValue sha256(File file) {
         return createHash(file, "SHA-256");
+    }
+
+    public static int compareHashCodes(HashCode a, HashCode b) {
+        return compareHashCodes(a.asBytes(), b.asBytes());
+    }
+
+    public static int compareHashCodes(byte[] a, byte[] b) {
+        int result;
+        int len = a.length;
+        result = len - b.length;
+        if (result == 0) {
+            for (int idx = 0; idx < len; idx++) {
+                result = a[idx] - b[idx];
+                if (result != 0) {
+                    break;
+                }
+            }
+        }
+        return result;
     }
 }

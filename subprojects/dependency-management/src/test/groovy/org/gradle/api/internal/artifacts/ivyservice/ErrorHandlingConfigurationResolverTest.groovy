@@ -22,6 +22,7 @@ import org.gradle.api.artifacts.result.ResolutionResult
 import org.gradle.api.internal.artifacts.ConfigurationResolver
 import org.gradle.api.internal.artifacts.DefaultResolverResults
 import org.gradle.api.internal.artifacts.configurations.ConfigurationInternal
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.VisitedArtifactSet
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.projectresult.ResolvedLocalComponentsResult
 import org.gradle.api.specs.Specs
 import spock.lang.Specification
@@ -33,6 +34,7 @@ class ErrorHandlingConfigurationResolverTest extends Specification {
     private resolvedConfiguration = Mock(ResolvedConfiguration)
     private resolutionResult = Mock(ResolutionResult)
     private projectConfigResult = Mock(ResolvedLocalComponentsResult)
+    private visitedArtifactSet = Mock(VisitedArtifactSet)
     private context = Mock(ConfigurationInternal.class)
     private results = new DefaultResolverResults()
     private resolver = new ErrorHandlingConfigurationResolver(delegate);
@@ -41,23 +43,79 @@ class ErrorHandlingConfigurationResolverTest extends Specification {
         context.displayName >> "resolve context 'foo'"
     }
 
-    void "delegates to backing service"() {
+    void "delegates to backing service to resolve build dependencies"() {
         when:
-        resolver.resolve(context, results)
+        resolver.resolveBuildDependencies(context, results)
 
         then:
-        1 * delegate.resolve(context, results) >> {
-            results.resolved(resolutionResult, projectConfigResult)
+        1 * delegate.resolveBuildDependencies(context, results) >> {
+            results.graphResolved(resolutionResult, projectConfigResult, visitedArtifactSet)
         }
     }
 
-    void "wraps operations with the failure"() {
+    void "delegates to backing service to resolve graph"() {
+        when:
+        resolver.resolveGraph(context, results)
+
+        then:
+        1 * delegate.resolveGraph(context, results) >> {
+            results.graphResolved(resolutionResult, projectConfigResult, visitedArtifactSet)
+        }
+    }
+
+    void "delegates to backing service to resolve artifacts"() {
+        when:
+        resolver.resolveArtifacts(context, results)
+
+        then:
+        1 * delegate.resolveArtifacts(context, results) >> {
+            results.artifactsResolved(Stub(ResolvedConfiguration), Stub(VisitedArtifactSet))
+        }
+    }
+
+    void "wraps build dependency resolve failures"() {
         given:
         def failure = new RuntimeException()
-        delegate.resolve(context, results) >> { throw failure }
+        delegate.resolveBuildDependencies(context, results) >> { throw failure }
 
         when:
-        resolver.resolve(context, results)
+        resolver.resolveBuildDependencies(context, results)
+
+        then:
+        results.resolvedConfiguration.hasError()
+
+        failsWith(failure)
+            .when { results.resolvedConfiguration.rethrowFailure(); }
+            .when { results.resolvedConfiguration.getFiles(Specs.satisfyAll()); }
+            .when { results.resolvedConfiguration.getFirstLevelModuleDependencies(); }
+            .when { results.resolvedConfiguration.getResolvedArtifacts(); }
+    }
+
+    void "wraps graph resolve failures"() {
+        given:
+        def failure = new RuntimeException()
+        delegate.resolveGraph(context, results) >> { throw failure }
+
+        when:
+        resolver.resolveGraph(context, results)
+
+        then:
+        results.resolvedConfiguration.hasError()
+
+        failsWith(failure)
+            .when { results.resolvedConfiguration.rethrowFailure(); }
+            .when { results.resolvedConfiguration.getFiles(Specs.satisfyAll()); }
+            .when { results.resolvedConfiguration.getFirstLevelModuleDependencies(); }
+            .when { results.resolvedConfiguration.getResolvedArtifacts(); }
+    }
+
+    void "wraps artifact resolve failures"() {
+        given:
+        def failure = new RuntimeException()
+        delegate.resolveArtifacts(context, results) >> { throw failure }
+
+        when:
+        resolver.resolveArtifacts(context, results)
 
         then:
         results.resolvedConfiguration.hasError()
@@ -80,11 +138,11 @@ class ErrorHandlingConfigurationResolverTest extends Specification {
         resolvedConfiguration.getResolvedArtifacts() >> { throw failure }
         resolvedConfiguration.getLenientConfiguration() >> { throw failure }
 
-        delegate.resolve(context, results) >> { results.resolved(resolutionResult, projectConfigResult) }
-        delegate.resolveArtifacts(context, results) >> { results.withResolvedConfiguration(resolvedConfiguration) }
+        delegate.resolveGraph(context, results) >> { results.graphResolved(resolutionResult, projectConfigResult, visitedArtifactSet) }
+        delegate.resolveArtifacts(context, results) >> { results.artifactsResolved(resolvedConfiguration, visitedArtifactSet) }
 
         when:
-        resolver.resolve(context, results)
+        resolver.resolveGraph(context, results)
         resolver.resolveArtifacts(context, results)
 
         then:
@@ -109,11 +167,11 @@ class ErrorHandlingConfigurationResolverTest extends Specification {
         lenientConfiguration.getArtifacts(_) >> { throw failure }
         lenientConfiguration.getUnresolvedModuleDependencies() >> { throw failure }
 
-        delegate.resolve(context, results) >> { results.resolved(resolutionResult, projectConfigResult) }
-        delegate.resolveArtifacts(context, results) >> { results.withResolvedConfiguration(resolvedConfiguration) }
+        delegate.resolveGraph(context, results) >> { results.graphResolved(resolutionResult, projectConfigResult, visitedArtifactSet) }
+        delegate.resolveArtifacts(context, results) >> { results.artifactsResolved(resolvedConfiguration, visitedArtifactSet) }
 
         when:
-        resolver.resolve(context, results)
+        resolver.resolveGraph(context, results)
         resolver.resolveArtifacts(context, results)
 
         then:
@@ -131,11 +189,11 @@ class ErrorHandlingConfigurationResolverTest extends Specification {
 
         resolutionResult.root >> { throw failure }
 
-        delegate.resolve(context, results) >> { results.resolved(resolutionResult, projectConfigResult) }
-        delegate.resolveArtifacts(context, results) >> { results.withResolvedConfiguration(resolvedConfiguration) }
+        delegate.resolveGraph(context, results) >> { results.graphResolved(resolutionResult, projectConfigResult, visitedArtifactSet) }
+        delegate.resolveArtifacts(context, results) >> { results.artifactsResolved(resolvedConfiguration, visitedArtifactSet) }
 
         when:
-        resolver.resolve(context, results)
+        resolver.resolveGraph(context, results)
         resolver.resolveArtifacts(context, results)
 
         then:

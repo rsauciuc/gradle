@@ -25,6 +25,7 @@ class JavaLibraryInitIntegrationTest extends AbstractIntegrationSpec {
 
     public static final String SAMPLE_LIBRARY_CLASS = "src/main/java/Library.java"
     public static final String SAMPLE_LIBRARY_TEST_CLASS = "src/test/java/LibraryTest.java"
+    public static final String SAMPLE_SPOCK_LIBRARY_TEST_CLASS = "src/test/groovy/LibraryTest.groovy"
 
     final wrapper = new WrapperTestFixture(testDirectory)
 
@@ -35,7 +36,7 @@ class JavaLibraryInitIntegrationTest extends AbstractIntegrationSpec {
         then:
         file(SAMPLE_LIBRARY_CLASS).exists()
         file(SAMPLE_LIBRARY_TEST_CLASS).exists()
-        buildFile.exists()
+        buildFileSeparatesImplementationAndApi()
         settingsFile.exists()
         wrapper.generated()
 
@@ -43,9 +44,43 @@ class JavaLibraryInitIntegrationTest extends AbstractIntegrationSpec {
         succeeds("build")
 
         then:
-        TestExecutionResult testResult = new DefaultTestExecutionResult(testDirectory)
-        testResult.assertTestClassesExecuted("LibraryTest")
-        testResult.testClass("LibraryTest").assertTestPassed("testSomeLibraryMethod")
+        assertTestPassed("testSomeLibraryMethod")
+    }
+
+    def "creates sample source using spock instead of junit"() {
+        when:
+        succeeds('init', '--type', 'java-library', '--test-framework', 'spock')
+
+        then:
+        file(SAMPLE_LIBRARY_CLASS).exists()
+        file(SAMPLE_SPOCK_LIBRARY_TEST_CLASS).exists()
+        buildFileSeparatesImplementationAndApi('org.spockframework')
+        settingsFile.exists()
+        wrapper.generated()
+
+        when:
+        succeeds("build")
+
+        then:
+        assertTestPassed("someLibraryMethod returns true")
+    }
+
+    def "creates sample source using testng instead of junit"() {
+        when:
+        succeeds('init', '--type', 'java-library', '--test-framework', 'testng')
+
+        then:
+        file(SAMPLE_LIBRARY_CLASS).exists()
+        file(SAMPLE_LIBRARY_TEST_CLASS).exists()
+        buildFileSeparatesImplementationAndApi('org.testng')
+        settingsFile.exists()
+        wrapper.generated()
+
+        when:
+        succeeds("build")
+
+        then:
+        assertTestPassed("someLibraryMethodReturnsTrue")
     }
 
     def "setupProjectLayout is skipped when java sources detected"() {
@@ -68,8 +103,22 @@ class JavaLibraryInitIntegrationTest extends AbstractIntegrationSpec {
         then:
         !file(SAMPLE_LIBRARY_CLASS).exists()
         !file(SAMPLE_LIBRARY_TEST_CLASS).exists()
-        buildFile.exists()
+        buildFileSeparatesImplementationAndApi()
         settingsFile.exists()
         wrapper.generated()
+    }
+
+    def assertTestPassed(String name) {
+        TestExecutionResult testResult = new DefaultTestExecutionResult(testDirectory)
+        testResult.assertTestClassesExecuted("LibraryTest")
+        testResult.testClass("LibraryTest").assertTestPassed(name)
+    }
+
+    private void buildFileSeparatesImplementationAndApi(String testFramework = 'junit:junit:') {
+        assert buildFile.exists()
+        def text = buildFile.text
+        assert text.contains("api 'org.apache.commons:commons-math3")
+        assert text.contains("implementation 'com.google.guava:guava:")
+        assert text.contains("testImplementation '$testFramework")
     }
 }

@@ -32,17 +32,16 @@ public class ConnectorServices {
     private static DefaultServiceRegistry singletonRegistry = new ConnectorServiceRegistry();
 
     public static DefaultGradleConnector createConnector() {
-        assertJava6();
+        checkJavaVersion();
         return singletonRegistry.getFactory(DefaultGradleConnector.class).create();
     }
-
     public static CancellationTokenSource createCancellationTokenSource() {
-        assertJava6();
+        checkJavaVersion();
         return new DefaultCancellationTokenSource();
     }
 
     public static void close() {
-        assertJava6();
+        checkJavaVersion();
         singletonRegistry.close();
     }
 
@@ -54,11 +53,8 @@ public class ConnectorServices {
         singletonRegistry = new ConnectorServiceRegistry();
     }
 
-    private static void assertJava6() {
-        JavaVersion javaVersion = JavaVersion.current();
-        if (!javaVersion.isJava6Compatible()) {
-            throw UnsupportedJavaRuntimeException.usingUnsupportedVersion("Gradle Tooling API", JavaVersion.VERSION_1_6);
-        }
+    private static void checkJavaVersion() {
+        UnsupportedJavaRuntimeException.assertUsingVersion("Gradle Tooling API", JavaVersion.VERSION_1_7);
     }
 
     private static class ConnectorServiceRegistry extends DefaultServiceRegistry {
@@ -78,8 +74,8 @@ public class ConnectorServices {
             return new DefaultExecutorServiceFactory();
         }
 
-        protected DistributionFactory createDistributionFactory(ExecutorServiceFactory executorFactory) {
-            return new DistributionFactory(executorFactory);
+        protected DistributionFactory createDistributionFactory() {
+            return new DistributionFactory();
         }
 
         protected ToolingImplementationLoader createToolingImplementationLoader() {

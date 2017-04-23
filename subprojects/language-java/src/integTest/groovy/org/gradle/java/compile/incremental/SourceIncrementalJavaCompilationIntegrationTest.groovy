@@ -14,16 +14,20 @@
  * limitations under the License.
  */
 
-package org.gradle.java.compile.incremental;
+package org.gradle.java.compile.incremental
 
+import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.CompilationOutputsFixture;
+import org.gradle.integtests.fixtures.CompilationOutputsFixture
+import spock.lang.Issue
+import spock.lang.Unroll
 
-public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractIntegrationSpec {
+class SourceIncrementalJavaCompilationIntegrationTest extends AbstractIntegrationSpec {
 
     CompilationOutputsFixture outputs
 
     def setup() {
+        executer.requireOwnGradleUserHomeDir()
         outputs = new CompilationOutputsFixture(file("build/classes"))
 
         buildFile << """
@@ -32,7 +36,7 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         """
     }
 
-    private File java(String ... classBodies) {
+    private File java(String... classBodies) {
         File out
         for (String body : classBodies) {
             def className = (body =~ /(?s).*?class (\w+) .*/)[0][1]
@@ -68,7 +72,8 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
 
         outputs.snapshot { run "compileJava" }
 
-        when: assert a.delete()
+        when:
+        assert a.delete()
         then:
         fails "compileJava"
         outputs.noneRecompiled()
@@ -165,14 +170,16 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java "class A { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'A', 'B', 'C'
+        then:
+        outputs.recompiledClasses 'A', 'B', 'C'
 
         when:
         outputs.snapshot()
         java "class B { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'B', 'C'
+        then:
+        outputs.recompiledClasses 'B', 'C'
     }
 
     def "detects transitive dependencies with inner classes"() {
@@ -187,7 +194,8 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java "class A { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'A', 'B', 'C', 'C$InnerC'
+        then:
+        outputs.recompiledClasses 'A', 'B', 'C', 'C$InnerC'
     }
 
     def "handles cycles in class dependencies"() {
@@ -199,12 +207,14 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java "class A { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'A', 'B', 'C'
+        then:
+        outputs.recompiledClasses 'A', 'B', 'C'
     }
 
-    def "change to an annotation class triggers full rebuild"() {
-        def annotationClass = file("src/main/java/SourceAnnotation.java") << """import java.lang.annotation.*;
-            @Retention(RetentionPolicy.SOURCE) public @interface SourceAnnotation {}
+    @Unroll
+    def "change to #retention retention annotation class recompiles #desc"() {
+        def annotationClass = file("src/main/java/SomeAnnotation.java") << """import java.lang.annotation.*;
+            @Retention(RetentionPolicy.$retention) public @interface SomeAnnotation {}
         """
         java "class A {}", "class B {}"
         outputs.snapshot { run "compileJava" }
@@ -213,7 +223,14 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         annotationClass.text += "/* change */"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'A', 'B', 'SourceAnnotation'
+        then:
+        outputs.recompiledClasses(expected as String[])
+
+        where:
+        desc              | retention | expected
+        'all'             | 'SOURCE'  | ['A', 'B', 'SomeAnnotation']
+        'annotation only' | 'CLASS'   | ['SomeAnnotation']
+        'annotation only' | 'RUNTIME' | ['SomeAnnotation']
     }
 
     def "changed class with private constant does not incur full rebuild"() {
@@ -224,18 +241,34 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java "class B { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'B'
+        then:
+        outputs.recompiledClasses 'B'
     }
 
-    def "changed class with non-private constant incurs full rebuild"() {
-        java "class A {}", "class B { final static int x = 1;}"
+    def "changed class with used non-private constant incurs full rebuild"() {
+        java "class A { int foo() { return 1; } }", "class B { final static int x = 1;}"
         outputs.snapshot { run "compileJava" }
 
         when:
         java "class B { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'B', 'A'
+        then:
+        outputs.recompiledClasses 'B', 'A'
+    }
+
+    @NotYetImplemented
+    //  Can re-enable with compiler plugins. See gradle/gradle#1474
+    def "changing an unused non-private constant incurs partial rebuild"() {
+        java "class A { int foo() { return 2; } }", "class B { final static int x = 1;}"
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        java "class B { /* change */ }"
+        run "compileJava"
+
+        then:
+        outputs.recompiledClasses 'B'
     }
 
     def "dependent class with non-private constant does not incur full rebuild"() {
@@ -246,7 +279,8 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java "class A { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses 'B', 'A'
+        then:
+        outputs.recompiledClasses 'B', 'A'
     }
 
     def "detects class changes in subsequent runs ensuring the class dependency data is refreshed"() {
@@ -257,14 +291,16 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java "class B extends A {}"
         run "compileJava"
 
-        then: outputs.recompiledClasses('B')
+        then:
+        outputs.recompiledClasses('B')
 
         when:
         outputs.snapshot()
         java "class A { /* change */ }"
         run "compileJava"
 
-        then: outputs.recompiledClasses('A', 'B')
+        then:
+        outputs.recompiledClasses('A', 'B')
     }
 
     def "handles multiple compile tasks within a single project"() {
@@ -296,11 +332,11 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
     }
 
     def "recompiles classes from extra source directories"() {
-        buildFile << "sourceSets.main.java.srcDir 'java'"
+        buildFile << "sourceSets.main.java.srcDir 'extra-java'"
 
         java("class B {}")
-        file("java/A.java") << "class A extends B {}"
-        file("java/C.java") << "class C {}"
+        file("extra-java/A.java") << "class A extends B {}"
+        file("extra-java/C.java") << "class C {}"
 
         outputs.snapshot { run "compileJava" }
 
@@ -312,21 +348,131 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         outputs.recompiledClasses("B", "A")
     }
 
-    def "detects changes to source in extra source directories"() {
-        buildFile << "sourceSets.main.java.srcDir 'java'"
+    def "recompilation considers changes from dependent sourceSet"() {
+        buildFile << """
+sourceSets {
+    other {}
+    main { compileClasspath += sourceSets.other.output }
+}
+"""
 
-        java("class A extends B {}")
-        file("java/B.java") << "class B {}"
-        file("java/C.java") << "class C {}"
+        java("class Main extends com.foo.Other {}")
+        file("src/other/java/com/foo/Other.java") << "package com.foo; public class Other {}"
 
         outputs.snapshot { run "compileJava" }
 
         when:
-        file("java/B.java").text = "class B { String change; }"
+        file("src/other/java/com/foo/Other.java").text = "package com.foo; public class Other { String change; }"
+        run "compileJava"
+
+        then:
+        outputs.recompiledClasses("Other", "Main")
+    }
+
+    def "recompilation does not process removed classes from dependent sourceSet"() {
+        buildFile << """
+compileTestJava.options.incremental = true
+"""
+
+        def unusedClass = java("public class Unused {}")
+        // Need another class or :compileJava will always be considered UP-TO-DATE
+        java("public class Other {}")
+
+        file("src/test/java/BazTest.java") << "public class BazTest {}"
+
+        outputs.snapshot { run "compileTestJava" }
+
+        when:
+        file("src/test/java/BazTest.java").text = "public class BazTest { String change; }"
+        unusedClass.delete()
+
+        run "compileTestJava"
+
+        then:
+        outputs.recompiledClasses("BazTest")
+        outputs.deletedClasses("Unused")
+    }
+
+    def "detects changes to source in extra source directories"() {
+        buildFile << "sourceSets.main.java.srcDir 'extra-java'"
+
+        java("class A extends B {}")
+        file("extra-java/B.java") << "class B {}"
+        file("extra-java/C.java") << "class C {}"
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("extra-java/B.java").text = "class B { String change; }"
         run "compileJava"
 
         then:
         outputs.recompiledClasses("B", "A")
+    }
+
+    def "recompiles classes from extra source directory provided as #type"() {
+        given:
+        buildFile << "compileJava.source $method('extra-java')"
+
+        java("class B {}")
+        file("extra-java/A.java") << "class A extends B {}"
+        file("extra-java/C.java") << "class C {}"
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        java("class B { String change; } ")
+        run "compileJava"
+
+        then:
+        outputs.recompiledClasses("B", "A")
+
+        where:
+        type            | method
+        "File"          | "file"
+        "DirectoryTree" | "fileTree"
+    }
+
+    def "detects changes to source in extra source directory provided as #type"() {
+        buildFile << "compileJava.source $method('extra-java')"
+
+        java("class A extends B {}")
+        file("extra-java/B.java") << "class B {}"
+        file("extra-java/C.java") << "class C {}"
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("extra-java/B.java").text = "class B { String change; }"
+        run "compileJava"
+
+        then:
+        outputs.recompiledClasses("B", "A")
+
+        where:
+        type            | method
+        "File"          | "file"
+        "DirectoryTree" | "fileTree"
+    }
+
+    def "reports source type that does not support detection of source root"() {
+        buildFile << "compileJava.source([file('extra-java'), file('other')])"
+
+        java("class A extends B {}")
+        file("extra-java/B.java") << "class B {}"
+        file("extra-java/C.java") << "class C {}"
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("extra-java/B.java").text = "class B { String change; }"
+        executer.withArgument "--info"
+        run "compileJava"
+
+        then:
+        outputs.recompiledClasses("A", "B", "C")
+        output.contains("Cannot infer source root(s) for input with type `ArrayList`. Supported types are `File`, `DirectoryTree` and `SourceDirectorySet`.")
+        output.contains(":compileJava - is not incremental. Unable to infer the source directories.")
     }
 
     def "handles duplicate class across source directories"() {
@@ -336,7 +482,242 @@ public class SourceIncrementalJavaCompilationIntegrationTest extends AbstractInt
         java("class A {}")
         file("java/A.java") << "class A {}"
 
-        when: fails "compileJava"
-        then: failure.assertHasCause("Compilation failed")
+        when:
+        fails "compileJava"
+        then:
+        failure.assertHasCause("Compilation failed")
+    }
+
+    @Issue("GRADLE-3426")
+    @NotYetImplemented
+    def "supports Java 1.2 dependencies"() {
+        java "class A {}"
+
+        buildFile << """
+repositories { jcenter() }
+dependencies { compile 'com.ibm.icu:icu4j:2.6.1' }
+"""
+        expect:
+        run "compileJava"
+    }
+
+    @Issue("GRADLE-3495")
+    def "supports Java 1.1 dependencies"() {
+        java "class A {}"
+
+        buildFile << """
+repositories { jcenter() }
+dependencies { compile 'net.sf.ehcache:ehcache:2.10.2' }
+"""
+        expect:
+        run "compileJava"
+    }
+
+    @Unroll("detects changes to class referenced through a #modifier field")
+    def "detects changes to class referenced through a field"() {
+        given:
+        java """class A {
+    $modifier B b;
+    void doSomething() {
+        Runnable r = b;
+        r.run();
+    }
+}"""
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b;'
+
+        where:
+        modifier << ['', 'static']
+    }
+
+    @Unroll("detects changes to class referenced through a #modifier array field")
+    def "detects changes to class referenced through an array field"() {
+        given:
+        java """class A {
+    $modifier B[] b;
+    void doSomething() {
+        Runnable r = b[0];
+        r.run();
+    }
+}"""
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b[0];'
+
+        where:
+        modifier << ['', 'static']
+    }
+
+    @Unroll("detects changes to class referenced through a #modifier multi-dimensional array field")
+    def "detects changes to class referenced through an multi-dimensional array field"() {
+        given:
+        java """class A {
+    $modifier B[][] b;
+    void doSomething() {
+        Runnable r = b[0][0];
+        r.run();
+    }
+}"""
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b[0][0];'
+
+        where:
+        modifier << ['', 'static']
+    }
+
+    def "detects changes to class referenced in method body"() {
+        given:
+        java '''class A {
+    void doSomething(Object b) {
+        Runnable r = (B) b;
+        r.run();
+    }
+}'''
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = (B) b;'
+    }
+
+    def "detects changes to class referenced through return type"() {
+        given:
+        java '''class A {
+    B b() { return null; }
+    
+    void doSomething() {
+        Runnable r = b();
+        r.run();
+    }
+}'''
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b();'
+    }
+
+    def "detects changes to class referenced through method signature"() {
+        given:
+        java '''class A {
+    Runnable go(B b) {
+        Runnable r = b;
+        r.run();
+        return b;
+    }
+}'''
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b;'
+    }
+
+    def "detects changes to class referenced through type argument in field"() {
+        given:
+        java '''class A {
+    java.util.List<B> bs;
+    void doSomething() {
+        for (B b: bs) {
+           Runnable r = b;
+           r.run();
+        }
+    }
+}'''
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b;'
+    }
+
+    def "detects changes to class referenced through type argument in return type"() {
+        given:
+        java '''class A {
+    java.util.List<B> bs() { return null; }
+    
+    void doSomething() {
+        for (B b: bs()) {
+           Runnable r = b;
+           r.run();
+        }
+    }
+}'''
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b;'
+    }
+
+    def "detects changes to class referenced through type argument in parameter"() {
+        given:
+        java '''class A {
+    
+    void doSomething(java.util.List<B> bs) {
+        for (B b: bs) {
+           Runnable r = b;
+           r.run();
+        }
+    }
+}'''
+        java '''abstract class B implements Runnable { }'''
+
+        outputs.snapshot { run "compileJava" }
+
+        when:
+        file("src/main/java/B.java").text = "class B { }"
+        fails "compileJava"
+
+        then:
+        errorOutput.contains 'Runnable r = b;'
     }
 }

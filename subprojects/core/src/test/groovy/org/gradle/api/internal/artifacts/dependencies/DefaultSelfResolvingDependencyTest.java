@@ -17,6 +17,7 @@ package org.gradle.api.internal.artifacts.dependencies;
 
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.SelfResolvingDependency;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.internal.artifacts.DependencyResolveContext;
 import org.gradle.api.internal.file.FileCollectionInternal;
 import org.gradle.api.tasks.TaskDependency;
@@ -37,7 +38,8 @@ import static org.junit.Assert.*;
 public class DefaultSelfResolvingDependencyTest {
     private final JUnit4Mockery context = new JUnit4Mockery();
     private final FileCollectionInternal source = context.mock(FileCollectionInternal.class);
-    private final DefaultSelfResolvingDependency dependency = new DefaultSelfResolvingDependency(source);
+    private final ComponentIdentifier targetComponent = context.mock(ComponentIdentifier.class);
+    private final DefaultSelfResolvingDependency dependency = new DefaultSelfResolvingDependency(targetComponent, source);
 
     @Test
     public void defaultValues() {
@@ -51,7 +53,7 @@ public class DefaultSelfResolvingDependencyTest {
         final DependencyResolveContext resolveContext = context.mock(DependencyResolveContext.class);
 
         context.checking(new Expectations() {{
-            one(resolveContext).add(source);
+            oneOf(resolveContext).add(source);
         }});
 
         dependency.resolve(resolveContext);
@@ -73,8 +75,11 @@ public class DefaultSelfResolvingDependencyTest {
 
     @Test
     public void createsCopy() {
-        Dependency copy = dependency.copy();
-        assertThat(copy, instanceOf(SelfResolvingDependency.class));
+        DefaultSelfResolvingDependency copy = dependency.copy();
+        assertThat(copy, instanceOf(DefaultSelfResolvingDependency.class));
+        assertThat(copy.getTargetComponentId(), equalTo(targetComponent));
+        assertThat(copy.getFiles(), sameInstance((Object) source));
+
         assertTrue(copy.contentEquals(dependency));
         assertTrue(dependency.contentEquals(copy));
     }

@@ -16,6 +16,7 @@
 package org.gradle.plugins.ide.eclipse
 
 import org.gradle.integtests.fixtures.TestResources
+import org.gradle.integtests.fixtures.executer.ExecutionResult
 import org.junit.Rule
 import org.junit.Test
 import spock.lang.Issue
@@ -26,6 +27,8 @@ class EclipseClasspathIntegrationTest extends AbstractEclipseIntegrationTest {
     public final TestResources testResources = new TestResources(testDirectoryProvider)
 
     String content
+
+    private final String jreContainerPath = "org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-${org.gradle.api.JavaVersion.current()}/"
 
     @Test
     void classpathContainsLibraryEntriesForExternalAndFileDependencies() {
@@ -67,6 +70,53 @@ dependencies {
         libraries[2].assertHasNoSource()
         libraries[2].assertHasNoJavadoc()
     }
+
+    @Test
+    @Issue("GRADLE-1945")
+    void unresolvedDependenciesAreLogged() {
+        //given
+        def module = mavenRepo.module('myGroup', 'existing-artifact', '1.0')
+        module.publish()
+
+        //when
+        ExecutionResult result = runEclipseTask """
+apply plugin: 'java'
+apply plugin: 'eclipse'
+
+repositories {
+    maven { url "${mavenRepo.uri}" }
+}
+
+configurations {
+    myPlusConfig
+    myMinusConfig
+}
+
+dependencies {
+    myPlusConfig group: 'myGroup', name: 'missing-extra-artifact', version: '1.0'
+    myPlusConfig group: 'myGroup', name: 'filtered-artifact', version: '1.0'
+    myMinusConfig group: 'myGroup', name: 'filtered-artifact', version: '1.0'
+    runtime  group: 'myGroup', name: 'missing-artifact', version: '1.0'
+    compile  group: 'myGroup', name: 'existing-artifact', version: '1.0'
+
+    eclipse {
+        classpath {
+            plusConfigurations += [ configurations.myPlusConfig ]
+            minusConfigurations += [ configurations.myMinusConfig]
+        }
+    }
+}
+"""
+        String expected = """:eclipseClasspath
+Could not resolve: myGroup:missing-artifact:1.0
+Could not resolve: myGroup:missing-extra-artifact:1.0
+:eclipseJdt
+:eclipseProject
+:eclipse
+"""
+        result.assertOutputContains(expected)
+    }
+
 
     @Test
     @Issue("GRADLE-1622")
@@ -141,6 +191,53 @@ configure(project(":b")){
 configure(project(":c")){
     dependencies {
         compile 'someGroup:someArtifact:1.0'
+    }
+}
+"""
+
+        def libs = classpath("a").libs
+        assert classpath("a").projects == ["/b", "/c"]
+        assert libs.size() == 2
+        libs[0].assertHasJar(someOtherArtifactJar)
+        libs[1].assertHasJar(someArtifactJar)
+    }
+
+    @Test
+    void includesTransitiveImplementationDependencies() {
+        //given
+        def someArtifactJar = mavenRepo.module('someGroup', 'someArtifact', '1.0').publish().artifactFile
+        def someOtherArtifactJar = mavenRepo.module('someGroup', 'someOtherArtifact', '1.0').publish().artifactFile
+
+        //when
+        runEclipseTask """include 'a', 'b', 'c'""", """
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'eclipse'
+
+    repositories {
+        maven { url "${mavenRepo.uri}" }
+    }
+}
+
+configure(project(":a")){
+    dependencies {
+        compile 'someGroup:someOtherArtifact:1.0'
+
+        compile project(':b')
+    }
+}
+
+configure(project(":b")){
+    apply plugin: 'java-library'
+    dependencies {
+        api project(':c')
+    }
+}
+
+configure(project(":c")){
+    apply plugin: 'java-library'
+    dependencies {
+        implementation 'someGroup:someArtifact:1.0'
     }
 }
 """
@@ -589,15 +686,15 @@ eclipse.classpath {
     @Test
     void removeDependenciesFromExistingClasspathFileWhenMerging() {
         //given
-        getClasspathFile() << '''<?xml version="1.0" encoding="UTF-8"?>
+        getClasspathFile() << """<?xml version="1.0" encoding="UTF-8"?>
 <classpath>
 	<classpathentry kind="output" path="bin"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="con" path="$jreContainerPath"/>
 	<classpathentry kind="lib" path="/some/path/someDependency.jar"/>
 	<classpathentry kind="var" path="SOME_VAR/someVarDependency.jar"/>
 	<classpathentry kind="src" path="/someProject"/>
 </classpath>
-'''
+"""
 
         //when
         runEclipseTask """
@@ -608,7 +705,6 @@ dependencies {
   compile files('newDependency.jar')
 }
 """
-
         //then
         assert classpath.entries.size() == 3
         def libraries = classpath.libs
@@ -760,14 +856,14 @@ sourceSets {
     void canAccessXmlModelBeforeAndAfterGeneration() {
         //given
         def classpath = getClasspathFile([:])
-        classpath << '''<?xml version="1.0" encoding="UTF-8"?>
+        classpath << """<?xml version="1.0" encoding="UTF-8"?>
 <classpath>
 	<classpathentry kind="output" path="bin"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="con" path="$jreContainerPath"/>
 	<classpathentry kind="lib" path="/some/path/someDependency.jar"/>
 	<classpathentry kind="var" path="SOME_VAR/someVarDependency.jar"/>
 </classpath>
-'''
+"""
 
         //when
         runEclipseTask """
@@ -878,46 +974,11 @@ apply plugin: "eclipse"
 sourceSets.main.output.dir "$buildDir/generated/main", builtBy: 'generateForMain'
 sourceSets.test.output.dir "$buildDir/generated/test", builtBy: 'generateForTest'
 
-task generateForMain << {}
-task generateForTest << {}
+task generateForMain
+task generateForTest
 ''')
         //then
         result.assertTasksExecuted(':generateForMain', ':generateForTest', ':eclipseClasspath', ':eclipseJdt', ':eclipseProject', ':eclipse')
-    }
-
-    @Test
-    void configuringNonExportedConfigurationsIsDeprecated() {
-        //when
-        executer.withDeprecationChecksDisabled()
-        def result = runEclipseTask """
-apply plugin: 'java'
-apply plugin: 'eclipse'
-
-configurations {
-  provided
-}
-
-dependencies {
-  compile  files('compileDependency.jar')
-  provided files('providedDependency.jar')
-}
-
-eclipse {
-  classpath {
-    plusConfigurations << configurations.provided
-    noExportConfigurations << configurations.provided
-  }
-}
-"""
-
-        //then
-        def libraries = classpath.libs
-        assert libraries.size() == 2
-        libraries[0].assertHasJar(file('compileDependency.jar'))
-        libraries[0].assertNotExported() // we changed the behaviour to default to false
-        libraries[1].assertHasJar(file('providedDependency.jar'))
-        libraries[1].assertNotExported()
-        result.output.contains("EclipseClasspath.noExportConfigurations has been deprecated and is scheduled to be removed in Gradle 3.0")
     }
 
     @Test
@@ -982,7 +1043,273 @@ dependencies {
         def libraries = classpath.libs
         assert libraries.size() == 1
         libraries[0].assertHasJar(otherLib)
-        assert classpath.containers == ['org.eclipse.jdt.launching.JRE_CONTAINER', 'org.scala-ide.sdt.launching.SCALA_CONTAINER']
+        assert classpath.containers == [jreContainerPath, 'org.scala-ide.sdt.launching.SCALA_CONTAINER']
     }
 
+    @Test
+    void avoidsDuplicateJreContainersInClasspathWhenMerging() {
+        //given
+        getClasspathFile() << """<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="output" path="bin"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.5"/>
+	<classpathentry kind="src" path="/someProject"/>
+</classpath>
+"""
+
+        //when
+        runEclipseTask """
+apply plugin: 'java'
+apply plugin: 'eclipse'
+"""
+        //then
+        assert classpath.entries.size() == 2
+        assert classpath.containers.size() == 1
+        assert classpath.containers == [jreContainerPath]
+    }
+
+    @Test
+    void compileOnlyDependenciesAddedToClasspath() {
+        // given
+        mavenRepo.module('org.gradle.test', 'compileOnly', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'testCompileOnly', '1.0').publish()
+
+        // when
+        runEclipseTask """
+apply plugin: 'java'
+apply plugin: 'eclipse'
+
+repositories {
+    maven { url "${mavenRepo.uri}" }
+}
+
+dependencies {
+    compileOnly 'org.gradle.test:compileOnly:1.0'
+    testCompileOnly 'org.gradle.test:testCompileOnly:1.0'
+}
+"""
+
+        // then
+        assert classpath.libs.size() == 2
+        classpath.assertHasLibs('compileOnly-1.0.jar', 'testCompileOnly-1.0.jar')
+    }
+
+    @Test
+    void compileOnlyDependenciesAreNotExported() {
+        // given
+        mavenRepo.module('org.gradle.test', 'compileOnly', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'compile', '1.0').publish()
+
+        // when
+        runEclipseTask "include 'a', 'b'", """
+allprojects {
+    apply plugin: 'java'
+    apply plugin: 'eclipse'
+
+    repositories {
+        maven { url "${mavenRepo.uri}" }
+    }
+}
+
+project(':a') {
+    dependencies {
+        compileOnly 'org.gradle.test:compileOnly:1.0'
+    }
+}
+
+project(':b') {
+    dependencies {
+        compile project(':a')
+        compile 'org.gradle.test:compile:1.0'
+    }
+}
+"""
+
+        // then
+        def classpathA = classpath('a')
+        def classpathB = classpath('b')
+        assert classpathA.libs.size() == 1
+        classpathA.assertHasLibs('compileOnly-1.0.jar')
+        assert classpathB.libs.size() == 1
+        assert classpathB.projects == ['/a']
+        classpathB.assertHasLibs('compile-1.0.jar')
+    }
+
+    @Test
+    void "test compile only dependencies mapped to classpath and not exported"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'compileOnly', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'compile', '1.0').publish()
+
+        // when
+        runEclipseTask "include 'a', 'b'", """
+            allprojects {
+                apply plugin: 'java'
+                apply plugin: 'eclipse'
+
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+            }
+
+            project(':a') {
+                dependencies {
+                    testCompileOnly 'org.gradle.test:compileOnly:1.0'
+                }
+            }
+
+            project(':b') {
+                dependencies {
+                    compile project(':a')
+                    compile 'org.gradle.test:compile:1.0'
+                }
+            }
+        """.stripIndent()
+
+        // then
+        def classpathA = classpath('a')
+        def classpathB = classpath('b')
+        assert classpathA.libs.size() == 1
+        classpathA.assertHasLibs('compileOnly-1.0.jar')
+        assert classpathB.libs.size() == 1
+        assert classpathB.projects == ['/a']
+        classpathB.assertHasLibs('compile-1.0.jar')
+    }
+
+    /*
+     * This is a test describing the current, not necessarily desired behavior. We really shouldn't
+     * put duplicate dependencies on the classpath. The order will always be arbitrary and break one
+     * use case or another.
+     */
+    @Test
+    void "conflicting versions of the same library for compile and compile-only mapped to classpath"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'conflictingDependency', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'conflictingDependency', '2.0').publish()
+
+        // when
+        runEclipseTask "include 'a', 'b'", """
+            allprojects {
+                apply plugin: 'java'
+                apply plugin: 'eclipse'
+
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+            }
+
+            project(':a') {
+                dependencies {
+                    compile 'org.gradle.test:conflictingDependency:1.0'
+                    compileOnly 'org.gradle.test:conflictingDependency:2.0'
+                }
+            }
+
+            project(':b') {
+                dependencies {
+                    compile project(':a')
+                }
+            }
+        """.stripIndent()
+
+        // then
+        def classpathA = classpath('a')
+        def classpathB = classpath('b')
+        assert classpathA.libs.size() == 2
+        classpathA.assertHasLibs('conflictingDependency-2.0.jar', 'conflictingDependency-1.0.jar')
+        assert classpathB.libs.size() == 1
+        assert classpathB.projects == ['/a']
+        classpathB.assertHasLibs('conflictingDependency-1.0.jar')
+    }
+
+    /*
+     * This is a test describing the current, not necessarily desired behavior. We really shouldn't
+     * put duplicate dependencies on the classpath. The order will always be arbitrary and break one
+     * use case or another.
+     */
+    @Test
+    void "conflicting versions of the same library for runtime and compile-only mapped to classpath"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'conflictingDependency', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'conflictingDependency', '2.0').publish()
+
+        // when
+        runEclipseTask "include 'a', 'b'", """
+            allprojects {
+                apply plugin: 'java'
+                apply plugin: 'eclipse'
+
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+            }
+
+            project(':a') {
+                dependencies {
+                    runtime 'org.gradle.test:conflictingDependency:1.0'
+                    compileOnly 'org.gradle.test:conflictingDependency:2.0'
+                }
+            }
+
+            project(':b') {
+                dependencies {
+                    compile project(':a')
+                }
+            }
+        """.stripIndent()
+
+        // then
+        def classpathA = classpath('a')
+        def classpathB = classpath('b')
+        assert classpathA.libs.size() == 2
+        classpathA.assertHasLibs('conflictingDependency-2.0.jar', 'conflictingDependency-1.0.jar')
+        assert classpathB.libs.size() == 1
+        assert classpathB.projects == ['/a']
+        classpathB.assertHasLibs('conflictingDependency-1.0.jar')
+    }
+
+    /*
+     * This is a test describing the current, not necessarily desired behavior. We really shouldn't
+     * put duplicate dependencies on the classpath. The order will always be arbitrary and break one
+     * use case or another.
+     */
+    @Test
+    void "conflicting versions of the same library for test-compile and testcompile-only mapped to classpath"() {
+        // given
+        mavenRepo.module('org.gradle.test', 'conflictingDependency', '1.0').publish()
+        mavenRepo.module('org.gradle.test', 'conflictingDependency', '2.0').publish()
+
+        // when
+        runEclipseTask "include 'a', 'b'", """
+            allprojects {
+                apply plugin: 'java'
+                apply plugin: 'eclipse'
+
+                repositories {
+                    maven { url "${mavenRepo.uri}" }
+                }
+            }
+
+            project(':a') {
+                dependencies {
+                    testCompile 'org.gradle.test:conflictingDependency:1.0'
+                    testCompileOnly 'org.gradle.test:conflictingDependency:2.0'
+                }
+            }
+
+            project(':b') {
+                dependencies {
+                    compile project(':a')
+                }
+            }
+        """.stripIndent()
+
+        // then
+        def classpathA = classpath('a')
+        def classpathB = classpath('b')
+        assert classpathA.libs.size() == 2
+        classpathA.assertHasLibs('conflictingDependency-2.0.jar', 'conflictingDependency-1.0.jar')
+        assert classpathB.libs.size() == 0
+        assert classpathB.projects == ['/a']
+    }
 }

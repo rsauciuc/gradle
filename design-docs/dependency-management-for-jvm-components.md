@@ -65,16 +65,76 @@ Later work:
 
 
 # Feature: Java library consumes external Java library
+## Story: Build author defines dependencies for an entire component
+
+- Extend the JvmLibrarySpec DSL with a component scoped `dependencies` block with support for the usual dependency selectors:
+
+```groovy
+model {
+    components {
+        A(JvmLibrarySpec) {
+            dependencies {
+                library "B"
+            }
+            sources {
+                core(JavaSourceSet) {
+                    source.srcDir "src/core"
+                }
+            }
+        }
+        B(JvmLibrarySpec) {
+        }
+        C(JvmLibrarySpec) {
+            dependencies {
+                library "A"
+            }
+        }
+    }
+}
+```
+
+- When library A declares a component level dependency on library B, defined in the same project or a different one, then:
+    - library B is considered part of the compile classpath of all source sets in library A
+    - the API of library B is _not_ considered part of the API of library A unless an explicit api dependency is also declared (which renders the component level dependency redundant)
+
+### Test cases
+
+- Given the example above:
+    - ~~source files in all source sets of A can reference public types from library B~~
+    - ~~source files in C fail to compile if they reference public types from library B~~
+    - ~~same tests above for a library B defined in a different project~~
+    - ~~same tests above given A declares component level dependencies on both libraries, B from the same project and B from a different project~~
+- Given a library dependency declared at both the component and api levels:
+    - ~~source files in all source sets can reference public types from said library~~
+    - ~~the API of said library is considered part of the API of the consuming library~~
+- Given a library dependency declared at both the component and source set levels:
+    - ~~source files in all source sets can reference public types from said library~~
+    - ~~the API of said library is _not_ considered part of the API of the consuming library~~
+- Given a library dependency for a library which cannot be found:
+    - ~~compilation should fail with a suitable error message pointing to the dependency declaration~~
 
 ## Story: Java library sources are compiled against library Jar resolved from Maven repository
 
-- Extend the dependency DSL to reference external libraries:
+- Extend the dependency DSL to reference external modules:
+
     ```groovy
     model {
         components {
             main(JvmLibrarySpec) {
                 dependencies {
-                    library 'com.acme:artifact:1.0'
+                    // external module spec can start with either group or module
+                    group 'com.acme' module 'artifact' version '1.0'
+                    module 'artifact' group 'com.acme' version '1.0'
+
+                    // shorthand module id syntax
+                    module 'com.acme:collections:1.42'
+
+                    // passing a module id to library should fail
+                    library 'com.acme:collections:1.42'
+
+                    // existing usage remains
+                    project ':foo' library 'bar'
+                    library 'bar' project ':foo'
                 }
             }
         }
@@ -89,10 +149,6 @@ Later work:
 - Update samples and user guide
 - Update newJavaModel performance test?
 
-### Implementation goals
-
- - Make `DependencySpecContainer` a proper `ModelSet<DependencySpec>`
-
 ### Test cases
 
 - For maven module dependencies
@@ -102,17 +158,12 @@ Later work:
 - For local component dependencies:
     - ~~Artifacts from transitive external dependencies that are non part of component API are _not_ included in the compile classpath.~~
 - ~~Displays a reasonable error message if the external dependency cannot be found in a declared repository~~
-- A Java plugin can use use `DependencySpecContainer` as a `ModelSet<DependencySpec>` (create, beforeEach, afterEach)
+- ~~Displays a reasonable error message if a module id is given to `library`~~
 
 ### Out of scope
 
 - Rule-based definition of repositories
 - Support for custom `ResolutionStrategy`: forced versions, dependency substitution, etc
-
-## Story: Dependencies report shows compile time dependency graph of a Java library
-
-- Dependency report shows all JVM components for the project, and the resolved compile time graphs for each variant.
-- Dependency report implementation should not have any knowledge of the Java ecosystem. It may understand the abstract software model. 
 
 ## Story: Build author defines repositories using model rules
 
@@ -184,53 +235,6 @@ The implementation will rely on the extension mechanism defined in `Plugin autho
 - Report shows component level dependencies
 - Report shows api dependencies
 
-## Story: Build author defines dependencies for an entire component
-
-- Extend the JvmLibrarySpec DSL with a component scoped `dependencies` block with support for the usual dependency selectors:
-
-```groovy
-model {
-    components {
-        A(JvmLibrarySpec) {
-            dependencies {
-                library "B"
-            }
-            sources {
-                core(JavaSourceSet) {
-                    source.srcDir "src/core"
-                }
-            }
-        }
-        B(JvmLibrarySpec) {
-        }
-        C(JvmLibrarySpec) {
-            dependencies {
-                library "A"
-            }
-        }
-    }
-}
-```
-
-- When library A declares a component level dependency on library B, defined in the same project or a different one, then:
-    - library B is considered part of the compile classpath of all source sets in library A
-    - the API of library B is _not_ considered part of the API of library A unless an explicit api dependency is also declared (which renders the component level dependency redundant)
-
-### Test cases
-
-- Given the example above:
-    - ~~source files in all source sets of A can reference public types from library B~~
-    - ~~source files in C fail to compile if they reference public types from library B~~
-    - ~~same tests above for a library B defined in a different project~~
-    - ~~same tests above given A declares component level dependencies on both libraries, B from the same project and B from a different project~~
-- Given a library dependency declared at both the component and api levels:
-    - ~~source files in all source sets can reference public types from said library~~
-    - ~~the API of said library is considered part of the API of the consuming library~~
-- Given a library dependency declared at both the component and source set levels:
-    - ~~source files in all source sets can reference public types from said library~~
-    - ~~the API of said library is _not_ considered part of the API of the consuming library~~
-- Given a library dependency for a library which cannot be found:
-    - ~~compilation should fail with a suitable error message pointing to the dependency declaration~~
 
 ## Story: Resolve external dependencies from Ivy repositories
 
@@ -250,6 +254,7 @@ Should reuse the "stub generator" that is used to create an API jar for local pr
 
 - Dependent classes are not recompiled when method implementation of external dependency has changed
 - Dependent classes are recompiled when signature of external dependency has changed
+
 
 # Feature: Fully featured dependency resolution for local Java libraries
 

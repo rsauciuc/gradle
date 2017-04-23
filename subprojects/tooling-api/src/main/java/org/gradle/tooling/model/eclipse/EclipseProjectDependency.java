@@ -20,12 +20,13 @@ import org.gradle.tooling.model.ProjectDependency;
 /**
  * Represents a dependency on another Eclipse project.
  */
-public interface EclipseProjectDependency extends ProjectDependency {
+public interface EclipseProjectDependency extends ProjectDependency, EclipseClasspathEntry {
     /**
     * Returns the target of this dependency.
     *
-    * @return The target project. Does not return null.
+    * @return The target project, or null for a dependency on a different build within a composite.
     */
+    @Deprecated
     HierarchicalEclipseProject getTargetProject();
 
     /**

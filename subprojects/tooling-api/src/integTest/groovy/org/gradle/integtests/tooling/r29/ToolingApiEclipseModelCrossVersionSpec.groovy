@@ -25,13 +25,13 @@ import org.gradle.tooling.model.eclipse.EclipseProject
 @ToolingApiVersion('>=2.9')
 class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
 
-    @TargetGradleVersion(">=1.0-milestone-8 <2.9")
+    @TargetGradleVersion(">=1.2 <2.9")
     def "older Gradle versions throw exception when querying natures"() {
         given:
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         rootProject.projectNatures
 
         then:
@@ -45,7 +45,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         def natures = rootProject.projectNatures.collect{ it.id }
 
         then:
@@ -76,7 +76,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         """
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         EclipseProject javaProject = rootProject.children.find{ it.name == 'java-project' }
         EclipseProject groovyProject = rootProject.children.find{ it.name == 'groovy-project' }
         EclipseProject scalaProject = rootProject.children.find{ it.name == 'scala-project' }
@@ -102,7 +102,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
 
         then:
         rootProject.projectNatures.collect{ it.id } == ['sample.nature.a', 'sample.nature.b']
@@ -124,19 +124,19 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
 
         then:
         rootProject.projectNatures.collect{ it.id } == ['org.eclipse.jdt.core.javanature', 'sample.nature.a', 'sample.nature.b']
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8 <2.9")
+    @TargetGradleVersion(">=1.2 <2.9")
     def "older Gradle versions throw exception when querying build commands"() {
         given:
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         rootProject.buildCommands
 
         then:
@@ -150,7 +150,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         def buuldCommandNames = rootProject.buildCommands.collect{ it.name }
 
         then:
@@ -164,7 +164,6 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         ['groovy']                  | ['org.eclipse.jdt.core.javabuilder']
         ['java', 'scala']           | ['org.scala-ide.sdt.core.scalabuilder']
         ['java', 'scala', 'groovy'] | ['org.scala-ide.sdt.core.scalabuilder']
-        ['java','ear']              | []
     }
 
     @TargetGradleVersion(">=2.9")
@@ -180,7 +179,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         """
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         EclipseProject javaProject = rootProject.children.find{ it.name == 'java-project' }
         EclipseProject scalaProject = rootProject.children.find{ it.name == 'scala-project' }
 
@@ -205,7 +204,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         def buildCommands = rootProject.buildCommands
 
         then:
@@ -233,7 +232,7 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         settingsFile << "rootProject.name = 'root'"
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
         def buildCommands = rootProject.buildCommands
 
         then:
@@ -243,4 +242,5 @@ class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
         buildCommands[1].name == 'customBuildCommand'
         buildCommands[1].arguments.isEmpty()
     }
+
 }

@@ -20,6 +20,8 @@ import org.gradle.internal.environment.GradleBuildEnvironment
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import spock.lang.Ignore
+import spock.lang.Issue
 
 class SmokeContinuousIntegrationTest extends Java7RequiringContinuousIntegrationTest {
     def setup() {
@@ -37,7 +39,7 @@ class SmokeContinuousIntegrationTest extends Java7RequiringContinuousIntegration
 
         buildFile << """
             task echo {
-              inputs.files file("marker")
+              inputs.files "marker"
               doLast {
                 println "value: " + file("marker").text
               }
@@ -58,12 +60,41 @@ class SmokeContinuousIntegrationTest extends Java7RequiringContinuousIntegration
         output.contains "value: changed"
     }
 
+    def "notifications work with quiet logging"() {
+        given:
+        def markerFile = file("marker")
+
+        when:
+        markerFile.text = "original"
+
+        buildFile << """
+            task echo {
+              inputs.files "marker"
+              doLast {
+                println "value: " + file("marker").text
+              }
+            }
+        """
+
+        then:
+        executer.withArgument("-q")
+        succeeds("echo")
+        output.contains "value: original"
+
+        when:
+        waitBeforeModification(markerFile)
+        markerFile.text = "changed"
+
+        then:
+        succeeds()
+        output.contains "value: changed"
+    }
+
     def "can recover from build failure"() {
         given:
         def markerFile = file("marker")
 
         when:
-        executer.withStackTraceChecksDisabled()
         buildFile << """
             task build {
               def f = file("marker")
@@ -241,11 +272,63 @@ class SmokeContinuousIntegrationTest extends Java7RequiringContinuousIntegration
         failureDescriptionContains("Could not determine the dependencies of task ':a'.")
     }
 
+    def "failure to determine inputs has a reasonable message when an earlier task succeeds"() {
+        when:
+        buildScript """
+            task a {
+                inputs.files file("inputA")
+                doLast {}
+            }
+            task b {
+                inputs.files files({ throw new Exception("boom") })
+                dependsOn a
+                doLast {}
+            }
+        """
+
+        then:
+        fails("b")
+        failureDescriptionContains("Could not determine the dependencies of task ':b'.")
+    }
+
+    def "failure to determine inputs cancels build and has a reasonable message after initial success"() {
+        when:
+        def bFlag = file("bFlag")
+        buildScript """
+            task a {
+                inputs.files file("inputA")
+                doLast {}
+            }
+            task b {
+                def bFlag = file("bFlag")
+                inputs.files files({
+                    if (!bFlag.exists()) {
+                        return bFlag
+                    }
+
+                    throw new Exception("boom")
+                })
+                dependsOn a
+
+                doLast { }
+            }
+        """
+
+        then:
+        succeeds("b")
+
+        when:
+        bFlag.text = "b executed"
+        then:
+        fails()
+        failureDescriptionContains("Could not determine the dependencies of task ':b'.")
+    }
+
     def "ignores non source when source is empty"() {
         when:
         buildScript """
             task build {
-              inputs.source fileTree("source")
+              inputs.files(fileTree("source")).skipWhenEmpty()
               inputs.files fileTree("ancillary")
               doLast {}
             }
@@ -273,11 +356,24 @@ class SmokeContinuousIntegrationTest extends Java7RequiringContinuousIntegration
         succeeds()
     }
 
+    @Ignore("This goes into a continuous loop since .gradle files change")
     def "project directory can be used as input"() {
         given:
         def aFile = file("A")
         buildFile << """
+        task before {
+            def outputFile = new File(buildDir, "output.txt")
+            outputs.file outputFile
+            outputs.upToDateWhen { false }
+
+            doLast {
+                outputFile.parentFile.mkdirs()
+                outputFile.text = "OK"
+            }
+        }
+
         task a {
+            dependsOn before
             inputs.dir projectDir
             doLast {}
         }
@@ -329,6 +425,45 @@ class SmokeContinuousIntegrationTest extends Java7RequiringContinuousIntegration
         then:
         succeeds "a"
         output.endsWith("(ctrl-d then enter to exit)\n")
+    }
+
+    @Issue("GRADLE-3415")
+    def "watches for changes when some task has a single input file in the parent directory of another task's input directory"() {
+        given:
+        def topLevelFile = file("src/topLevel.txt").createFile()
+        def nestedFile = file("src/subdirectory/nested.txt").createFile()
+        buildFile << """
+        task inner {
+            inputs.file "src/topLevel.txt"
+            doLast {}
+        }
+
+        task outer {
+            dependsOn inner
+            inputs.dir "src"
+            doLast {}
+        }
+        """
+
+        expect:
+        succeeds("outer")
+        executedAndNotSkipped(":inner", ":outer")
+
+        when:
+        waitBeforeModification(topLevelFile)
+        topLevelFile.text = "hello"
+
+        then:
+        succeeds()
+        executedAndNotSkipped(":inner", ":outer")
+
+        when: "file is changed"
+        waitBeforeModification(nestedFile)
+        nestedFile.text = "B"
+
+        then:
+        succeeds()
+        executedAndNotSkipped(":outer")
     }
 
 }

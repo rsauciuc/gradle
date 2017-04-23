@@ -19,7 +19,6 @@ import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.CppHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
@@ -30,7 +29,6 @@ import spock.lang.Unroll
 
 class BinaryConfigurationIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
 
-    @LeaksFileHandles
     def "can configure the binaries of a C++ application"() {
         given:
         buildFile << """
@@ -63,11 +61,10 @@ model {
         run "mainExecutable"
 
         then:
-        def executable = executable("build/binaries/mainExecutable/main")
+        def executable = executable("build/exe/main/main")
         executable.exec().out == "Hello!"
     }
 
-    @LeaksFileHandles("can't delete build/binaries/mainExecutable")
     def "can build debug binaries for a C++ executable"() {
         given:
         buildFile << """
@@ -103,21 +100,20 @@ model {
         run "mainExecutable"
 
         then:
-        def executable = executable("build/binaries/mainExecutable/main")
+        def executable = executable("build/exe/main/main")
         executable.exec().out == "Hello!"
         executable.assertDebugFileExists()
         // TODO - need to verify that the debug info ended up in the binary
     }
 
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-    @LeaksFileHandles
     def "can configure the binaries of a C++ library"() {
         given:
         buildFile << """
 apply plugin: "cpp"
 
 model {
-    components { comp ->
+    components {
         hello(NativeLibrarySpec) {
             binaries.all {
                 cppCompiler.define 'ENABLE_GREETING'
@@ -125,7 +121,7 @@ model {
         }
         main(NativeExecutableSpec) {
             binaries.all {
-                lib comp.hello.static
+                lib \$('components.hello').static
             }
         }
     }
@@ -163,8 +159,8 @@ model {
         run "installMainExecutable"
 
         then:
-        staticLibrary("build/binaries/helloStaticLibrary/hello").assertExists()
-        installation("build/install/mainExecutable").exec().out == "Hello!"
+        staticLibrary("build/libs/hello/static/hello").assertExists()
+        installation("build/install/main").exec().out == "Hello!"
     }
 
     def "can customize binaries before and after linking"() {
@@ -178,26 +174,24 @@ model {
         main(NativeExecutableSpec)
     }
     tasks { t ->
-        $.components.main.binaries { binaries ->
-            binaries.values().each { binary ->
-                def preLinkTask = binary.tasks.taskName("preLink")
-                t.create(preLinkTask) {
-                    dependsOn binary.tasks.withType(CppCompile)
-                    doLast {
-                        println "Pre Link"
-                    }
+        $.components.main.binaries.each { binary ->
+            def preLinkTask = binary.tasks.taskName("preLink")
+            t.create(preLinkTask) {
+                dependsOn binary.tasks.withType(CppCompile)
+                doLast {
+                    println "Pre Link"
                 }
-                binary.tasks.link.dependsOn preLinkTask
-
-                def postLinkTask = binary.tasks.taskName("postLink")
-                t.create(postLinkTask) {
-                    dependsOn binary.tasks.link
-                    doLast {
-                        println "Post Link"
-                    }
-                }
-                binary.tasks.build.dependsOn postLinkTask
             }
+            binary.tasks.link.dependsOn preLinkTask
+
+            def postLinkTask = binary.tasks.taskName("postLink")
+            t.create(postLinkTask) {
+                dependsOn binary.tasks.link
+                doLast {
+                    println "Post Link"
+                }
+            }
+            binary.tasks.build.dependsOn postLinkTask
         }
     }
 }
@@ -277,15 +271,14 @@ model {
         succeeds "mainExecutable", "helloSharedLibrary", "helloStaticLibrary"
 
         then:
-        def modPath = {TestFile file -> new TestFile("${file.parentFile}/new_output/_${file.name}")}
-        modPath(executable("build/binaries/mainExecutable/main").file).assertExists()
-        modPath(sharedLibrary("build/binaries/helloSharedLibrary/hello").file).assertExists()
-        modPath(staticLibrary("build/binaries/helloStaticLibrary/hello").file).assertExists()
+        def modPath = { TestFile file -> new TestFile("${file.parentFile}/new_output/_${file.name}") }
+        modPath(executable("build/exe/main/main").file).assertExists()
+        modPath(sharedLibrary("build/libs/hello/shared/hello").file).assertExists()
+        modPath(staticLibrary("build/libs/hello/static/hello").file).assertExists()
     }
 
     @Unroll
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-    @LeaksFileHandles
     def "can link to #linkage library binary with custom output file"() {
         given:
         def app = new CppHelloWorldApp()
@@ -320,7 +313,7 @@ model {
         succeeds "installMainExecutable"
 
         then:
-        installation("build/install/mainExecutable").exec().out == app.englishOutput
+        installation("build/install/main").exec().out == app.englishOutput
 
         where:
         linkage << ["static", "shared"]

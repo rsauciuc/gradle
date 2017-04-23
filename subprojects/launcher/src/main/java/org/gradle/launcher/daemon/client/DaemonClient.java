@@ -28,6 +28,7 @@ import org.gradle.internal.concurrent.CompositeStoppable;
 import org.gradle.internal.concurrent.ExecutorFactory;
 import org.gradle.internal.id.IdGenerator;
 import org.gradle.internal.invocation.BuildAction;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.diagnostics.DaemonDiagnostics;
@@ -35,8 +36,8 @@ import org.gradle.launcher.daemon.protocol.*;
 import org.gradle.launcher.daemon.server.api.DaemonStoppedException;
 import org.gradle.launcher.exec.BuildActionExecuter;
 import org.gradle.launcher.exec.BuildActionParameters;
-import org.gradle.logging.internal.OutputEventListener;
-import org.gradle.messaging.remote.internal.Connection;
+import org.gradle.internal.logging.events.OutputEventListener;
+import org.gradle.internal.remote.internal.Connection;
 
 import java.io.InputStream;
 import java.util.List;
@@ -85,17 +86,19 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
     private final InputStream buildStandardInput;
     private final ExecutorFactory executorFactory;
     private final IdGenerator<?> idGenerator;
+    private final ProcessEnvironment processEnvironment;
 
     //TODO - outputEventListener and buildStandardInput are per-build settings
     //so down the road we should refactor the code accordingly and potentially attach them to BuildActionParameters
     public DaemonClient(DaemonConnector connector, OutputEventListener outputEventListener, ExplainingSpec<DaemonContext> compatibilitySpec,
-                        InputStream buildStandardInput, ExecutorFactory executorFactory, IdGenerator<?> idGenerator) {
+                        InputStream buildStandardInput, ExecutorFactory executorFactory, IdGenerator<?> idGenerator, ProcessEnvironment processEnvironment) {
         this.connector = connector;
         this.outputEventListener = outputEventListener;
         this.compatibilitySpec = compatibilitySpec;
         this.buildStandardInput = buildStandardInput;
         this.executorFactory = executorFactory;
         this.idGenerator = idGenerator;
+        this.processEnvironment = processEnvironment;
     }
 
     protected IdGenerator<?> getIdGenerator() {
@@ -114,14 +117,16 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
      */
     public Object execute(BuildAction action, BuildRequestContext requestContext, BuildActionParameters parameters, ServiceRegistry contextServices) {
         Object buildId = idGenerator.generateId();
-        Build build = new Build(buildId, action, requestContext.getClient(), requestContext.getBuildTimeClock().getStartTime(), parameters);
         List<DaemonInitialConnectException> accumulatedExceptions = Lists.newArrayList();
+
+        LOGGER.debug("Executing build " + buildId + " in daemon client {pid=" + processEnvironment.maybeGetPid() + "}");
 
         int saneNumberOfAttempts = 100; //is it sane enough?
 
         for (int i = 1; i < saneNumberOfAttempts; i++) {
             final DaemonClientConnection connection = connector.connect(compatibilitySpec);
             try {
+                Build build = new Build(buildId, connection.getDaemon().getToken(), action, requestContext.getClient(), requestContext.getBuildTimeClock().getStartTime(), parameters);
                 return executeBuild(build, connection, requestContext.getCancellationToken(), requestContext.getEventConsumer());
             } catch (DaemonInitialConnectException e) {
                 // this exception means that we want to try again.
@@ -133,8 +138,8 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
         }
 
         throw new NoUsableDaemonFoundException("Unable to find a usable idle daemon. I have connected to "
-                + saneNumberOfAttempts + " different daemons but I could not use any of them to run build: " + build
-                + ".  BuildActionParameters were " + parameters + ".", accumulatedExceptions);
+                + saneNumberOfAttempts + " different daemons but I could not use any of them to run the build. BuildActionParameters were "
+                + parameters + ".", accumulatedExceptions);
     }
 
     protected Object executeBuild(Build build, DaemonClientConnection connection, BuildCancellationToken cancellationToken, BuildEventConsumer buildEventConsumer) throws DaemonInitialConnectException {
@@ -184,7 +189,7 @@ public class DaemonClient implements BuildActionExecuter<BuildActionParameters> 
 
     private Object monitorBuild(Build build, DaemonDiagnostics diagnostics, Connection<Message> connection, BuildCancellationToken cancellationToken, BuildEventConsumer buildEventConsumer) {
         DaemonClientInputForwarder inputForwarder = new DaemonClientInputForwarder(buildStandardInput, connection, executorFactory);
-        DaemonCancelForwarder cancelForwarder = new DaemonCancelForwarder(connection, cancellationToken, idGenerator);
+        DaemonCancelForwarder cancelForwarder = new DaemonCancelForwarder(connection, cancellationToken);
         try {
             cancelForwarder.start();
             inputForwarder.start();

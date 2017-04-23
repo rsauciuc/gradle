@@ -15,7 +15,6 @@
  */
 package org.gradle.api.internal.artifacts.mvnsettings;
 
-import org.apache.maven.settings.Settings;
 import org.apache.maven.settings.building.SettingsBuildingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +51,7 @@ public class DefaultLocalMavenRepositoryLocator implements LocalMavenRepositoryL
                 return new File(resolvePlaceholders(repoPath.trim()));
             } else {
                 File defaultLocation = new File(system.getProperty("user.home"), "/.m2/repository").getAbsoluteFile();
-                LOGGER.debug(String.format("No local repository in Settings file defined. Using default path: %s", defaultLocation));
+                LOGGER.debug("No local repository in Settings file defined. Using default path: {}", defaultLocation);
                 return defaultLocation;
             }
         } catch (SettingsBuildingException e) {
@@ -65,8 +64,7 @@ public class DefaultLocalMavenRepositoryLocator implements LocalMavenRepositoryL
     // (see http://forums.gradle.org/gradle/topics/override_location_of_the_local_maven_repo).
     private synchronized String parseLocalRepoPathFromMavenSettings() throws SettingsBuildingException {
         if (localRepoPathFromMavenSettings == null) {
-            Settings settings = settingsProvider.buildSettings();
-            localRepoPathFromMavenSettings = settings.getLocalRepository();
+            localRepoPathFromMavenSettings = settingsProvider.getLocalRepository();
         }
         return localRepoPathFromMavenSettings;
     }

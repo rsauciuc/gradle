@@ -20,9 +20,12 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 import org.gradle.api.Action;
 import org.gradle.api.DefaultTask;
+import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.OutputFile;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.build.docs.dsl.source.model.ClassMetaData;
 import org.gradle.build.docs.model.SimpleClassMetaDataRepository;
@@ -33,12 +36,15 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.*;
 
+@CacheableTask
 public class GenerateDefaultImportsTask extends DefaultTask {
     private File metaDataFile;
-    private File destFile;
-    private Set<String> excludePatterns = new HashSet<String>();
-    private Set<String> extraPackages = new HashSet<String>();
+    private File importsDestFile;
+    private File mappingDestFile;
+    private Set<String> excludePatterns = new LinkedHashSet<String>();
+    private Set<String> extraPackages = new LinkedHashSet<String>();
 
+    @PathSensitive(PathSensitivity.NONE)
     @InputFile
     public File getMetaDataFile() {
         return metaDataFile;
@@ -49,12 +55,21 @@ public class GenerateDefaultImportsTask extends DefaultTask {
     }
 
     @OutputFile
-    public File getDestFile() {
-        return destFile;
+    public File getImportsDestFile() {
+        return importsDestFile;
     }
 
-    public void setDestFile(File destFile) {
-        this.destFile = destFile;
+    public void setImportsDestFile(File importsDestFile) {
+        this.importsDestFile = importsDestFile;
+    }
+
+    @OutputFile
+    public File getMappingDestFile() {
+        return mappingDestFile;
+    }
+
+    public void setMappingDestFile(File destFile) {
+        this.mappingDestFile = destFile;
     }
 
     @Input
@@ -73,6 +88,7 @@ public class GenerateDefaultImportsTask extends DefaultTask {
         excludePatterns.add(name);
     }
 
+    @Input
     public Set<String> getExtraPackages() {
         return extraPackages;
     }
@@ -125,16 +141,28 @@ public class GenerateDefaultImportsTask extends DefaultTask {
             }
         });
 
-        for (Map.Entry<String, Collection<String>> entry : simpleNames.asMap().entrySet()) {
-            if (entry.getValue().size() > 1) {
-                System.out.println(String.format("Multiple DSL types have short name '%s'", entry.getKey()));
-                for (String className : entry.getValue()) {
-                    System.out.println("    * " + className);
+        final PrintWriter mappingFileWriter = new PrintWriter(new FileWriter(getMappingDestFile()));
+        try {
+            for (Map.Entry<String, Collection<String>> entry : simpleNames.asMap().entrySet()) {
+                if (entry.getValue().size() > 1) {
+                    System.out.println(String.format("Multiple DSL types have short name '%s'", entry.getKey()));
+                    for (String className : entry.getValue()) {
+                        System.out.println("    * " + className);
+                    }
                 }
+                mappingFileWriter.print(entry.getKey());
+                mappingFileWriter.print(":");
+                for (String className : entry.getValue()) {
+                    mappingFileWriter.print(className);
+                    mappingFileWriter.print(";");
+                }
+                mappingFileWriter.println();
             }
+        } finally {
+            mappingFileWriter.close();
         }
 
-        final PrintWriter writer = new PrintWriter(new FileWriter(getDestFile()));
+        final PrintWriter writer = new PrintWriter(new FileWriter(getImportsDestFile()));
         try {
             for (String packageName : packages) {
                 writer.print("import ");

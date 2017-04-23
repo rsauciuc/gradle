@@ -14,19 +14,15 @@
  * limitations under the License.
  */
 
-
 package org.gradle.nativeplatform.sourceset
 
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.CHelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.CppCallingCHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
-
-// TODO:DAZ Test incremental
-// TODO:DAZ Test dependency on functional source set
-// TODO:DAZ Test dependency on source set that is not HeaderExportingSourceSet
-// TODO:DAZ Sad day tests
-@LeaksFileHandles
+// TODO: Test incremental
+// TODO: Test dependency on functional source set
+// TODO: Test dependency on source set that is not HeaderExportingSourceSet
+// TODO: Sad day tests
 class SourceSetDependenciesIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
 
     def "source dependency on source set of same type"() {
@@ -55,7 +51,7 @@ model {
         succeeds "mainExecutable"
 
         then:
-        executable("build/binaries/mainExecutable/main").exec().out == app.englishOutput
+        executable("build/exe/main/main").exec().out == app.englishOutput
     }
 
     def "source dependency on source set of headers"() {
@@ -72,7 +68,7 @@ model {
         library(NativeLibrarySpec)
         main(NativeExecutableSpec) {
             sources {
-                c.lib comp.library.sources.c
+                c.lib \$.components.library.sources.c
             }
         }
     }
@@ -82,7 +78,7 @@ model {
         succeeds "mainExecutable"
 
         then:
-        executable("build/binaries/mainExecutable/main").exec().out == app.englishOutput
+        executable("build/exe/main/main").exec().out == app.englishOutput
     }
 
     def "source dependency on source set of different type"() {
@@ -112,7 +108,7 @@ model {
         succeeds "mainExecutable"
 
         then:
-        executable("build/binaries/mainExecutable/main").exec().out == app.englishOutput
+        executable("build/exe/main/main").exec().out == app.englishOutput
     }
 
     def "source files in depended-on source set are not included"() {
@@ -132,7 +128,7 @@ model {
         extra(NativeLibrarySpec)
         main(NativeExecutableSpec) {
             sources {
-                cpp.lib comp.extra.sources.cpp
+                cpp.lib \$.components.extra.sources.cpp
             }
         }
     }
@@ -159,7 +155,7 @@ model {
         extra(NativeLibrarySpec)
         main(NativeExecutableSpec) {
             binaries.all {
-                lib comp.extra.sources.cpp
+                lib \$.components.extra.sources.cpp
             }
         }
     }

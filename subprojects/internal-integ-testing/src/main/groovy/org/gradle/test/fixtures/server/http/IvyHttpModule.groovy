@@ -17,6 +17,8 @@
 package org.gradle.test.fixtures.server.http
 
 import org.gradle.test.fixtures.HttpModule
+import org.gradle.test.fixtures.Module
+import org.gradle.test.fixtures.ModuleArtifact
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.ivy.IvyDescriptor
 import org.gradle.test.fixtures.ivy.IvyFileModule
@@ -26,13 +28,20 @@ class IvyHttpModule implements RemoteIvyModule, HttpModule {
     public final IvyHttpRepository repository
     private final IvyFileModule backingModule
     private final HttpServer server
+    private final String repoPrefix
     private final String prefix
 
-    IvyHttpModule(IvyHttpRepository repository, HttpServer server, String prefix, IvyFileModule backingModule) {
+    IvyHttpModule(IvyHttpRepository repository, HttpServer server, String repoPrefix, String prefix, IvyFileModule backingModule) {
         this.repository = repository
+        this.repoPrefix = repoPrefix
         this.prefix = prefix
         this.server = server
         this.backingModule = backingModule
+    }
+
+    @Override
+    String getGroup() {
+        return backingModule.group
     }
 
     String getOrganisation() {
@@ -41,6 +50,11 @@ class IvyHttpModule implements RemoteIvyModule, HttpModule {
 
     String getModule() {
         return backingModule.module
+    }
+
+    @Override
+    String getVersion() {
+        return backingModule.version
     }
 
     String getRevision() {
@@ -96,6 +110,23 @@ class IvyHttpModule implements RemoteIvyModule, HttpModule {
         return this
     }
 
+    @Override
+    IvyHttpModule dependsOn(Module module) {
+        backingModule.dependsOn(module)
+        return this
+    }
+
+    @Override
+    IvyHttpModule dependsOn(Map<String, ?> attributes, Module module) {
+        backingModule.dependsOn(attributes, module)
+        return this
+    }
+
+    /**
+     * Adds an additional artifact to this module.
+     * @param options Can specify any of name, type, ext or classifier
+     * @return this
+     */
     IvyHttpModule artifact(Map<String, ?> options = [:]) {
         backingModule.artifact(options)
         return this
@@ -150,16 +181,16 @@ class IvyHttpModule implements RemoteIvyModule, HttpModule {
     }
 
     IvyModuleHttpArtifact getArtifact(Map<String, ?> options = [:]) {
-        def backingFile = backingModule.file(options)
-        return new IvyModuleHttpArtifact(server, prefix, backingModule.getArtifactFilePath(options), backingFile)
+        def artifact = backingModule.moduleArtifact(options)
+        return new IvyModuleHttpArtifact(server, prefix, artifact)
     }
 
     IvyModuleHttpArtifact getIvy() {
-        return new IvyModuleHttpArtifact(server, prefix, backingModule.ivyFilePath, ivyFile)
+        return new IvyModuleHttpArtifact(server, prefix, backingModule.ivy)
     }
 
     IvyModuleHttpArtifact getJar() {
-        return new IvyModuleHttpArtifact(server, prefix, backingModule.jarFilePath, jarFile)
+        return new IvyModuleHttpArtifact(server, prefix, backingModule.jar)
     }
 
     void assertIvyAndJarFilePublished() {
@@ -167,33 +198,31 @@ class IvyHttpModule implements RemoteIvyModule, HttpModule {
     }
 
     private class IvyModuleHttpArtifact extends HttpArtifact {
-        final TestFile backingFile
-        final String filePath
+        final ModuleArtifact backingArtifact
 
-        IvyModuleHttpArtifact(HttpServer server, String modulePath, String filePath, TestFile backingFile) {
+        IvyModuleHttpArtifact(HttpServer server, String modulePath, ModuleArtifact backingArtifact) {
             super(server, modulePath)
-            this.filePath = filePath
-            this.backingFile = backingFile
+            this.backingArtifact = backingArtifact
         }
 
         @Override
-        protected String getPath() {
-            "${modulePath}/${filePath}"
+        String getPath() {
+            return repoPrefix + '/' + backingArtifact.path
         }
 
         @Override
         TestFile getFile() {
-            return backingFile
+            return backingArtifact.file
         }
 
         @Override
         protected TestFile getSha1File() {
-            return backingModule.getSha1File(backingFile)
+            return backingModule.getSha1File(file)
         }
 
         @Override
         protected TestFile getMd5File() {
-            return backingModule.getMd5File(backingFile)
+            return backingModule.getMd5File(file)
         }
 
         @Override
@@ -201,7 +230,7 @@ class IvyHttpModule implements RemoteIvyModule, HttpModule {
             // MD5 not published for ivy modules
             def sha1File = getSha1File()
             sha1File.assertIsFile()
-            assert new BigInteger(sha1File.text, 16) == new BigInteger(getHash(getFile(), "sha1"), 16)
+            assert new BigInteger(sha1File.text, 16) == new BigInteger(getHash(file, "sha1"), 16)
         }
     }
 }

@@ -15,8 +15,12 @@
  */
 package org.gradle.language.nativeplatform.internal.incremental
 
+import com.google.common.collect.ImmutableMap
+import com.google.common.collect.ImmutableSet
 import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.TaskOutputsInternal
+import org.gradle.api.internal.changedetection.changes.DiscoveredInputRecorder
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.SimpleFileCollection
 import org.gradle.api.internal.tasks.SimpleWorkResult
 import org.gradle.language.base.internal.compile.Compiler
@@ -25,17 +29,20 @@ import org.gradle.nativeplatform.toolchain.Gcc
 import org.gradle.nativeplatform.toolchain.NativeToolChain
 import org.gradle.nativeplatform.toolchain.internal.NativeCompileSpec
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
 
+@UsesNativeServices
 class IncrementalNativeCompilerTest extends Specification {
     @Rule final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
 
     def delegateCompiler = Mock(Compiler)
     def toolChain = Mock(NativeToolChain)
     def task = Mock(TaskInternal)
-    def compiler = new IncrementalNativeCompiler(task, null, null, null, delegateCompiler, toolChain)
+    def directoryTreeFactory = TestFiles.directoryFileTreeFactory()
+    def compiler = new IncrementalNativeCompiler(task, null, null, delegateCompiler, toolChain, directoryTreeFactory)
 
     def outputs = Mock(TaskOutputsInternal)
 
@@ -80,7 +87,7 @@ class IncrementalNativeCompilerTest extends Specification {
 
         then:
         1 * spec.getObjectFileDir() >> outputFile.parentFile
-        1 * outputs.previousFiles >> new SimpleFileCollection(outputFile)
+        1 * outputs.previousOutputFiles >> new SimpleFileCollection(outputFile)
         0 * spec._
         1 * delegateCompiler.execute(spec) >> new SimpleWorkResult(false)
 
@@ -92,7 +99,7 @@ class IncrementalNativeCompilerTest extends Specification {
     @Unroll
     def "imports are includes for toolchain #tcName"() {
        when:
-       def compiler = new IncrementalNativeCompiler(task, null, null, null, delegateCompiler, toolChain)
+       def compiler = new IncrementalNativeCompiler(task, null, null, delegateCompiler, toolChain, directoryTreeFactory)
        then:
        compiler.importsAreIncludes
        where:
@@ -102,4 +109,55 @@ class IncrementalNativeCompilerTest extends Specification {
 
     }
 
+    def "adds include files as discovered inputs"() {
+        given:
+        def spec = Mock(NativeCompileSpec)
+        def compilation = Mock(IncrementalCompilation)
+        def taskInputs = Mock(DiscoveredInputRecorder)
+        def includedFile = temporaryFolder.file("include")
+        compilation.discoveredInputs >> [includedFile ]
+
+        when:
+        compiler.handleDiscoveredInputs(spec, compilation, taskInputs)
+
+        then:
+        1 * spec.getSourceFiles() >> []
+        1 * taskInputs.newInput(includedFile)
+        0 * spec._
+    }
+
+    def "falls back to old behavior of walking include path when macros are used"() {
+        given:
+        def spec = Mock(NativeCompileSpec)
+
+        def taskInputs = Mock(DiscoveredInputRecorder)
+
+        def includeDir = temporaryFolder.createDir("includes")
+        def includedFile = includeDir.createFile("include")
+        def notIncludedFile = includeDir.createFile("notIncluded")
+        def sourceFile = temporaryFolder.file("source")
+        def includeRoots = [ includeDir ]
+
+        def compilation = Mock(IncrementalCompilation)
+        def sourceState = Mock(CompilationFileState)
+        def sourceFiles = ImmutableSet.copyOf([sourceFile])
+        def map = ImmutableMap.copyOf(Collections.singletonMap(sourceFile, sourceState))
+        def finalState = new CompilationState(sourceFiles, map)
+
+        compilation.discoveredInputs >> [includedFile]
+        compilation.getFinalState() >> finalState
+        sourceState.getResolvedIncludes() >> ImmutableSet.copyOf([new ResolvedInclude("MACRO", null)])
+
+        when:
+        compiler.handleDiscoveredInputs(spec, compilation, taskInputs)
+
+        then:
+        1 * spec.getSourceFiles() >> [ sourceFile ]
+        1 * spec.getIncludeRoots() >> includeRoots
+        0 * spec._
+
+        2 * taskInputs.newInput(includedFile)
+        1 * taskInputs.newInput(notIncludedFile)
+        0 * taskInputs._
+    }
 }

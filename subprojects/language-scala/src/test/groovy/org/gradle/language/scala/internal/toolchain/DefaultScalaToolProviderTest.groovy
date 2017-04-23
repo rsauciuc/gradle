@@ -16,22 +16,22 @@
 
 package org.gradle.language.scala.internal.toolchain
 
-import org.gradle.api.internal.artifacts.dsl.dependencies.ProjectFinder
 import org.gradle.api.internal.file.FileResolver
-import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonManager
+import org.gradle.workers.internal.WorkerDaemonFactory
 import org.gradle.language.base.internal.compile.CompileSpec
 import spock.lang.Specification
 
 class DefaultScalaToolProviderTest extends Specification {
     FileResolver fileResolver = Mock()
-    CompilerDaemonManager compilerDaemonManager = Mock()
+    WorkerDaemonFactory workerDaemonFactory = Mock()
     Set<File> scalacClasspath = Mock()
     Set<File> zincClasspath = Mock()
-    ProjectFinder projectFinder = Mock()
+    File gradleUserHome = Mock()
+    File rootProjectDir = Mock()
 
     def "newCompiler provides decent error for unsupported CompileSpec"() {
         setup:
-        DefaultScalaToolProvider scalaToolProvider = new DefaultScalaToolProvider(projectFinder, compilerDaemonManager, scalacClasspath, zincClasspath)
+        DefaultScalaToolProvider scalaToolProvider = new DefaultScalaToolProvider(gradleUserHome, rootProjectDir, workerDaemonFactory, scalacClasspath, zincClasspath)
 
         when:
         scalaToolProvider.newCompiler(UnknownCompileSpec.class)

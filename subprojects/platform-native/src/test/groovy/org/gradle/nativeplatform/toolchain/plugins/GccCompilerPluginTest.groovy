@@ -17,13 +17,11 @@
 package org.gradle.nativeplatform.toolchain.plugins
 
 import org.gradle.api.Plugin
-import org.gradle.nativeplatform.toolchain.NativeToolChain
 import org.gradle.nativeplatform.toolchain.Gcc
+import org.gradle.nativeplatform.toolchain.NativeToolChain
 import org.gradle.nativeplatform.toolchain.internal.gcc.GccToolChain
-import org.gradle.util.TestUtil
 
 class GccCompilerPluginTest extends NativeToolChainPluginTest {
-    def project = TestUtil.createRootProject()
 
     @Override
     Class<? extends Plugin> getPluginClass() {
@@ -38,6 +36,14 @@ class GccCompilerPluginTest extends NativeToolChainPluginTest {
     @Override
     String getToolchainName() {
         "gcc"
+    }
+
+    def "can apply plugin by id"() {
+        given:
+        project.apply plugin: 'gcc-compiler'
+
+        expect:
+        project.plugins.hasPlugin(pluginClass)
     }
 
     def "makes a Gcc tool chain available"() {

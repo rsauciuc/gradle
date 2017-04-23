@@ -44,8 +44,10 @@ class PluginResolutionCachingIntegrationTest extends AbstractIntegrationSpec {
         service.start()
         buildScript """
             plugins { id '$PLUGIN_ID' version '$VERSION' }
-            task pluginApplied << {
-                assert project.pluginApplied
+            task pluginApplied {
+                doLast {
+                    assert project.pluginApplied
+                }
             }
         """
     }
@@ -69,7 +71,7 @@ class PluginResolutionCachingIntegrationTest extends AbstractIntegrationSpec {
         reset()
         args "--refresh-dependencies"
         pluginQuery()
-        moduleResolution()
+        moduleResolutionWithRevalidate()
         build()
 
         reset()
@@ -166,6 +168,10 @@ class PluginResolutionCachingIntegrationTest extends AbstractIntegrationSpec {
 
     void moduleResolution() {
         module.allowAll()
+    }
+
+    void moduleResolutionWithRevalidate() {
+        module.revalidate()
     }
 
     void pluginQuery() {

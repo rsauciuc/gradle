@@ -18,10 +18,9 @@ package org.gradle.model.internal.type;
 
 import com.google.common.collect.ImmutableList;
 
-import java.lang.reflect.GenericArrayType;
-import java.lang.reflect.Type;
+import java.lang.reflect.Array;
 
-class GenericArrayTypeWrapper implements GenericArrayType, TypeWrapper {
+class GenericArrayTypeWrapper implements TypeWrapper {
     private final TypeWrapper componentType;
     private final int hashCode;
 
@@ -30,14 +29,23 @@ class GenericArrayTypeWrapper implements GenericArrayType, TypeWrapper {
         this.hashCode = hashCode;
     }
 
-    @Override
-    public Type getGenericComponentType() {
-        return componentType.unwrap();
+    public TypeWrapper getComponentType() {
+        return componentType;
     }
 
     @Override
-    public Type unwrap() {
-        return this;
+    public Class<?> getRawClass() {
+        // This could probably be more efficient
+        return Array.newInstance(componentType.getRawClass(), 0).getClass();
+    }
+
+    @Override
+    public boolean isAssignableFrom(TypeWrapper wrapper) {
+        if (wrapper instanceof GenericArrayTypeWrapper) {
+            GenericArrayTypeWrapper arrayType = (GenericArrayTypeWrapper) wrapper;
+            return componentType.isAssignableFrom(arrayType.componentType);
+        }
+        return false;
     }
 
     @Override
@@ -47,9 +55,9 @@ class GenericArrayTypeWrapper implements GenericArrayType, TypeWrapper {
 
     @Override
     public boolean equals(Object o) {
-        if (o instanceof GenericArrayType) {
-            GenericArrayType that = (GenericArrayType) o;
-            return this == that || getGenericComponentType().equals(that.getGenericComponentType());
+        if (o instanceof GenericArrayTypeWrapper) {
+            GenericArrayTypeWrapper that = (GenericArrayTypeWrapper) o;
+            return this == that || componentType.equals(that.componentType);
         } else {
             return false;
         }

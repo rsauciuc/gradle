@@ -15,9 +15,12 @@
  */
 package org.gradle.api.internal.artifacts;
 
-import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphVisitor;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.DependencyArtifactsVisitor;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphVisitor;
 import org.gradle.api.internal.artifacts.repositories.ResolutionAwareRepository;
+import org.gradle.api.internal.attributes.AttributesSchemaInternal;
+import org.gradle.api.specs.Spec;
+import org.gradle.internal.component.model.DependencyMetadata;
 
 import java.util.List;
 
@@ -25,6 +28,8 @@ public interface ArtifactDependencyResolver {
     void resolve(ResolveContext resolveContext,
                  List<? extends ResolutionAwareRepository> repositories,
                  GlobalDependencyResolutionRules metadataHandler,
+                 Spec<? super DependencyMetadata> edgeFilter,
                  DependencyGraphVisitor graphVisitor,
-                 DependencyArtifactsVisitor artifactsVisitor);
+                 DependencyArtifactsVisitor artifactsVisitor,
+                 AttributesSchemaInternal consumerSchema);
 }

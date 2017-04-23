@@ -10,17 +10,14 @@ Build tasks
 clean - Deletes the build directory (build)
 api:clean - Deletes the build directory (build)
 webapp:clean - Deletes the build directory (build)
-dists - Builds the distribution [api:libs, webapp:libs]
-    docs - Builds the documentation
+dists - Builds the distribution
 api:libs - Builds the JAR
-    api:compile - Compiles the source files
-webapp:libs - Builds the JAR [api:libs]
-    webapp:compile - Compiles the source files
+webapp:libs - Builds the JAR
 
 Build Setup tasks
 -----------------
-init - Initializes a new Gradle build. [incubating]
-wrapper - Generates Gradle wrapper files. [incubating]
+init - Initializes a new Gradle build.
+wrapper - Generates Gradle wrapper files.
 
 Help tasks
 ----------
@@ -36,6 +33,9 @@ webapp:dependencies - Displays all dependencies declared in project ':webapp'.
 dependencyInsight - Displays the insight into a specific dependency in root project 'projectReports'.
 api:dependencyInsight - Displays the insight into a specific dependency in project ':api'.
 webapp:dependencyInsight - Displays the insight into a specific dependency in project ':webapp'.
+dependentComponents - Displays the dependent components of components in root project 'projectReports'. [incubating]
+api:dependentComponents - Displays the dependent components of components in project ':api'. [incubating]
+webapp:dependentComponents - Displays the dependent components of components in project ':webapp'. [incubating]
 help - Displays a help message.
 api:help - Displays a help message.
 webapp:help - Displays a help message.
@@ -51,3 +51,9 @@ webapp:properties - Displays the properties of project ':webapp'.
 tasks - Displays the tasks runnable from root project 'projectReports' (some of the displayed tasks may belong to subprojects).
 api:tasks - Displays the tasks runnable from project ':api'.
 webapp:tasks - Displays the tasks runnable from project ':webapp'.
+
+Other tasks
+-----------
+api:compile - Compiles the source files
+webapp:compile - Compiles the source files
+docs - Builds the documentation

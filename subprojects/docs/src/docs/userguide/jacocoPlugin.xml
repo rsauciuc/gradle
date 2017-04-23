@@ -24,7 +24,7 @@
 
     <para>The JaCoCo plugin provides code coverage metrics for Java code via integration with <ulink url="http://www.eclemma.org/jacoco/">JaCoCo</ulink>.
     </para>
-    <section>
+    <section id="sec:jacoco_getting_started">
         <title>Getting Started</title>
         <para>To get started, apply the JaCoCo plugin to the project you want to calculate code coverage for.</para>
         <sample id="applyJacoco" dir="testing/jacoco/quickstart" title="Applying the JaCoCo plugin">
@@ -41,7 +41,7 @@
         </para>
     </section>
 
-    <section>
+    <section id="sec:configuring_the_jacoco_plugin">
         <title>Configuring the JaCoCo Plugin</title>
         <para>
             The JaCoCo plugin adds a project extension named <literal>jacoco</literal> of type <apilink class="org.gradle.testing.jacoco.plugins.JacocoPluginExtension"/>,
@@ -65,7 +65,7 @@
             </tr>
         </table>
     </section>
-    <section>
+    <section id="sec:jacoco_report_configuration">
         <title>JaCoCo Report configuration</title>
         <para>The
             <apilink class="org.gradle.testing.jacoco.tasks.JacocoReport"/>
@@ -81,7 +81,38 @@
         </imageobject>
     </section>
 
-    <section>
+    <section id="sec:jacoco_report_violation_rules">
+        <title>Enforcing code coverage metrics</title>
+        <note>
+            <para>
+                This feature requires the use of JaCoCo version 0.6.3 or higher.
+            </para>
+        </note>
+        <para>
+            The <apilink class="org.gradle.testing.jacoco.tasks.JacocoCoverageVerification"/> task can be used to verify if code coverage
+            metrics are met based on configured rules. Its API exposes the method
+            <apilink class="org.gradle.testing.jacoco.tasks.JacocoCoverageVerification" method="violationRules(org.gradle.api.Action)"/>
+            which is used as main entry point for configuring rules.
+            Invoking any of those methods returns an instance of <apilink class="org.gradle.testing.jacoco.tasks.rules.JacocoViolationRulesContainer"/> providing
+            extensive configuration options. The build fails if any of the configured rules are not met. JaCoCo only reports the first violated rule.
+        </para>
+        <para>
+            Code coverage requirements can be specified for a project as a whole, for individual files, and for
+            particular JaCoCo-specific types of coverage, e.g., lines covered or branches covered. The following example
+            describes the syntax.
+        </para>
+        <sample id="configViolationRules" dir="testing/jacoco/quickstart" includeLocation="true" title="Configuring violation rules">
+            <sourcefile file="build.gradle" snippet="violation-rules-configuration"/>
+        </sample>
+        <para>
+            The <apilink class="org.gradle.testing.jacoco.tasks.JacocoCoverageVerification"/> task is not a task dependency of the
+            <literal>check</literal> task provided by the Java plugin. There is a good reason for it. The task is currently not incremental as it
+            doesn't declare any outputs. Any violation of the declared rules would automatically result in a failed build when executing the
+            <literal>check</literal> task. This behavior might not be desirable for all users. Future versions of Gradle might change the behavior.
+        </para>
+    </section>
+
+    <section id="sec:jacoco_specific_task_configuration">
         <title>JaCoCo specific task configuration</title>
         <para>The JaCoCo plugin adds a
             <apilink class="org.gradle.testing.jacoco.plugins.JacocoTaskExtension"/>
@@ -124,6 +155,10 @@
             <tr>
                 <td>excludeClassLoaders</td>
                 <td>[]</td>
+            </tr>
+            <tr>
+                <td>includeNoLocationClasses</td>
+                <td>false</td>
             </tr>
             <tr>
                 <td>sessionId</td>
@@ -188,7 +223,7 @@
         </sample>
     </section>
 
-    <section>
+    <section id="sec:jacoco_tasks">
         <title>Tasks</title>
         <para>For projects that also apply the Java Plugin, The JaCoCo plugin automatically adds the following tasks:</para>
         <table>
@@ -211,10 +246,20 @@
                 </td>
                 <td>Generates code coverage report for the test task.</td>
             </tr>
+            <tr>
+                <td>
+                    <literal>jacocoTestCoverageVerification</literal>
+                </td>
+                <td>-</td>
+                <td>
+                    <apilink class="org.gradle.testing.jacoco.tasks.JacocoCoverageVerification"/>
+                </td>
+                <td>Verifies code coverage metrics based on specified rules for the test task.</td>
+            </tr>
         </table>
     </section>
 
-    <section>
+    <section id="sec:jacoco_dependency_management">
         <title>Dependency management</title>
         <para>The JaCoCo plugin adds the following dependency configurations:</para>
         <table>
@@ -230,9 +275,10 @@
                     <filename>jacocoAnt</filename>
                 </td>
                 <td>The JaCoCo Ant library used for running the
-                    <literal>JacocoReport</literal>
-                    and
+                    <literal>JacocoReport</literal>,
                     <literal>JacocoMerge</literal>
+                    and
+                    <literal>JacocoCoverageVerification</literal>
                     tasks.
                 </td>
             </tr>

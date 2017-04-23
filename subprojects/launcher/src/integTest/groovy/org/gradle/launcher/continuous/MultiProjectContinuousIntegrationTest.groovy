@@ -16,12 +16,14 @@
 
 package org.gradle.launcher.continuous
 
+import spock.lang.Ignore
+
 class MultiProjectContinuousIntegrationTest extends Java7RequiringContinuousIntegrationTest {
 
     def upstreamSource, downstreamSource
 
     def setup() {
-        executer.noExtraLogging().withStackTraceChecksDisabled()
+        executer.noExtraLogging()
         settingsFile << "include 'upstream', 'downstream'"
         buildFile << """
             subprojects {
@@ -81,11 +83,24 @@ class MultiProjectContinuousIntegrationTest extends Java7RequiringContinuousInte
         executedAndNotSkipped ":upstream:compileJava", ":downstream:compileJava"
     }
 
+    @Ignore("This goes into a continuous loop since .gradle files change")
     def "can specify root directory of multi project build as a task input; changes are respected"() {
         given:
         buildFile << """
             allprojects {
+                task before {
+                    def outputFile = new File(buildDir, "output.txt")
+                    outputs.file outputFile
+                    outputs.upToDateWhen { false }
+
+                    doLast {
+                        outputFile.parentFile.mkdirs()
+                        outputFile.text = "OK"
+                    }
+                }
+
                 task a {
+                    dependsOn before
                     inputs.dir rootDir
                     doLast {
                     }

@@ -17,29 +17,48 @@
 package org.gradle.api.tasks.javadoc;
 
 import org.gradle.api.InvalidUserDataException;
+import org.gradle.api.Nullable;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.FileTree;
 import org.gradle.api.internal.ClassPathRegistry;
 import org.gradle.api.internal.project.IsolatedAntBuilder;
+import org.gradle.api.internal.tasks.AntGroovydoc;
 import org.gradle.api.logging.LogLevel;
-import org.gradle.api.tasks.*;
+import org.gradle.api.resources.TextResource;
+import org.gradle.api.tasks.CacheableTask;
+import org.gradle.api.tasks.Classpath;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.Optional;
+import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.api.tasks.SourceTask;
+import org.gradle.api.tasks.TaskAction;
 
 import java.io.File;
 import java.io.Serializable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 // This import must be here due to a clash in Java 8 between this and java.util.Optional.
 // Be careful running “Optimize Imports” as it will wipe this out.
 // If there's no import below this comment, this has happened.
-import org.gradle.api.tasks.Optional;
 
 /**
  * <p>Generates HTML API documentation for Groovy source, and optionally, Java source.
  *
- * <p>This task uses Groovy's Groovydoc tool to generate the API documentation. Please note that the Groovydoc tool has
- * some severe limitations at the moment (for example no doc for properties comments). The version of the Groovydoc that
- * is used, is the one from the Groovy defined in the build script. Please note also, that the Groovydoc tool prints to
- * System.out for many of its statements and does circumvents our logging currently.
+ * <p>This task uses Groovy's Groovydoc tool to generate the API documentation. Please note
+ * that the Groovydoc tool has some limitations at the moment. The version of the Groovydoc
+ * that is used, is the one from the Groovy dependency defined in the build script.
  */
+@CacheableTask
 public class Groovydoc extends SourceTask {
     private FileCollection groovyClasspath;
 
@@ -51,6 +70,10 @@ public class Groovydoc extends SourceTask {
 
     private boolean use;
 
+    private boolean noTimestamp;
+
+    private boolean noVersionStamp;
+
     private String windowTitle;
 
     private String docTitle;
@@ -59,9 +82,9 @@ public class Groovydoc extends SourceTask {
 
     private String footer;
 
-    private String overview;
+    private TextResource overview;
 
-    private Set<Link> links = new HashSet<Link>();
+    private Set<Link> links = new LinkedHashSet<Link>();
 
     boolean includePrivate;
 
@@ -72,14 +95,33 @@ public class Groovydoc extends SourceTask {
     @TaskAction
     protected void generate() {
         checkGroovyClasspathNonEmpty(getGroovyClasspath().getFiles());
-        getAntGroovydoc().execute(getSource(), getDestinationDir(), isUse(), getWindowTitle(), getDocTitle(), getHeader(),
-                getFooter(), getOverview(), isIncludePrivate(), getLinks(), getGroovyClasspath(), getClasspath(), getProject());
+        getAntGroovydoc().execute(getSource(), getDestinationDir(), isUse(), isNoTimestamp(), isNoVersionStamp(), getWindowTitle(),
+                getDocTitle(), getHeader(), getFooter(), getPathToOverview(), isIncludePrivate(), getLinks(), getGroovyClasspath(),
+                getClasspath(), getProject());
+    }
+
+    @Nullable @Internal
+    private String getPathToOverview() {
+        TextResource overview = getOverviewText();
+        if (overview!=null) {
+            return overview.asFile().getAbsolutePath();
+        }
+        return null;
     }
 
     private void checkGroovyClasspathNonEmpty(Collection<File> classpath) {
         if (classpath.isEmpty()) {
             throw new InvalidUserDataException("You must assign a Groovy library to the groovy configuration!");
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @PathSensitive(PathSensitivity.RELATIVE)
+    @Override
+    public FileTree getSource() {
+        return super.getSource();
     }
 
     /**
@@ -104,7 +146,7 @@ public class Groovydoc extends SourceTask {
      *
      * @return The classpath containing the Groovy library to be used
      */
-    @InputFiles
+    @Classpath
     public FileCollection getGroovyClasspath() {
         return groovyClasspath;
     }
@@ -121,7 +163,7 @@ public class Groovydoc extends SourceTask {
      *
      * @return The classpath used to locate classes referenced by the documented sources
      */
-    @InputFiles
+    @Classpath
     public FileCollection getClasspath() {
         return classpath;
     }
@@ -133,6 +175,7 @@ public class Groovydoc extends SourceTask {
         this.classpath = classpath;
     }
 
+    @Internal
     public AntGroovydoc getAntGroovydoc() {
         if (antGroovydoc == null) {
             IsolatedAntBuilder antBuilder = getServices().get(IsolatedAntBuilder.class);
@@ -159,6 +202,36 @@ public class Groovydoc extends SourceTask {
      */
     public void setUse(boolean use) {
         this.use = use;
+    }
+
+    /**
+     * Returns whether to include timestamp within hidden comment in generated HTML (Groovy >= 2.4.6).
+     */
+    @Input
+    public boolean isNoTimestamp() {
+        return noTimestamp;
+    }
+
+    /**
+     * Sets whether to include timestamp within hidden comment in generated HTML (Groovy >= 2.4.6).
+     */
+    public void setNoTimestamp(boolean noTimestamp) {
+        this.noTimestamp = noTimestamp;
+    }
+
+    /**
+     * Returns whether to include version stamp within hidden comment in generated HTML (Groovy >= 2.4.6).
+     */
+    @Input
+    public boolean isNoVersionStamp() {
+        return noVersionStamp;
+    }
+
+    /**
+     * Sets whether to include version stamp within hidden comment in generated HTML (Groovy >= 2.4.6).
+     */
+    public void setNoVersionStamp(boolean noVersionStamp) {
+        this.noVersionStamp = noVersionStamp;
     }
 
     /**
@@ -234,17 +307,21 @@ public class Groovydoc extends SourceTask {
     }
 
     /**
-     * Returns a HTML file to be used for overview documentation. Set to {@code null} when there is no overview file.
+     * Returns a HTML text to be used for overview documentation. Set to {@code null} when there is no overview text.
      */
-    public String getOverview() {
+    @Nested
+    @Optional
+    public TextResource getOverviewText() {
         return overview;
     }
 
     /**
-     * Sets a HTML file to be used for overview documentation (optional).
+     * Sets a HTML text to be used for overview documentation (optional).
+     * <p>
+     * <b>Example:</b> {@code overviewText = resources.text.fromFile("/overview.html")}
      */
-    public void setOverview(String overview) {
-        this.overview = overview;
+    public void setOverviewText(TextResource overviewText) {
+        this.overview = overviewText;
     }
 
     /**

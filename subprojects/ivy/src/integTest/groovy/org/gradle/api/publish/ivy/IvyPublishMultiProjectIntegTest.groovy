@@ -29,10 +29,10 @@ class IvyPublishMultiProjectIntegTest extends AbstractIvyPublishIntegTest {
 
         then:
         project1.assertPublishedAsJavaModule()
-        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:2.0@runtime", "org.gradle.test:project3:3.0@runtime")
+        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:2.0@compile", "org.gradle.test:project3:3.0@compile")
 
         project2.assertPublishedAsJavaModule()
-        project2.parsedIvy.assertDependsOn("org.gradle.test:project3:3.0@runtime")
+        project2.parsedIvy.assertDependsOn("org.gradle.test:project3:3.0@compile")
 
         project3.assertPublishedAsJavaModule()
         project3.parsedIvy.dependencies.isEmpty()
@@ -61,10 +61,10 @@ project(":project3") {
 
         then:
         project1.assertPublishedAsJavaModule()
-        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:2.0@runtime", "changed.org:changed-module:changed@runtime")
+        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:2.0@compile", "changed.org:changed-module:changed@compile")
 
         project2.assertPublishedAsJavaModule()
-        project2.parsedIvy.assertDependsOn("changed.org:changed-module:changed@runtime")
+        project2.parsedIvy.assertDependsOn("changed.org:changed-module:changed@compile")
 
         project3.assertPublishedAsJavaModule()
         project3.parsedIvy.dependencies.isEmpty()
@@ -109,11 +109,11 @@ project(":project2") {
 
         then:
         project1.assertPublishedAsJavaModule()
-        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:2.0@runtime", "org.gradle.test:project3:3.0@runtime")
+        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:2.0@compile", "org.gradle.test:project3:3.0@compile")
 
         // published with the correct coordinates, even though artifact has different name
         project2.assertPublishedAsJavaModule()
-        project2.parsedIvy.assertDependsOn("org.gradle.test:project3:3.0@runtime")
+        project2.parsedIvy.assertDependsOn("org.gradle.test:project3:3.0@compile")
 
         project3.assertPublishedAsJavaModule()
         project3.parsedIvy.dependencies.isEmpty()
@@ -161,10 +161,68 @@ project(":project2") {
 
         then:
         project1.assertPublishedAsJavaModule()
-        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:1.0@runtime")
+        project1.parsedIvy.assertDependsOn("org.gradle.test:project2:1.0@compile")
     }
 
+    def "ivy-publish plugin publishes project dependency excludes in descriptor"() {
+        given:
+        settingsFile << """
+include 'project1', 'project2'
+"""
 
+        buildFile << """
+allprojects {
+    group = 'org.gradle.test'
+    version = '1.0'
+}
+
+project(':project1') {
+    apply plugin: 'java'
+
+    repositories {
+        jcenter()
+    }
+
+    dependencies {
+        compile 'commons-logging:commons-logging:1.2'
+    }
+}
+
+project(':project2') {
+    apply plugin: "java"
+    apply plugin: "ivy-publish"
+
+    version = '2.0'
+
+    dependencies {
+        compile project(":project1"), {
+            exclude group: 'commons-logging', module: 'commons-logging'
+        }
+    }
+
+    publishing {
+        repositories {
+            ivy { url "${ivyRepo.uri}" }
+        }
+        publications {
+            ivy(IvyPublication) {
+                from components.java
+            }
+        }
+    }
+}
+"""
+
+        when:
+        run "publish"
+
+        then:
+        project2.assertPublishedAsJavaModule()
+        def dependency = project2.parsedIvy.expectDependency("org.gradle.test:project1:1.0")
+        dependency.exclusions.size() == 1
+        dependency.exclusions[0].org == 'commons-logging'
+        dependency.exclusions[0].module == 'commons-logging'
+    }
 
     private void createBuildScripts(String append = "") {
         settingsFile << """

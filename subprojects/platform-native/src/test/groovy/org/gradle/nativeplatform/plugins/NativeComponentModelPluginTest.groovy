@@ -19,9 +19,20 @@ package org.gradle.nativeplatform.plugins
 import org.gradle.api.Task
 import org.gradle.api.tasks.TaskDependency
 import org.gradle.language.base.plugins.LifecycleBasePlugin
+import org.gradle.model.Model
 import org.gradle.model.ModelMap
+import org.gradle.model.Path
+import org.gradle.model.RuleSource
 import org.gradle.model.internal.type.ModelType
-import org.gradle.nativeplatform.*
+import org.gradle.nativeplatform.BuildType
+import org.gradle.nativeplatform.BuildTypeContainer
+import org.gradle.nativeplatform.Flavor
+import org.gradle.nativeplatform.FlavorContainer
+import org.gradle.nativeplatform.NativeExecutableBinarySpec
+import org.gradle.nativeplatform.NativeExecutableSpec
+import org.gradle.nativeplatform.NativeLibrarySpec
+import org.gradle.nativeplatform.SharedLibraryBinarySpec
+import org.gradle.nativeplatform.StaticLibraryBinarySpec
 import org.gradle.nativeplatform.internal.DefaultFlavor
 import org.gradle.nativeplatform.platform.internal.NativePlatformInternal
 import org.gradle.nativeplatform.toolchain.NativeToolChainRegistry
@@ -30,17 +41,27 @@ import org.gradle.nativeplatform.toolchain.internal.PlatformToolProvider
 import org.gradle.platform.base.BinarySpec
 import org.gradle.platform.base.ComponentSpecContainer
 import org.gradle.platform.base.PlatformContainer
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import org.gradle.util.TestUtil
-import spock.lang.Specification
+import spock.lang.Issue
 
 import static org.gradle.model.internal.type.ModelTypes.modelMap
 
-class NativeComponentModelPluginTest extends Specification {
-    final def project = TestUtil.createRootProject()
-    def registry = project.modelRegistry
+class NativeComponentModelPluginTest extends AbstractProjectBuilderSpec {
+    def registry
 
     def setup() {
+        registry = project.modelRegistry
         project.pluginManager.apply(NativeComponentModelPlugin)
+    }
+
+    def "can apply plugin by id"() {
+        given:
+        def project = TestUtil.createRootProject()
+        project.apply plugin: 'native-component-model'
+
+        expect:
+        project.plugins.hasPlugin(NativeComponentModelPlugin)
     }
 
     public <T> T realizeModelElement(String path, Class<T> type) {
@@ -105,10 +126,10 @@ class NativeComponentModelPluginTest extends Specification {
     def "behaves correctly for defaults when domain is explicitly configured"() {
         when:
         registry
-                .mutate(NativeToolChainRegistry) { it.add toolChain("tc") }
-                .mutate(PlatformContainer) { it.add named(NativePlatformInternal, "platform") }
-                .mutate(BuildTypeContainer) { it.add named(BuildType, "bt") }
-                .mutate(FlavorContainer) { it.add named(Flavor, "flavor1") }
+            .mutate(NativeToolChainRegistry) { it.add toolChain("tc") }
+            .mutate(PlatformContainer) { it.add named(NativePlatformInternal, "platform") }
+            .mutate(BuildTypeContainer) { it.add named(BuildType, "bt") }
+            .mutate(FlavorContainer) { it.add named(Flavor, "flavor1") }
 
         then:
         one(toolChains).name == 'tc'
@@ -121,10 +142,10 @@ class NativeComponentModelPluginTest extends Specification {
         when:
         project.pluginManager.apply(NativeComponentModelPlugin)
         registry
-                .mutate(NativeToolChainRegistry) { it.add toolChain("tc") }
-                .mutate(PlatformContainer) { it.add named(NativePlatformInternal, "platform") }
-                .mutate(BuildTypeContainer) { it.add named(BuildType, "bt") }
-                .mutate(FlavorContainer) { it.add named(Flavor, "flavor1") }
+            .mutate(NativeToolChainRegistry) { it.add toolChain("tc") }
+            .mutate(PlatformContainer) { it.add named(NativePlatformInternal, "platform") }
+            .mutate(BuildTypeContainer) { it.add named(BuildType, "bt") }
+            .mutate(FlavorContainer) { it.add named(Flavor, "flavor1") }
 
         project.model {
             components {
@@ -154,10 +175,10 @@ class NativeComponentModelPluginTest extends Specification {
         when:
         project.pluginManager.apply(NativeComponentModelPlugin)
         registry
-                .mutate(NativeToolChainRegistry) { it.add toolChain("tc") }
-                .mutate(PlatformContainer) { it.add named(NativePlatformInternal, "platform") }
-                .mutate(BuildTypeContainer) { it.add named(BuildType, "bt") }
-                .mutate(FlavorContainer) { it.add named(Flavor, "flavor1") }
+            .mutate(NativeToolChainRegistry) { it.add toolChain("tc") }
+            .mutate(PlatformContainer) { it.add named(NativePlatformInternal, "platform") }
+            .mutate(BuildTypeContainer) { it.add named(BuildType, "bt") }
+            .mutate(FlavorContainer) { it.add named(Flavor, "flavor1") }
 
         project.model {
             components {
@@ -252,5 +273,25 @@ class NativeComponentModelPluginTest extends Specification {
         def tasks = dependencies.getDependencies(Stub(Task))
         assert tasks.size() == 1
         return tasks.asList()[0]
+    }
+
+    @Issue("GRADLE-3523")
+    def "does not prevent build authors to register root nodes of type File"() {
+        when:
+        project.pluginManager.apply(RootFileRules)
+        project.pluginManager.apply(NativeComponentModelPlugin)
+        project.model {
+            components {
+                exe(NativeExecutableSpec)
+            }
+        }
+
+        then:
+        getComponents()
+    }
+
+    static class RootFileRules extends RuleSource {
+        @Model
+        File someFile(@Path("buildDir") File buildDir) { return new File(buildDir, "something") }
     }
 }

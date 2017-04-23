@@ -16,7 +16,7 @@
 
 package org.gradle.integtests.language
 
-import com.sun.xml.internal.ws.util.StringUtils
+import org.apache.commons.lang.StringUtils
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.test.fixtures.archive.JarTestFixture
 
@@ -143,7 +143,7 @@ abstract class AbstractJvmPluginLanguageIntegrationTest extends AbstractIntegrat
         executed ":createMyLibJar", ":myLibJar"
 
         and:
-        def jar = new JarTestFixture(file("build/jars/myLibJar/myLib.jar"))
+        def jar = new JarTestFixture(file("build/jars/myLib/jar/myLib.jar"))
         jar.hasDescendants()
     }
 

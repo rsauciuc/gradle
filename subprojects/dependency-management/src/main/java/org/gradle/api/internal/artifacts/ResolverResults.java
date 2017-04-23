@@ -18,22 +18,56 @@ package org.gradle.api.internal.artifacts;
 import org.gradle.api.artifacts.ResolveException;
 import org.gradle.api.artifacts.ResolvedConfiguration;
 import org.gradle.api.artifacts.result.ResolutionResult;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.VisitedArtifactSet;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.projectresult.ResolvedLocalComponentsResult;
 
 public interface ResolverResults {
     boolean hasError();
 
-    //old model, slowly being replaced by the new model
+    /**
+     * Returns the old model, slowly being replaced by the new model represented by {@link ResolutionResult}. Requires artifacts to be resolved.
+     */
     ResolvedConfiguration getResolvedConfiguration();
 
-    //new model
+    /**
+     * Returns details of the artifacts visited during dependency graph resolution. This set is later refined during artifact resolution and replaced with a new instance.
+     */
+    VisitedArtifactSet getVisitedArtifacts();
+
+    /**
+     * Returns the dependency graph resolve result.
+     */
     ResolutionResult getResolutionResult();
 
+    /**
+     * Returns details of the local components in the resolved dependency graph.
+     */
     ResolvedLocalComponentsResult getResolvedLocalComponents();
 
-    void resolved(ResolutionResult resolutionResult, ResolvedLocalComponentsResult resolvedLocalComponentsResult);
+    /**
+     * Marks the dependency graph resolution as successful, with the given result.
+     */
+    void graphResolved(VisitedArtifactSet visitedArtifacts);
+
+    /**
+     * Marks the dependency graph resolution as successful, with the given result.
+     */
+    void graphResolved(ResolutionResult resolutionResult, ResolvedLocalComponentsResult resolvedLocalComponentsResult, VisitedArtifactSet visitedArtifacts);
 
     void failed(ResolveException failure);
 
-    void withResolvedConfiguration(ResolvedConfiguration resolvedConfiguration);
+    /**
+     * Attaches some opaque state calculated during dependency graph resolution that will later be required to resolve the artifacts.
+     */
+    void retainState(Object artifactResolveState);
+
+    /**
+     * Returns the opaque state required to resolve the artifacts.
+     */
+    Object getArtifactResolveState();
+
+    /**
+     * Marks artifact resolution as successful, clearing state provided by {@link #retainState(Object)}.
+     */
+    void artifactsResolved(ResolvedConfiguration resolvedConfiguration, VisitedArtifactSet visitedArtifacts);
 }

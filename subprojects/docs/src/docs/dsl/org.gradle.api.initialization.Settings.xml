@@ -8,6 +8,9 @@
                 </tr>
             </thead>
             <tr>
+                <td>buildCache</td>
+            </tr>
+            <tr>
                 <td>gradle</td>
             </tr>
             <tr>
@@ -36,7 +39,13 @@
                 </tr>
             </thead>
             <tr>
+                <td>buildCache</td>
+            </tr>
+            <tr>
                 <td>include</td>
+            </tr>
+            <tr>
+                <td>includeBuild</td>
             </tr>
             <tr>
                 <td>includeFlat</td>

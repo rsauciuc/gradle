@@ -17,8 +17,10 @@ package org.gradle.integtests.fixtures.executer;
 
 import org.gradle.api.JavaVersion;
 import org.gradle.internal.jvm.Jvm;
-import org.gradle.launcher.daemon.client.JvmVersionDetector;
+import org.gradle.internal.jvm.inspection.JvmVersionDetector;
+import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
+import org.gradle.util.GradleVersion;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,9 +29,15 @@ import static java.util.Arrays.asList;
 import static org.apache.commons.collections.CollectionUtils.containsAny;
 
 public class DaemonGradleExecuter extends ForkingGradleExecuter {
+    private static final JvmVersionDetector JVM_VERSION_DETECTOR = GLOBAL_SERVICES.get(JvmVersionDetector.class);
 
     public DaemonGradleExecuter(GradleDistribution distribution, TestDirectoryProvider testDirectoryProvider) {
         super(distribution, testDirectoryProvider);
+        requireDaemon();
+    }
+
+    public DaemonGradleExecuter(GradleDistribution distribution, TestDirectoryProvider testDirectoryProvider, GradleVersion gradleVersion, IntegrationTestBuildContext buildContext) {
+        super(distribution, testDirectoryProvider, gradleVersion, buildContext);
         requireDaemon();
     }
 
@@ -42,7 +50,7 @@ public class DaemonGradleExecuter extends ForkingGradleExecuter {
     protected List<String> getAllArgs() {
         List<String> args = new ArrayList<String>(super.getAllArgs());
         if(!isQuiet() && isAllowExtraLogging()) {
-            if (!containsAny(args, asList("-i", "--info", "-d", "--debug", "-q", "--quiet"))) {
+            if (!containsAny(args, asList("-i", "--info", "-d", "--debug", "-w", "--warn", "-q", "--quiet"))) {
                 args.add(0, "-i");
             }
         }
@@ -64,7 +72,7 @@ public class DaemonGradleExecuter extends ForkingGradleExecuter {
         // Add JVM heap settings only for shared daemons
         List<String> buildJvmOpts = new ArrayList<String>(super.getImplicitBuildJvmArgs());
 
-        if (new JvmVersionDetector().getJavaVersion(Jvm.forHome(getJavaHome())).compareTo(JavaVersion.VERSION_1_9) < 0) {
+        if (JVM_VERSION_DETECTOR.getJavaVersion(Jvm.forHome(getJavaHome())).compareTo(JavaVersion.VERSION_1_8) < 0) {
             buildJvmOpts.add("-XX:MaxPermSize=320m");
         }
 
@@ -73,4 +81,12 @@ public class DaemonGradleExecuter extends ForkingGradleExecuter {
         return buildJvmOpts;
     }
 
+    @Override
+    protected void transformInvocation(GradleInvocation invocation) {
+        super.transformInvocation(invocation);
+
+        if (!noExplicitNativeServicesDir) {
+            invocation.environmentVars.put(NativeServices.NATIVE_DIR_OVERRIDE, buildContext.getNativeServicesDir().getAbsolutePath());
+        }
+    }
 }

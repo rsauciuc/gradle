@@ -20,18 +20,27 @@ import org.gradle.internal.UncheckedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.UndeclaredThrowableException;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Controls the behavior of an executor when a task is executed and an executor is stopped.
  */
-interface ExecutorPolicy {
+public interface ExecutorPolicy {
     /**
      * Special behavior when a task is executed.
      *
      * The Runnable's run() needs to be called from this method.
      */
     void onExecute(Runnable command);
+
+    /**
+     * Special behavior when a task is executed.
+     *
+     * The Callable's call() needs to be called from this method.
+     */
+    <T> T onExecute(Callable<T> command) throws Exception;
 
     /**
      * Special behavior after an executor is stopped.
@@ -45,7 +54,7 @@ interface ExecutorPolicy {
      *
      * The first exception caught during onExecute(), will be rethrown in onStop().
      */
-    static class CatchAndRecordFailures implements ExecutorPolicy {
+    class CatchAndRecordFailures implements ExecutorPolicy {
         private static final Logger LOGGER = LoggerFactory.getLogger(DefaultExecutorFactory.class);
         private final AtomicReference<Throwable> failure = new AtomicReference<Throwable>();
 
@@ -53,31 +62,36 @@ interface ExecutorPolicy {
             try {
                 command.run();
             } catch (Throwable throwable) {
-                // Capture and log all failures
-                if (!failure.compareAndSet(null, throwable)) {
-                    LOGGER.error(String.format("Failed to execute %s.", command), throwable);
-                }
+                onFailure(String.format("Failed to execute %s.", command), throwable);
+            }
+        }
+
+        @Override
+        public <T> T onExecute(Callable<T> command) throws Exception {
+            try {
+                return command.call();
+            } catch (Exception exception) {
+                onFailure(String.format("Failed to execute %s.", command), exception);
+                throw exception;
+            } catch(Throwable throwable) {
+                onFailure(String.format("Failed to execute %s.", command), throwable);
+                throw new UndeclaredThrowableException(throwable);
+            }
+        }
+
+        public void onFailure(String message, Throwable throwable) {
+            // Capture or log all failures
+            if (!failure.compareAndSet(null, throwable)) {
+                LOGGER.error(message, throwable);
             }
         }
 
         public void onStop() {
             // Rethrow the first failure
-            if (failure.get() != null) {
-                throw UncheckedException.throwAsUncheckedException(failure.get());
+            Throwable failure = this.failure.getAndSet(null);
+            if (failure != null) {
+                throw UncheckedException.throwAsUncheckedException(failure);
             }
-        }
-    }
-
-    /**
-     * Just runs the Runnable and lets any exceptions propagate as usual.
-     */
-    static class PropagateFailures implements ExecutorPolicy {
-        public void onExecute(Runnable command) {
-            command.run();
-        }
-
-        public void onStop() {
-            // Do nothing
         }
     }
 }

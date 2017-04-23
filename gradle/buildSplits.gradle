@@ -15,21 +15,101 @@
  */
 
 def buckets = [
-    "1": [":platformPlay", ":scala", ":languageScala", ":buildComparison",
-        ":ivy", ":platformBase", ":jacoco", ":announce", ":internalIntegTesting",
-        ":diagnostics", ":jetty", ":cli", ":reporting", ":toolingApiBuilders", ":openApi"],
+    "1": [
+        ":platformPlay",
+        ":runtimeApiInfo",
+    ],
 
-    "2": [":toolingApi", ":dependencyManagement", ":testKit", ":distributions",
-        ":pluginUse",  ":buildInit", ":languageGroovy", ":internalTesting",
-        ":languageJvm", ":performance", ":publish", ":resources", ":baseServicesGroovy", ":resourcesHttp",
-        ":pluginDevelopment", ":osgi"],
+    "2": [
+        ":toolingApi",
+        ":compositeBuilds",
+        ":resourcesS3",
+        ":resources",
+        ":jvmServices",
+        ":docs",
+        ":distributions",
+        ":soak",
+        ":smokeTest",
+        ":buildCacheHttp",
+        ":workers"
+    ],
 
-    "3": [":launcher", ":plugins", ":codeQuality", ":languageJava",
-        ":ui", ":javascript", ":antlr", ":messaging", ":ear",
-        ":resourcesS3", ":wrapper", ":resourcesSftp", ":signing", ":modelGroovy", ":baseServices"],
+    "3": [
+        ":launcher",
+        ":buildComparison",
+        ":buildInit",
+        ":antlr",
+        ":signing",
+        ":testingBase",
+        ":baseServicesGroovy",
+        ":toolingApiBuilders"
+    ],
 
-    "4": [":docs", ":integTest", ":core", ":languageNative", ":ide", ":platformJvm", ":platformNative",
-          ":modelCore", ":sonar", ":maven", ":testingNative", ":ideNative", ":native"]
+    "4": [
+        ":testKit",
+        ":languageNative",
+        ":ivy",
+        ":wrapper",
+        ":platformJvm",
+        ":baseServices",
+        ":announce",
+        ":publish"
+    ],
+
+    "5": [
+        ":integTest",
+        ":plugins",
+        ":idePlay",
+        ":platformBase",
+        ":diagnostics",
+        ":ideNative",
+        ":javascript",
+        ":languageJvm",
+        ":ear"
+    ],
+
+    "6": [
+        ":pluginUse",
+        ":dependencyManagement",
+        ":languageJava",
+        ":maven",
+        ":reporting",
+        ":languageGroovy",
+        ":internalTesting",
+        ":performance",
+        ":buildScanPerformance",
+        ":internalIntegTesting",
+        ":internalPerformanceTesting",
+	":internalAndroidPerformanceTesting",
+        ":processServices",
+        ":installationBeacon",
+    ],
+
+    "7": [
+        ":core",
+        ":languageScala",
+        ":scala",
+        ":platformNative",
+        ":modelCore",
+        ":resourcesSftp",
+        ":messaging",
+        ":logging",
+        ":resourcesHttp",
+        ":versionInfo"
+    ],
+
+    "8": [
+        ":pluginDevelopment",
+        ":codeQuality",
+        ":testingJvm",
+        ":ide",
+        ":testingNative",
+        ":jacoco",
+        ":modelGroovy",
+        ":osgi",
+        ":native",
+        ":cli"
+    ]
 ]
 
 //Make sure all projects are accounted for

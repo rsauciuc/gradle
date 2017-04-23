@@ -20,9 +20,14 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import org.gradle.api.Incubating;
 import org.gradle.api.Nullable;
+import org.gradle.api.tasks.Console;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFile;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
 import org.gradle.api.tasks.Optional;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
 
 import java.io.File;
 import java.util.List;
@@ -63,6 +68,7 @@ public class GroovyCompileOptions extends AbstractOptions {
     /**
      * Tells whether the compilation task should fail if compile errors occurred. Defaults to {@code true}.
      */
+    @Input
     public boolean isFailOnError() {
         return failOnError;
     }
@@ -77,6 +83,7 @@ public class GroovyCompileOptions extends AbstractOptions {
     /**
      * Tells whether to turn on verbose output. Defaults to {@code false}.
      */
+    @Console
     public boolean isVerbose() {
         return verbose;
     }
@@ -91,6 +98,7 @@ public class GroovyCompileOptions extends AbstractOptions {
     /**
      * Tells whether to print which source files are to be compiled. Defaults to {@code false}.
      */
+    @Console
     public boolean isListFiles() {
         return listFiles;
     }
@@ -120,6 +128,7 @@ public class GroovyCompileOptions extends AbstractOptions {
     /**
      * Tells whether to run the Groovy compiler in a separate process. Defaults to {@code true}.
      */
+    @Input
     public boolean isFork() {
         return fork;
     }
@@ -159,7 +168,7 @@ public class GroovyCompileOptions extends AbstractOptions {
      * </pre>
      * </p>
      * <p>
-     * Please see <a href="http://groovy.codehaus.org/Advanced+compiler+configuration#Advancedcompilerconfiguration-Thecustomizationbuilder">the Groovy compiler customization builder documentation</a>
+     * Please see <a href="http://docs.groovy-lang.org/latest/html/documentation/#compilation-customizers">the Groovy compiler customization builder documentation</a>
      * for more information about the compiler configuration DSL.
      * </p>
      * <p>
@@ -168,6 +177,7 @@ public class GroovyCompileOptions extends AbstractOptions {
      * @see <a href="http://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/CompilerConfiguration.html">CompilerConfiguration</a>
      * @see <a href="http://docs.groovy-lang.org/latest/html/gapi/org/codehaus/groovy/control/customizers/builder/CompilerCustomizationBuilder.html">CompilerCustomizationBuilder</a>
      */
+    @PathSensitive(PathSensitivity.NONE)
     @InputFile
     @Incubating
     @Optional
@@ -217,6 +227,7 @@ public class GroovyCompileOptions extends AbstractOptions {
      * Returns options for running the Groovy compiler in a separate process. These options only take effect
      * if {@code fork} is set to {@code true}.
      */
+    @Nested
     public GroovyForkOptions getForkOptions() {
         return forkOptions;
     }
@@ -244,6 +255,7 @@ public class GroovyCompileOptions extends AbstractOptions {
      *     <dd>Enable or disable all optimizations. Note that some optimizations might be mutually exclusive.
      * </dl>
      */
+    @Optional @Input
     public Map<String, Boolean> getOptimizationOptions() {
         return optimizationOptions;
     }
@@ -260,6 +272,8 @@ public class GroovyCompileOptions extends AbstractOptions {
      * Returns the directory where Java stubs for Groovy classes will be stored during Java/Groovy joint
      * compilation. Defaults to {@code null}, in which case a temporary directory will be used.
      */
+    @Internal
+    // TOOD:LPTR Should be just a relative path
     public File getStubDir() {
         return stubDir;
     }
@@ -296,6 +310,7 @@ public class GroovyCompileOptions extends AbstractOptions {
      * should be kept after compilation has completed. Useful for joint compilation debugging purposes.
      * Defaults to {@code false}.
      */
+    @Input
     public boolean isKeepStubs() {
         return keepStubs;
     }
@@ -327,6 +342,7 @@ public class GroovyCompileOptions extends AbstractOptions {
     /**
      * Internal method.
      */
+    @Override
     public Map<String, Object> optionMap() {
         Map<String, Object> map = super.optionMap();
         map.putAll(forkOptions.optionMap());

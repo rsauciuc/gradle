@@ -18,16 +18,15 @@ package org.gradle.api.internal.artifacts.ivyservice.resolveengine.oldresult;
 
 import org.gradle.api.artifacts.ModuleDependency;
 import org.gradle.api.artifacts.UnresolvedDependency;
-import org.gradle.api.internal.artifacts.ResolvedConfigurationIdentifier;
 
 import java.util.Map;
 import java.util.Set;
 
 public class DefaultResolvedGraphResults implements ResolvedGraphResults {
     private final Set<UnresolvedDependency> unresolvedDependencies;
-    private final Map<ResolvedConfigurationIdentifier, ModuleDependency> modulesMap;
+    private final Map<Long, ModuleDependency> modulesMap;
 
-    public DefaultResolvedGraphResults(Set<UnresolvedDependency> unresolvedDependencies, Map<ResolvedConfigurationIdentifier, ModuleDependency> modulesMap) {
+    public DefaultResolvedGraphResults(Set<UnresolvedDependency> unresolvedDependencies, Map<Long, ModuleDependency> modulesMap) {
         this.unresolvedDependencies = unresolvedDependencies;
         this.modulesMap = modulesMap;
     }
@@ -43,9 +42,11 @@ public class DefaultResolvedGraphResults implements ResolvedGraphResults {
     }
 
     @Override
-    public ModuleDependency getModuleDependency(ResolvedConfigurationIdentifier id) {
-        ModuleDependency m = modulesMap.get(id);
-        assert m != null : "Unable to find module dependency for id: " + id;
+    public ModuleDependency getModuleDependency(long nodeId) {
+        ModuleDependency m = modulesMap.get(nodeId);
+        if (m == null) {
+            throw new IllegalArgumentException("Unable to find module dependency for id: " + nodeId);
+        }
         return m;
     }
 }

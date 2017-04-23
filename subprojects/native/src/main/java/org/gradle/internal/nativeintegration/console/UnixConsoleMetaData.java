@@ -29,14 +29,17 @@ public class UnixConsoleMetaData implements ConsoleMetaData {
         this.stderr = stderr;
     }
 
+    @Override
     public boolean isStdOut() {
         return stdout;
     }
 
+    @Override
     public boolean isStdErr() {
         return stderr;
     }
 
+    @Override
     public int getCols() {
         final String columns = System.getenv("COLUMNS");
         if (columns != null) {
@@ -44,6 +47,19 @@ public class UnixConsoleMetaData implements ConsoleMetaData {
                 return Integer.parseInt(columns);
             } catch (NumberFormatException ex) {
                 LOGGER.debug("Cannot parse COLUMNS environment variable to get console width. Value: '{}'", columns);
+            }
+        }
+        return 0;
+    }
+
+    @Override
+    public int getRows() {
+        final String rows = System.getenv("LINES");
+        if (rows != null) {
+            try {
+                return Integer.parseInt(rows);
+            } catch (NumberFormatException ex) {
+                LOGGER.debug("Cannot parse LINES environment variable to get console height. Value: '{}'", rows);
             }
         }
         return 0;

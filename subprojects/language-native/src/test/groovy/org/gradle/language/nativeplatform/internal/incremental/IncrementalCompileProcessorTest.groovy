@@ -15,13 +15,12 @@
  */
 package org.gradle.language.nativeplatform.internal.incremental
 
-import org.gradle.api.internal.changedetection.state.FileSnapshot
-import org.gradle.api.internal.changedetection.state.FileSnapshotter
-import org.gradle.api.tasks.incremental.IncrementalTaskInputs
+import com.google.common.hash.Hashing
+import com.google.common.io.Files
+import org.gradle.api.internal.hash.FileHasher
 import org.gradle.cache.PersistentStateCache
-import org.gradle.internal.hash.HashUtil
-import org.gradle.language.nativeplatform.internal.SourceIncludes
-import org.gradle.language.nativeplatform.internal.incremental.sourceparser.DefaultSourceIncludes
+import org.gradle.language.nativeplatform.internal.IncludeDirectives
+import org.gradle.language.nativeplatform.internal.incremental.sourceparser.DefaultIncludeDirectives
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
@@ -32,10 +31,9 @@ class IncrementalCompileProcessorTest extends Specification {
 
     def includesParser = Mock(SourceIncludesParser)
     def dependencyParser = Mock(SourceIncludesResolver)
-    def taskInputs = Mock(IncrementalTaskInputs)
-    def fileSnapshotter = Stub(FileSnapshotter)
+    def hasher = Stub(FileHasher)
     def stateCache = new DummyPersistentStateCache()
-    def incrementalCompileProcessor = new IncrementalCompileProcessor(stateCache, dependencyParser, includesParser, fileSnapshotter, taskInputs)
+    def incrementalCompileProcessor = new IncrementalCompileProcessor(stateCache, dependencyParser, includesParser, hasher)
 
     def source1 = sourceFile("source1")
     def source2 = sourceFile("source2")
@@ -49,10 +47,8 @@ class IncrementalCompileProcessorTest extends Specification {
     List<TestFile> modified = []
 
     def setup() {
-        fileSnapshotter.snapshot(_) >> { File file ->
-            return Stub(FileSnapshot) {
-                getHash() >> HashUtil.sha1(file).asByteArray()
-            }
+        hasher.hash(_) >> { File file ->
+            Files.asByteSource(file).hash(Hashing.sha1())
         }
 
         // S1 - D1 \
@@ -85,20 +81,18 @@ class IncrementalCompileProcessorTest extends Specification {
 
     def parse(TestFile sourceFile) {
         final Set<ResolvedInclude> deps = graph[sourceFile]
-        SourceIncludes includes = includes(deps)
+        IncludeDirectives includes = includes(deps)
         1 * includesParser.parseIncludes(sourceFile) >> includes
     }
 
     def resolve(TestFile sourceFile) {
         Set<ResolvedInclude> deps = graph[sourceFile]
-        SourceIncludes includes = includes(deps)
-        1 * dependencyParser.resolveIncludes(sourceFile, includes) >> deps
+        IncludeDirectives includes = includes(deps)
+        1 * dependencyParser.resolveIncludes(sourceFile, includes) >> resolveDeps(deps)
     }
 
-    private static SourceIncludes includes(Set<ResolvedInclude> deps) {
-        def includes = new DefaultSourceIncludes()
-        includes.addAll(deps.collect { '<' + it.file.name + '>' })
-        return includes
+    private static IncludeDirectives includes(Set<ResolvedInclude> deps) {
+        return new DefaultIncludeDirectives(deps.collect { '<' + it.file.name + '>' })
     }
 
     def added(TestFile sourceFile) {
@@ -253,7 +247,7 @@ class IncrementalCompileProcessorTest extends Specification {
         parse(dep5)
         resolve(dep5)
 
-        1 * dependencyParser.resolveIncludes(source2, includes(deps(dep3, dep4))) >> deps(dep3, dep5)
+        1 * dependencyParser.resolveIncludes(source2, includes(deps(dep3, dep4))) >> resolveDeps(deps(dep3, dep5))
 
         then:
         with (state) {
@@ -409,6 +403,20 @@ class IncrementalCompileProcessorTest extends Specification {
 
     Set<ResolvedInclude> deps(File... dep) {
         dep.collect {new ResolvedInclude(it.name, it)} as Set
+    }
+
+    SourceIncludesResolver.ResolvedSourceIncludes resolveDeps(Set<ResolvedInclude> deps) {
+        new SourceIncludesResolver.ResolvedSourceIncludes() {
+            @Override
+            Set<ResolvedInclude> getResolvedIncludes() {
+                return deps
+            }
+
+            @Override
+            Set<File> getCheckedLocations() {
+                return [] as Set
+            }
+        }
     }
 
     class DummyPersistentStateCache implements PersistentStateCache<CompilationState> {

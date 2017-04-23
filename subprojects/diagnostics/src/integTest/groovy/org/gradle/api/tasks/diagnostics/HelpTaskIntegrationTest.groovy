@@ -33,7 +33,7 @@ class HelpTaskIntegrationTest extends AbstractIntegrationSpec {
         run "help"
 
         then:
-        output.startsWith """:help
+        output.contains """:help
 
 Welcome to Gradle ${GradleVersion.current().version}.
 
@@ -45,8 +45,7 @@ To see a list of command-line options, run gradle --help
 
 To see more detail about a task, run gradle help --task <task>
 
-BUILD SUCCESSFUL
-"""
+BUILD SUCCESSFUL"""
     }
 
     def "can print help for implicit tasks"() {
@@ -369,6 +368,7 @@ Options
                        Available values are:
                             optionA
                             optionB
+                            optionC
 
 Description
      -
@@ -379,4 +379,17 @@ Group
 BUILD SUCCESSFUL"""
     }
 
+    def "sortsOptionsBySpecifiedOrder"() {
+        when:
+        run "help", "--task", "hello"
+
+        then:
+        output.contains """
+Options
+     --valueC     descC
+
+     --valueB     descB
+
+     --valueA     descA"""
+    }
 }

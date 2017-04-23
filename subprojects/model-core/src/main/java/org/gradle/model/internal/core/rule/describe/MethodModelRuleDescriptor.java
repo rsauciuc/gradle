@@ -16,34 +16,43 @@
 
 package org.gradle.model.internal.core.rule.describe;
 
+import com.google.common.base.Function;
+import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
+import com.google.common.collect.Iterables;
 import net.jcip.annotations.ThreadSafe;
 import org.gradle.api.UncheckedIOException;
-import org.gradle.api.specs.Spec;
 import org.gradle.model.internal.method.WeaklyTypeReferencingMethod;
 import org.gradle.model.internal.type.ModelType;
-import org.gradle.util.CollectionUtils;
 
 import java.io.IOException;
-import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 // TODO some kind of context of why the method was attached (e.g. which plugin declared the rule)
 // TODO some kind of instance state for the method (might be the same as context above)
 @ThreadSafe
 public class MethodModelRuleDescriptor extends AbstractModelRuleDescriptor {
+    private final static Cache DESCRIPTOR_CACHE = new Cache();
+    private final static Joiner PARAM_JOINER = Joiner.on(", ");
+    private static final Function<ModelType<?>, String> TYPE_DISPLAYNAME_FUNCTION = new Function<ModelType<?>, String>() {
+        @Override
+        public String apply(ModelType<?> input) {
+            return input.getDisplayName();
+        }
+    };
 
     private final WeaklyTypeReferencingMethod<?, ?> method;
     private String description;
-
-    public MethodModelRuleDescriptor(ModelType<?> target, ModelType<?> returnType, Method method) {
-        this(WeaklyTypeReferencingMethod.of(target, returnType, method));
-    }
+    private int hashCode;
 
     public MethodModelRuleDescriptor(WeaklyTypeReferencingMethod<?, ?> method) {
         this.method = method;
     }
 
+    @Override
     public void describeTo(Appendable appendable) {
         try {
             appendable.append(getDescription());
@@ -54,10 +63,17 @@ public class MethodModelRuleDescriptor extends AbstractModelRuleDescriptor {
 
     private String getDescription() {
         if (description == null) {
-            description = getClassName() + "#" + method.getName();
+            description = createDescription();
         }
-
         return description;
+    }
+
+    private String createDescription() {
+        return getClassName() + "#" + method.getName() + "(" + toParameterList(method.getGenericParameterTypes()) + ")";
+    }
+
+    private static String toParameterList(List<ModelType<?>> genericParameterTypes) {
+        return PARAM_JOINER.join(Iterables.transform(genericParameterTypes, TYPE_DISPLAYNAME_FUNCTION));
     }
 
     private String getClassName() {
@@ -78,29 +94,53 @@ public class MethodModelRuleDescriptor extends AbstractModelRuleDescriptor {
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(method);
+        int result = hashCode;
+        if (result != 0) {
+            return result;
+        }
+        result = Objects.hashCode(method);
+        hashCode = result;
+        return result;
     }
 
-    public static ModelRuleDescriptor of(Class<?> clazz, final String methodName) {
-        List<Method> methodsOfName = CollectionUtils.filter(clazz.getDeclaredMethods(), new Spec<Method>() {
-            public boolean isSatisfiedBy(Method element) {
-                return element.getName().equals(methodName);
+    public static <T, R> ModelRuleDescriptor of(WeaklyTypeReferencingMethod<T, R> method) {
+        return DESCRIPTOR_CACHE.get(method);
+    }
+
+    private static class Cache {
+        private final WeakHashMap<Class<?>, CacheEntry> cached = new WeakHashMap<Class<?>, CacheEntry>();
+
+        public synchronized <T, R> ModelRuleDescriptor get(WeaklyTypeReferencingMethod<T, R> method) {
+            Class<?> clazz = method.getDeclaringType().getConcreteClass();
+            CacheEntry cacheEntry = cached.get(clazz);
+            if (cacheEntry == null) {
+                cacheEntry = new CacheEntry(clazz);
+                cached.put(clazz, cacheEntry);
             }
-        });
-
-        if (methodsOfName.isEmpty()) {
-            throw new IllegalStateException("Class " + clazz.getName() + " has no method named '" + methodName + "'");
+            MethodModelRuleDescriptor methodModelRuleDescriptor = cacheEntry.get(method);
+            if (methodModelRuleDescriptor == null) {
+                methodModelRuleDescriptor = new MethodModelRuleDescriptor(method);
+            }
+            return methodModelRuleDescriptor;
         }
 
-        if (methodsOfName.size() > 1) {
-            throw new IllegalStateException("Class " + clazz.getName() + " has more than one method named '" + methodName + "'");
+        private static class CacheEntry {
+            private final Map<WeaklyTypeReferencingMethod<?, ?>, MethodModelRuleDescriptor> descriptors;
+
+            public CacheEntry(Class<?> clazz) {
+                this.descriptors = new HashMap<WeaklyTypeReferencingMethod<?, ?>, MethodModelRuleDescriptor>(clazz.getDeclaredMethods().length);
+            }
+
+            public <T, R> MethodModelRuleDescriptor get(WeaklyTypeReferencingMethod<T, R> weakMethod) {
+                MethodModelRuleDescriptor desc = descriptors.get(weakMethod);
+                if (desc != null) {
+                    return desc;
+                }
+                desc = new MethodModelRuleDescriptor(weakMethod);
+                // Only cache non-overloaded methods by name
+                descriptors.put(weakMethod, desc);
+                return desc;
+            }
         }
-
-        Method method = methodsOfName.get(0);
-        return of(clazz, method);
-    }
-
-    public static ModelRuleDescriptor of(Class<?> clazz, Method method) {
-        return new MethodModelRuleDescriptor(ModelType.of(clazz), ModelType.returnType(method), method);
     }
 }

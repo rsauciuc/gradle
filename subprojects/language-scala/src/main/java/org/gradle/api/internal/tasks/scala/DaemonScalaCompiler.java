@@ -33,8 +33,8 @@ package org.gradle.api.internal.tasks.scala;
  */
 
 import org.gradle.api.internal.tasks.compile.daemon.AbstractDaemonCompiler;
-import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonFactory;
-import org.gradle.api.internal.tasks.compile.daemon.DaemonForkOptions;
+import org.gradle.workers.internal.WorkerDaemonFactory;
+import org.gradle.workers.internal.DaemonForkOptions;
 import org.gradle.api.tasks.compile.ForkOptions;
 import org.gradle.api.tasks.scala.ScalaForkOptions;
 import org.gradle.language.base.internal.compile.Compiler;
@@ -43,11 +43,12 @@ import java.io.File;
 import java.util.Arrays;
 
 public class DaemonScalaCompiler<T extends ScalaJavaJointCompileSpec> extends AbstractDaemonCompiler<T> {
-    private static final Iterable<String> SHARED_PACKAGES = Arrays.asList("scala", "com.typesafe.zinc", "xsbti", "com.sun.tools.javac");
+    private static final Iterable<String> SHARED_PACKAGES =
+            Arrays.asList("scala", "com.typesafe.zinc", "xsbti", "com.sun.tools.javac", "sbt");
     private final Iterable<File> zincClasspath;
 
-    public DaemonScalaCompiler(File daemonWorkingDir, Compiler<T> delegate, CompilerDaemonFactory daemonFactory, Iterable<File> zincClasspath) {
-        super(daemonWorkingDir, delegate, daemonFactory);
+    public DaemonScalaCompiler(File daemonWorkingDir, Compiler<T> delegate, WorkerDaemonFactory workerDaemonFactory, Iterable<File> zincClasspath) {
+        super(daemonWorkingDir, delegate, workerDaemonFactory);
         this.zincClasspath = zincClasspath;
     }
 

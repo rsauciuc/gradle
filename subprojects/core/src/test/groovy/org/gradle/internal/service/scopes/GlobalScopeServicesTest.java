@@ -16,35 +16,53 @@
 
 package org.gradle.internal.service.scopes;
 
-import org.gradle.api.internal.*;
-import org.gradle.api.internal.classpath.*;
+import org.gradle.api.internal.AsmBackedClassGenerator;
+import org.gradle.api.internal.ClassGenerator;
+import org.gradle.api.internal.ClassGeneratorBackedInstantiator;
+import org.gradle.api.internal.ClassPathRegistry;
+import org.gradle.api.internal.DefaultClassPathRegistry;
+import org.gradle.api.internal.DocumentationRegistry;
+import org.gradle.api.internal.classpath.DefaultModuleRegistry;
+import org.gradle.api.internal.classpath.DefaultPluginModuleRegistry;
+import org.gradle.api.internal.classpath.ModuleRegistry;
+import org.gradle.api.internal.classpath.PluginModuleRegistry;
 import org.gradle.api.internal.file.DefaultFileLookup;
 import org.gradle.api.internal.file.FileLookup;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.file.IdentityFileResolver;
-import org.gradle.api.internal.initialization.loadercache.*;
 import org.gradle.cache.internal.CacheFactory;
 import org.gradle.cache.internal.DefaultCacheFactory;
 import org.gradle.cache.internal.DefaultFileLockManager;
 import org.gradle.cache.internal.FileLockManager;
 import org.gradle.cli.CommandLineConverter;
-import org.gradle.initialization.*;
-import org.gradle.internal.classloader.ClassLoaderFactory;
-import org.gradle.internal.classloader.DefaultClassLoaderFactory;
+import org.gradle.initialization.ClassLoaderRegistry;
+import org.gradle.initialization.DefaultClassLoaderRegistry;
+import org.gradle.initialization.DefaultCommandLineConverter;
+import org.gradle.initialization.DefaultGradleLauncherFactory;
+import org.gradle.initialization.GradleLauncherFactory;
 import org.gradle.internal.concurrent.DefaultExecutorFactory;
 import org.gradle.internal.concurrent.ExecutorFactory;
 import org.gradle.internal.event.DefaultListenerManager;
 import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.installation.CurrentGradleInstallation;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.internal.logging.progress.DefaultProgressLoggerFactory;
+import org.gradle.internal.logging.progress.ProgressLoggerFactory;
+import org.gradle.internal.logging.services.DefaultLoggingManagerFactory;
+import org.gradle.internal.logging.services.LoggingServiceRegistry;
 import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.internal.nativeintegration.filesystem.FileSystem;
+import org.gradle.internal.remote.MessagingServer;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistry;
-import org.gradle.logging.LoggingManagerInternal;
-import org.gradle.logging.LoggingServiceRegistry;
-import org.gradle.logging.ProgressLoggerFactory;
-import org.gradle.logging.internal.DefaultLoggingManagerFactory;
-import org.gradle.logging.internal.DefaultProgressLoggerFactory;
-import org.gradle.messaging.remote.MessagingServer;
+import org.gradle.internal.time.TimeProvider;
+import org.gradle.internal.time.TrueTimeProvider;
+import org.gradle.process.internal.health.memory.DefaultJvmMemoryInfo;
+import org.gradle.process.internal.health.memory.DefaultMemoryManager;
+import org.gradle.process.internal.health.memory.DefaultOsMemoryInfo;
+import org.gradle.process.internal.health.memory.JvmMemoryInfo;
+import org.gradle.process.internal.health.memory.MemoryManager;
+import org.gradle.process.internal.health.memory.OsMemoryInfo;
 import org.gradle.testfixtures.internal.NativeServicesTestFixture;
 import org.junit.Test;
 
@@ -74,7 +92,7 @@ public class GlobalScopeServicesTest {
     @Test
     public void providesCommandLineArgsConverter() {
         assertThat(registry().get(CommandLineConverter.class), instanceOf(
-                DefaultCommandLineConverter.class));
+            DefaultCommandLineConverter.class));
     }
 
     @Test
@@ -118,13 +136,8 @@ public class GlobalScopeServicesTest {
     }
 
     @Test
-    public void providesAGradleDistributionLocator() {
-        assertThat(registry().get(GradleDistributionLocator.class), instanceOf(DefaultGradleDistributionLocator.class));
-    }
-
-    @Test
-    public void providesAClassLoaderFactory() {
-        assertThat(registry().get(ClassLoaderFactory.class), instanceOf(DefaultClassLoaderFactory.class));
+    public void providesACurrentGradleInstallation() {
+        assertThat(registry().get(CurrentGradleInstallation.class), instanceOf(CurrentGradleInstallation.class));
     }
 
     @Test
@@ -178,14 +191,22 @@ public class GlobalScopeServicesTest {
     }
 
     @Test
-    public void providesAClasspathSnapshotter() throws Exception {
-        assertThat(registry().get(ClassPathSnapshotter.class), instanceOf(FileClassPathSnapshotter.class));
-        assertThat(longLivingProcessRegistry().get(ClassPathSnapshotter.class), instanceOf(HashClassPathSnapshotter.class));
+    public void providesATimeProvider() throws Exception {
+        assertThat(registry().get(TimeProvider.class), instanceOf(TrueTimeProvider.class));
     }
 
     @Test
-    public void providesAClassloaderCache() throws Exception {
-        assertThat(registry().get(ClassLoaderCache.class), instanceOf(DefaultClassLoaderCache.class));
+    public void providesAnOsMemoryInfo() throws Exception {
+        assertThat(registry().get(OsMemoryInfo.class), instanceOf(DefaultOsMemoryInfo.class));
     }
 
+    @Test
+    public void providesAJvmMemoryInfo() throws Exception {
+        assertThat(registry().get(JvmMemoryInfo.class), instanceOf(DefaultJvmMemoryInfo.class));
+    }
+
+    @Test
+    public void providesAMemoryManager() throws Exception {
+        assertThat(registry().get(MemoryManager.class), instanceOf(DefaultMemoryManager.class));
+    }
 }

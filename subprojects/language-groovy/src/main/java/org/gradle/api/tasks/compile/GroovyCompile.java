@@ -16,30 +16,46 @@
 
 package org.gradle.api.tasks.compile;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.FileTree;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.compile.*;
-import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonManager;
-import org.gradle.api.internal.tasks.compile.daemon.InProcessCompilerDaemonFactory;
-import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.internal.tasks.compile.AnnotationProcessorDetector;
+import org.gradle.api.internal.tasks.compile.CleaningGroovyCompiler;
+import org.gradle.api.internal.tasks.compile.DefaultGroovyJavaJointCompileSpec;
+import org.gradle.api.internal.tasks.compile.DefaultGroovyJavaJointCompileSpecFactory;
+import org.gradle.api.internal.tasks.compile.GroovyCompilerFactory;
+import org.gradle.api.internal.tasks.compile.GroovyJavaJointCompileSpec;
+import org.gradle.api.internal.tasks.compile.JavaCompilerFactory;
+import org.gradle.api.tasks.CacheableTask;
+import org.gradle.api.tasks.Classpath;
+import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.WorkResult;
 import org.gradle.language.base.internal.compile.Compiler;
 import org.gradle.util.GFileUtils;
+import org.gradle.workers.internal.InProcessWorkerFactory;
+import org.gradle.workers.internal.WorkerDaemonFactory;
 
 import java.io.File;
+import java.util.List;
 
 /**
  * Compiles Groovy source files, and optionally, Java source files.
  */
+@CacheableTask
 public class GroovyCompile extends AbstractCompile {
     private Compiler<GroovyJavaJointCompileSpec> compiler;
     private FileCollection groovyClasspath;
     private final CompileOptions compileOptions = new CompileOptions();
     private final GroovyCompileOptions groovyCompileOptions = new GroovyCompileOptions();
 
+    @Override
     @TaskAction
     protected void compile() {
         checkGroovyClasspathIsNonEmpty();
@@ -51,10 +67,10 @@ public class GroovyCompile extends AbstractCompile {
     private Compiler<GroovyJavaJointCompileSpec> getCompiler(GroovyJavaJointCompileSpec spec) {
         if (compiler == null) {
             ProjectInternal projectInternal = (ProjectInternal) getProject();
-            CompilerDaemonManager compilerDaemonManager = getServices().get(CompilerDaemonManager.class);
-            InProcessCompilerDaemonFactory inProcessCompilerDaemonFactory = getServices().get(InProcessCompilerDaemonFactory.class);
+            WorkerDaemonFactory workerDaemonFactory = getServices().get(WorkerDaemonFactory.class);
+            InProcessWorkerFactory inProcessWorkerFactory = getServices().get(InProcessWorkerFactory.class);
             JavaCompilerFactory javaCompilerFactory = getServices().get(JavaCompilerFactory.class);
-            GroovyCompilerFactory groovyCompilerFactory = new GroovyCompilerFactory(projectInternal, javaCompilerFactory, compilerDaemonManager, inProcessCompilerDaemonFactory);
+            GroovyCompilerFactory groovyCompilerFactory = new GroovyCompilerFactory(projectInternal, javaCompilerFactory, workerDaemonFactory, inProcessWorkerFactory);
             Compiler<GroovyJavaJointCompileSpec> delegatingCompiler = groovyCompilerFactory.newCompiler(spec);
             compiler = new CleaningGroovyCompiler(delegatingCompiler, getOutputs());
         }
@@ -67,10 +83,11 @@ public class GroovyCompile extends AbstractCompile {
         spec.setDestinationDir(getDestinationDir());
         spec.setWorkingDir(getProject().getProjectDir());
         spec.setTempDir(getTemporaryDir());
-        spec.setClasspath(getClasspath());
+        spec.setCompileClasspath(ImmutableList.copyOf(getClasspath()));
         spec.setSourceCompatibility(getSourceCompatibility());
         spec.setTargetCompatibility(getTargetCompatibility());
-        spec.setGroovyClasspath(getGroovyClasspath());
+        spec.setAnnotationProcessorPath(calculateAnnotationProcessorClasspath());
+        spec.setGroovyClasspath(Lists.newArrayList(getGroovyClasspath()));
         spec.setCompileOptions(compileOptions);
         spec.setGroovyCompileOptions(groovyCompileOptions);
         if (spec.getGroovyCompileOptions().getStubDir() == null) {
@@ -81,11 +98,26 @@ public class GroovyCompile extends AbstractCompile {
         return spec;
     }
 
+    private List<File> calculateAnnotationProcessorClasspath() {
+        AnnotationProcessorDetector annotationProcessorDetector = getServices().get(AnnotationProcessorDetector.class);
+        FileCollection processorClasspath = annotationProcessorDetector.getEffectiveAnnotationProcessorClasspath(compileOptions, getClasspath());
+        return Lists.newArrayList(processorClasspath);
+    }
+
     private void checkGroovyClasspathIsNonEmpty() {
         if (getGroovyClasspath().isEmpty()) {
             throw new InvalidUserDataException("'" + getName() + ".groovyClasspath' must not be empty. If a Groovy compile dependency is provided, "
                     + "the 'groovy-base' plugin will attempt to configure 'groovyClasspath' automatically. Alternatively, you may configure 'groovyClasspath' explicitly.");
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @PathSensitive(PathSensitivity.NAME_ONLY) // Java source files are supported, too. Therefore we should care about the names.
+    public FileTree getSource() {
+        return super.getSource();
     }
 
     /**
@@ -114,7 +146,7 @@ public class GroovyCompile extends AbstractCompile {
      *
      * @return The classpath.
      */
-    @InputFiles
+    @Classpath
     public FileCollection getGroovyClasspath() {
         return groovyClasspath;
     }
@@ -128,6 +160,7 @@ public class GroovyCompile extends AbstractCompile {
         this.groovyClasspath = groovyClasspath;
     }
 
+    @Internal
     public Compiler<GroovyJavaJointCompileSpec> getCompiler() {
         return getCompiler(createSpec());
     }

@@ -16,14 +16,15 @@
 
 package org.gradle.jvm.tasks.api.internal
 
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
-import org.objectweb.asm.*
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.Label
+import org.objectweb.asm.MethodVisitor
+import org.objectweb.asm.Opcodes
 import spock.lang.Unroll
 
 import java.lang.reflect.Modifier
 
-@Requires(TestPrecondition.JDK6_OR_LATER)
 class ApiClassExtractorTest extends ApiClassExtractorTestSupport {
 
     def "should not remove public method"() {
@@ -278,7 +279,6 @@ class ApiClassExtractorTest extends ApiClassExtractorTestSupport {
         'boolean' | 'true'         | false
     }
 
-    @Requires(TestPrecondition.JDK7_OR_LATER)
     void "target binary compatibility is maintained"() {
         given:
         def api = toApi(target, [A: 'public class A {}'])
@@ -388,6 +388,35 @@ class ApiClassExtractorTest extends ApiClassExtractorTestSupport {
         api.shouldExtractApiClassFrom(clazz)
         hasField(clazz.clazz, 'foo', String).modifiers == 0
         hasField(extracted, 'foo', String).modifiers == 0
+
+    }
+
+    def "should not remove package private members that have additional modifiers if no API is declared"() {
+        given:
+        def api = toApi 'A': '''
+            public abstract class A {
+                volatile int foo = 0;
+                final int bar = 0;
+
+                abstract int getFoo();
+                synchronized void doBar() { }
+            }
+        '''
+
+        when:
+        def clazz = api.classes.A
+        def extracted = api.extractAndLoadApiClassFrom(clazz)
+
+        then:
+        api.shouldExtractApiClassFrom(clazz)
+        hasField(clazz.clazz, 'foo', int).modifiers == Modifier.VOLATILE
+        hasField(extracted, 'foo', int).modifiers == Modifier.VOLATILE
+        hasField(clazz.clazz, 'bar', int).modifiers == Modifier.FINAL
+        hasField(extracted, 'bar', int).modifiers == Modifier.FINAL
+        hasMethod(clazz.clazz, 'getFoo').modifiers == Modifier.ABSTRACT
+        hasMethod(extracted, 'getFoo').modifiers == Modifier.ABSTRACT
+        hasMethod(clazz.clazz, 'doBar').modifiers == Modifier.SYNCHRONIZED
+        hasMethod(extracted, 'doBar').modifiers == Modifier.SYNCHRONIZED
 
     }
 

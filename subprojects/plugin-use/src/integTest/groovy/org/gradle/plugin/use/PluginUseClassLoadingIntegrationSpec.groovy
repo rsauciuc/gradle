@@ -23,6 +23,7 @@ import org.gradle.plugin.use.resolve.service.PluginResolutionServiceTestServer
 import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.plugin.PluginBuilder
 import org.junit.Rule
+import spock.lang.Issue
 
 @LeaksFileHandles
 class PluginUseClassLoadingIntegrationSpec extends AbstractIntegrationSpec {
@@ -39,7 +40,7 @@ class PluginUseClassLoadingIntegrationSpec extends AbstractIntegrationSpec {
     PluginResolutionServiceTestServer resolutionService = new PluginResolutionServiceTestServer(executer, mavenRepo)
 
     def setup() {
-        executer.requireGradleHome() // need accurate classloading
+        executer.requireGradleDistribution() // need accurate classloading
         executer.requireOwnGradleUserHomeDir()
         resolutionService.start()
     }
@@ -50,14 +51,16 @@ class PluginUseClassLoadingIntegrationSpec extends AbstractIntegrationSpec {
         buildScript """
             $USE
 
-            task verify << {
-                def foundByClass = false
-                plugins.withType(pluginClass) { foundByClass = true }
-                def foundById = false
-                plugins.withId("$PLUGIN_ID") { foundById = true }
+            task verify {
+                doLast {
+                    def foundByClass = false
+                    plugins.withType(pluginClass) { foundByClass = true }
+                    def foundById = false
+                    plugins.withId("$PLUGIN_ID") { foundById = true }
 
-                assert foundByClass
-                assert foundById
+                    assert foundByClass
+                    assert foundById
+                }
             }
         """
 
@@ -71,11 +74,13 @@ class PluginUseClassLoadingIntegrationSpec extends AbstractIntegrationSpec {
         buildScript """
             $USE
 
-            task verify << {
-                try {
-                    getClass().getClassLoader().loadClass("org.gradle.test.TestPlugin")
-                    throw new AssertionError("plugin class *is* visible to build script")
-                } catch (ClassNotFoundException expected) {}
+            task verify {
+                doLast {
+                    try {
+                        getClass().getClassLoader().loadClass("org.gradle.test.TestPlugin")
+                        throw new AssertionError("plugin class *is* visible to build script")
+                    } catch (ClassNotFoundException expected) {}
+                }
             }
         """
 
@@ -148,13 +153,29 @@ class PluginUseClassLoadingIntegrationSpec extends AbstractIntegrationSpec {
 
         buildScript """
             evaluationDependsOnChildren()
-            task verify <<  {
-                project(":p1").pluginClass.is(project(":p2").pluginClass)
+            task verify {
+                doLast {
+                    project(":p1").pluginClass.is(project(":p2").pluginClass)
+                }
             }
         """
 
         then:
         succeeds "verify"
+    }
+
+    @Issue("GRADLE-3503")
+    def "Context classloader contains plugin classpath during application"() {
+        publishPlugin("""
+            def className = getClass().getName()
+            Thread.currentThread().getContextClassLoader().loadClass(className)
+            project.task("verify")
+        """)
+
+        buildScript USE
+
+        expect:
+        succeeds("verify")
     }
 
     void publishPlugin() {

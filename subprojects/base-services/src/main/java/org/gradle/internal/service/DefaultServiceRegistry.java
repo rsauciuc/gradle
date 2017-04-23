@@ -15,6 +15,10 @@
  */
 package org.gradle.internal.service;
 
+import com.google.common.base.Optional;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import org.gradle.api.Action;
 import org.gradle.api.Nullable;
 import org.gradle.api.specs.Spec;
@@ -25,8 +29,27 @@ import org.gradle.internal.reflect.JavaReflectionUtil;
 import org.gradle.internal.util.BiFunction;
 
 import java.io.Closeable;
-import java.lang.reflect.*;
-import java.util.*;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Member;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.lang.reflect.WildcardType;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Formatter;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -39,22 +62,21 @@ import java.util.concurrent.ConcurrentMap;
  *
  * <li>Calling {@link #addProvider(Object)} to register a service provider bean. A provider bean may have factory, decorator and configuration methods as described below.</li>
  *
- * <li>Adding a factory method. A factory method should have a name that starts with 'create', and have a non-void return type. For example, <code>protected SomeService
- * createSomeService() { .... }</code>. Parameters are injected using services from this registry or its parents.</li>
+ * <li>Adding a factory method. A factory method should have a name that starts with 'create', and have a non-void return type. For example, <code>protected SomeService createSomeService() { ....
+ * }</code>. Parameters are injected using services from this registry or its parents. Parameter of type {@link ServiceRegistry} will receive the service registry that owns the service. Parameter ot type {@code List<T>} will receive all services of type T, if any. Note that factory methods with a single parameter and an return type equal to that parameter type are interpreted as decorator methods.</li>
  *
- * <li>Adding a decorator method. A decorator method should have a name that starts with 'decorate', take a single parameter, and a have a non-void return type. Before invoking the method, the
- * parameter is located in the parent service registry and then passed to the method.</li>
+ * <li>Adding a decorator method. A decorator method should have a name that starts with 'decorate', take a single parameter, and a have return type equal to the parameter type. Before invoking the
+ * method, the parameter is located in the parent service registry and then passed to the method.</li>
  *
- * <li>Adding a configure method. A configure method should be called 'configure', take a {@link ServiceRegistration} parameter, and a have a void return type. Additional parameters
- * are injected using services from this registry or its parents.</li>
+ * <li>Adding a configure method. A configure method should be called 'configure', take a {@link ServiceRegistration} parameter, and a have a void return type. Additional parameters are injected using
+ * services from this registry or its parents.</li>
  *
  * </ul>
  *
  * <p>Service instances are created on demand. {@link #getFactory(Class)} looks for a service instance which implements {@code Factory<T>} where {@code T} is the expected type.</p>
  *
- * <p>Service instances and factories are closed when the registry that created them is closed using {@link #close()}. If a service instance or factory implements
- * {@link java.io.Closeable} or {@link org.gradle.internal.concurrent.Stoppable} then the appropriate close() or stop() method is called. Instances are closed in
- * reverse dependency order.</p>
+ * <p>Service instances and factories are closed when the registry that created them is closed using {@link #close()}. If a service instance or factory implements {@link java.io.Closeable} or {@link
+ * org.gradle.internal.concurrent.Stoppable} then the appropriate close() or stop() method is called. Instances are closed in reverse dependency order.</p>
  *
  * <p>Service registries are arranged in a hierarchy. If a service of a given type cannot be located, the registry uses its parent registry, if any, to locate the service.</p>
  */
@@ -65,9 +87,9 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
     private final Map<Type, ServiceProvider> providerCache = new HashMap<Type, ServiceProvider>();
 
     private final Object lock = new Object();
-    private final CompositeProvider allServices = new CompositeProvider();
     private final OwnServices ownServices;
-    private final CompositeProvider parentServices;
+    private final Provider allServices;
+    private final Provider parentServices;
     private final String displayName;
     private boolean closed;
     private boolean mutable = true; // access under lock
@@ -89,15 +111,25 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
     }
 
     public DefaultServiceRegistry(String displayName, Collection<? extends ServiceRegistry> parents) {
-        this.displayName = displayName != null ? displayName : getClass().getSimpleName().intern();
-        this.parentServices = parents.isEmpty() ? null : new CompositeProvider();
+        this.displayName = displayName;
         this.ownServices = new OwnServices();
-        allServices.providers.add(ownServices);
-        if (parentServices != null) {
-            allServices.providers.add(parentServices);
-            for (ServiceRegistry parent : parents) {
-                parentServices.providers.add(new ParentServices(parent));
+        if (parents.isEmpty()) {
+            this.parentServices = null;
+            this.allServices = ownServices;
+        } else {
+            if (parents.size() == 1) {
+                this.parentServices = new ParentServices(parents.iterator().next());
+            } else {
+                List<Provider> providers = new ArrayList<Provider>(parents.size());
+                for (ServiceRegistry parent : parents) {
+                    providers.add(new ParentServices(parent));
+                }
+                this.parentServices = new CompositeProvider(providers);
             }
+            List<Provider> allProviders = new ArrayList<Provider>(2);
+            allProviders.add(ownServices);
+            allProviders.add(parentServices);
+            allServices = new CachingProvider(new CompositeProvider(allProviders));
         }
 
         findProviderMethods(this);
@@ -114,9 +146,13 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         return registry;
     }
 
+    private String getDisplayName() {
+        return displayName == null ? getClass().getSimpleName() : displayName;
+    }
+
     @Override
     public String toString() {
-        return displayName;
+        return getDisplayName();
     }
 
     static class RelevantMethods {
@@ -209,9 +245,9 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                 ServiceProvider paramProvider = context.find(paramType, allServices);
                 if (paramProvider == null) {
                     throw new ServiceLookupException(String.format("Cannot configure services using %s.%s() as required service of type %s is not available.",
-                            method.getDeclaringClass().getSimpleName(),
-                            method.getName(),
-                            format(paramType)));
+                        method.getDeclaringClass().getSimpleName(),
+                        method.getName(),
+                        format(paramType)));
                 }
                 params[i] = paramProvider.get();
             }
@@ -220,8 +256,8 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             invoke(method, target, params);
         } catch (Exception e) {
             throw new ServiceLookupException(String.format("Could not configure services using %s.%s().",
-                    method.getDeclaringClass().getSimpleName(),
-                    method.getName()), e);
+                method.getDeclaringClass().getSimpleName(),
+                method.getName()), e);
         }
     }
 
@@ -248,7 +284,6 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                 if (method.getReturnType().equals(Void.TYPE)) {
                     throw new ServiceLookupException(String.format("Method %s.%s() must not return void.", type.getSimpleName(), method.getName()));
                 }
-
                 builder.add(iterator, builder.factories, method);
             }
         }
@@ -259,11 +294,11 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         Iterator<Method> iterator = builder.remainingMethods.iterator();
         while (iterator.hasNext()) {
             Method method = iterator.next();
-            if (method.getName().startsWith("create") && method.getParameterTypes().length == 1 && method.getParameterTypes()[0].equals(method.getReturnType())) {
+            if ((method.getName().startsWith("create") || method.getName().startsWith("decorate"))
+                && method.getParameterTypes().length == 1 && method.getParameterTypes()[0].equals(method.getReturnType())) {
                 if (method.getReturnType().equals(Void.TYPE)) {
                     throw new ServiceLookupException(String.format("Method %s.%s() must not return void.", type.getSimpleName(), method.getName()));
                 }
-
                 builder.add(iterator, builder.decorators, method);
             }
         }
@@ -361,12 +396,16 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         synchronized (lock) {
             mutable = false;
             if (closed) {
-                throw new IllegalStateException(String.format("Cannot locate service of type %s, as %s has been closed.", format(serviceType), displayName));
+                throw new IllegalStateException(String.format("Cannot locate service of type %s, as %s has been closed.", format(serviceType), getDisplayName()));
             }
-            List<T> result = new ArrayList<T>();
+            List<ServiceProvider> providers = new ArrayList<ServiceProvider>();
             DefaultLookupContext context = new DefaultLookupContext();
-            allServices.getAll(context, serviceType, result);
-            return result;
+            allServices.getAll(context, serviceType, providers);
+            List<T> services = new ArrayList<T>(providers.size());
+            for (ServiceProvider provider : providers) {
+                services.add(serviceType.cast(provider.get()));
+            }
+            return services;
         }
     }
 
@@ -383,7 +422,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         synchronized (lock) {
             mutable = false;
             if (closed) {
-                throw new IllegalStateException(String.format("Cannot locate service of type %s, as %s has been closed.", format(serviceType), displayName));
+                throw new IllegalStateException(String.format("Cannot locate service of type %s, as %s has been closed.", format(serviceType), getDisplayName()));
             }
             ServiceProvider provider = providerCache.get(serviceType);
             if (provider == null) {
@@ -397,7 +436,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
     private ServiceProvider getServiceProvider(Type serviceType) {
         ServiceProvider provider = new DefaultLookupContext().find(serviceType, allServices);
         if (provider == null) {
-            throw new UnknownServiceException(serviceType, String.format("No service of type %s available in %s.", format(serviceType), displayName));
+            throw new UnknownServiceException(serviceType, String.format("No service of type %s available in %s.", format(serviceType), getDisplayName()));
         }
         return provider;
     }
@@ -405,7 +444,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
     public <T> Factory<T> getFactory(Class<T> type) {
         synchronized (lock) {
             if (closed) {
-                throw new IllegalStateException(String.format("Cannot locate factory for objects of type %s, as %s has been closed.", format(type), displayName));
+                throw new IllegalStateException(String.format("Cannot locate factory for objects of type %s, as %s has been closed.", format(type), getDisplayName()));
             }
 
             DefaultLookupContext context = new DefaultLookupContext();
@@ -414,7 +453,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                 return (Factory<T>) factory.get();
             }
 
-            throw new UnknownServiceException(type, String.format("No factory for objects of type %s available in %s.", format(type), displayName));
+            throw new UnknownServiceException(type, String.format("No factory for objects of type %s available in %s.", format(type), getDisplayName()));
         }
     }
 
@@ -423,9 +462,12 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
     }
 
     private static Object invoke(Method method, Object target, Object... args) {
-        return JavaReflectionUtil.method(target, Object.class, method).invoke(target, args);
+        return JavaReflectionUtil.method(Object.class, method).invoke(target, args);
     }
 
+    /**
+     * Provides a single service instance.
+     */
     interface ServiceProvider {
         String getDisplayName();
 
@@ -434,6 +476,9 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         void requiredBy(Provider provider);
     }
 
+    /**
+     * Provides a set or zero or more services.
+     */
     interface Provider extends Stoppable {
         /**
          * Locates a service instance of the given type. Returns null if this provider does not provide a service of this type.
@@ -445,13 +490,20 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
          */
         ServiceProvider getFactory(LookupContext context, Class<?> type);
 
-        <T> void getAll(LookupContext context, Class<T> serviceType, List<T> result);
+        /**
+         * Collects all services of the given type.
+         */
+        void getAll(LookupContext context, Class<?> serviceType, List<ServiceProvider> result);
     }
 
     private class OwnServices implements Provider {
-        private final List<Provider> providers = new ArrayList<Provider>();
+        private List<Provider> providers;
 
+        @Override
         public ServiceProvider getFactory(LookupContext context, Class<?> type) {
+            if (providers == null) {
+                return null;
+            }
             List<ServiceProvider> candidates = new ArrayList<ServiceProvider>();
             for (Provider provider : providers) {
                 ServiceProvider factory = provider.getFactory(context, type);
@@ -459,7 +511,6 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                     candidates.add(factory);
                 }
             }
-
             if (candidates.size() == 0) {
                 return null;
             }
@@ -473,27 +524,40 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             }
 
             Formatter formatter = new Formatter();
-            formatter.format("Multiple factories for objects of type %s available in %s:", format(type), displayName);
+            formatter.format("Multiple factories for objects of type %s available in %s:", format(type), getDisplayName());
             for (String description : descriptions) {
                 formatter.format("%n   - %s", description);
             }
             throw new ServiceLookupException(formatter.toString());
         }
 
+        @Override
         public ServiceProvider getService(LookupContext context, TypeSpec serviceType) {
-            List<ServiceProvider> candidates = new ArrayList<ServiceProvider>();
+            if (providers == null) {
+                return null;
+            }
+            ServiceProvider singleCandidate = null;
+            List<ServiceProvider> candidates = null;
             for (Provider provider : providers) {
                 ServiceProvider service = provider.getService(context, serviceType);
                 if (service != null) {
-                    candidates.add(service);
+                    if (singleCandidate == null) {
+                        singleCandidate = service;
+                    } else {
+                        if (candidates == null) {
+                            candidates = new ArrayList<ServiceProvider>(2);
+                            candidates.add(singleCandidate);
+                        }
+                        candidates.add(service);
+                    }
                 }
             }
 
-            if (candidates.size() == 0) {
+            if (candidates == null && singleCandidate == null) {
                 return null;
             }
-            if (candidates.size() == 1) {
-                return candidates.get(0);
+            if (candidates==null) {
+                return singleCandidate;
             }
 
             Set<String> descriptions = new TreeSet<String>();
@@ -502,31 +566,42 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             }
 
             Formatter formatter = new Formatter();
-            formatter.format("Multiple services of type %s available in %s:", format(serviceType.getType()), displayName);
+            formatter.format("Multiple services of type %s available in %s:", format(serviceType.getType()), getDisplayName());
             for (String description : descriptions) {
                 formatter.format("%n   - %s", description);
             }
             throw new ServiceLookupException(formatter.toString());
         }
 
-        public <T> void getAll(LookupContext context, Class<T> serviceType, List<T> result) {
+        @Override
+        public void getAll(LookupContext context, Class<?> serviceType, List<ServiceProvider> result) {
+            if (providers == null) {
+                return;
+            }
             for (Provider provider : providers) {
                 provider.getAll(context, serviceType, result);
             }
         }
 
+        @Override
         public void stop() {
+            if (providers == null) {
+                return;
+            }
             CompositeStoppable.stoppable(providers).stop();
         }
 
         public void add(Provider provider) {
+            if (providers == null) {
+                providers = Lists.newArrayList();
+            }
             this.providers.add(provider);
         }
     }
 
     private static abstract class ManagedObjectProvider<T> implements Provider {
         private T instance;
-        private final Set<Provider> dependents = new HashSet<Provider>();
+        private Set<Provider> dependents;
 
         protected void setInstance(T instance) {
             this.instance = instance;
@@ -543,16 +618,21 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         protected abstract T create();
 
         public void requiredBy(Provider provider) {
+            if (dependents == null) {
+                dependents = Sets.newHashSet();
+            }
             dependents.add(provider);
         }
 
         public void stop() {
             try {
                 if (instance != null) {
-                    CompositeStoppable.stoppable(dependents).add(instance).stop();
+                    CompositeStoppable.stoppable(dependents == null ? Collections.emptyList() : dependents).add(instance).stop();
                 }
             } finally {
-                dependents.clear();
+                if (dependents != null) {
+                    dependents.clear();
+                }
                 instance = null;
             }
         }
@@ -573,6 +653,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             return getDisplayName();
         }
 
+        @Override
         public Object get() {
             return getInstance();
         }
@@ -588,6 +669,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         protected void bind(LookupContext context) {
         }
 
+        @Override
         public ServiceProvider getService(LookupContext context, TypeSpec serviceType) {
             if (!serviceType.isSatisfiedBy(this.serviceType)) {
                 return null;
@@ -595,12 +677,14 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             return prepare(context);
         }
 
-        public <T> void getAll(LookupContext context, Class<T> serviceType, List<T> result) {
+        @Override
+        public void getAll(LookupContext context, Class<?> serviceType, List<ServiceProvider> result) {
             if (serviceType.isAssignableFrom(this.serviceClass)) {
-                result.add(serviceType.cast(prepare(context).get()));
+                result.add(prepare(context));
             }
         }
 
+        @Override
         public ServiceProvider getFactory(LookupContext context, Class<?> elementType) {
             if (!isFactory(serviceType, elementType)) {
                 return null;
@@ -669,10 +753,10 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                         ServiceProvider paramProvider = context.find(paramType, allServices);
                         if (paramProvider == null) {
                             throw new ServiceCreationException(String.format("Cannot create service of type %s using %s.%s() as required service of type %s is not available.",
-                                    format(serviceType),
-                                    getFactory().getDeclaringClass().getSimpleName(),
-                                    getFactory().getName(),
-                                    format(paramType)));
+                                format(serviceType),
+                                getFactory().getDeclaringClass().getSimpleName(),
+                                getFactory().getName(),
+                                format(paramType)));
 
                         }
                         paramProviders[i] = paramProvider;
@@ -680,11 +764,11 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                     }
                 } catch (ServiceValidationException e) {
                     throw new ServiceCreationException(String.format("Cannot create service of type %s using %s.%s() as there is a problem with parameter #%s of type %s.",
-                            format(serviceType),
-                            getFactory().getDeclaringClass().getSimpleName(),
-                            getFactory().getName(),
-                            i + 1,
-                            format(paramType)), e);
+                        format(serviceType),
+                        getFactory().getDeclaringClass().getSimpleName(),
+                        getFactory().getName(),
+                        i + 1,
+                        format(paramType)), e);
                 }
             }
         }
@@ -721,7 +805,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         }
 
         public String getDisplayName() {
-            return String.format("Service %s at %s.%s()", format(method.getGenericReturnType()), method.getDeclaringClass().getSimpleName(), method.getName());
+            return "Service " + format(method.getGenericReturnType()) + " at " + method.getDeclaringClass().getSimpleName() + "." +  method.getName() + "()";
         }
 
         protected Type[] getParameterTypes() {
@@ -739,17 +823,17 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                 result = invoke(method, target, params);
             } catch (Exception e) {
                 throw new ServiceCreationException(String.format("Could not create service of type %s using %s.%s().",
-                        format(serviceType),
-                        method.getDeclaringClass().getSimpleName(),
-                        method.getName()),
-                        e);
+                    format(serviceType),
+                    method.getDeclaringClass().getSimpleName(),
+                    method.getName()),
+                    e);
             }
             try {
                 if (result == null) {
                     throw new ServiceCreationException(String.format("Could not create service of type %s using %s.%s() as this method returned null.",
-                            format(serviceType),
-                            method.getDeclaringClass().getSimpleName(),
-                            method.getName()));
+                        format(serviceType),
+                        method.getDeclaringClass().getSimpleName(),
+                        method.getName()));
                 }
                 return result;
             } finally {
@@ -762,7 +846,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
     private ServiceProvider getThisAsProvider() {
         return new ServiceProvider() {
             public String getDisplayName() {
-                return String.format("ServiceRegistry %s", displayName);
+                return "ServiceRegistry " + DefaultServiceRegistry.this.getDisplayName();
             }
 
             public Object get() {
@@ -781,7 +865,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         }
 
         public String getDisplayName() {
-            return String.format("Service %s with implementation %s", format(serviceType), getInstance());
+            return "Service " + format(serviceType) + " with implementation " + getInstance();
         }
 
         @Override
@@ -824,7 +908,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         }
 
         public String getDisplayName() {
-            return String.format("Service %s", format(serviceType));
+            return "Service " + format(serviceType);
         }
     }
 
@@ -840,7 +924,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         }
 
         public String getDisplayName() {
-            return String.format("Service %s at %s.%s()", format(method.getGenericReturnType()), method.getDeclaringClass().getSimpleName(), method.getName());
+            return "Service " + format(method.getGenericReturnType()) + " at " + method.getDeclaringClass().getSimpleName() + "." + method.getName() + "()";
         }
 
         @Override
@@ -850,10 +934,10 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             paramProvider = parentLookupContext.find(paramType, parentServices);
             if (paramProvider == null) {
                 throw new ServiceCreationException(String.format("Cannot create service of type %s using %s.%s() as required service of type %s is not available in parent registries.",
-                        format(method.getGenericReturnType()),
-                        method.getDeclaringClass().getSimpleName(),
-                        method.getName(),
-                        format(paramType)));
+                    format(method.getGenericReturnType()),
+                    method.getDeclaringClass().getSimpleName(),
+                    method.getName(),
+                    format(paramType)));
             }
         }
 
@@ -865,17 +949,17 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                 result = invoke(method, target, param);
             } catch (Exception e) {
                 throw new ServiceCreationException(String.format("Could not create service of type %s using %s.%s().",
-                        format(method.getGenericReturnType()),
-                        method.getDeclaringClass().getSimpleName(),
-                        method.getName()),
-                        e);
+                    format(method.getGenericReturnType()),
+                    method.getDeclaringClass().getSimpleName(),
+                    method.getName()),
+                    e);
             }
             try {
                 if (result == null) {
                     throw new ServiceCreationException(String.format("Could not create service of type %s using %s.%s() as this method returned null.",
-                            format(method.getGenericReturnType()),
-                            method.getDeclaringClass().getSimpleName(),
-                            method.getName()));
+                        format(method.getGenericReturnType()),
+                        method.getDeclaringClass().getSimpleName(),
+                        method.getName()));
                 }
                 return result;
             } finally {
@@ -886,9 +970,72 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         }
     }
 
-    private class CompositeProvider implements Provider {
-        private final List<Provider> providers = new LinkedList<Provider>();
+    private static class CachingProvider implements Provider {
+        private final ConcurrentMap<Object, Optional<ServiceProvider>> seen = Maps.newConcurrentMap();
+        private final ConcurrentMap<Class<?>, List<ServiceProvider>> allServicesCache = Maps.newConcurrentMap();
 
+        private final Provider delegate;
+
+        private CachingProvider(Provider delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public ServiceProvider getService(LookupContext context, TypeSpec serviceType) {
+            Optional<ServiceProvider> cached = seen.get(serviceType);
+            if (cached != null) {
+                return cached.orNull();
+            }
+            ServiceProvider service = delegate.getService(context, serviceType);
+            return cacheServiceProvider(serviceType, service);
+        }
+
+        private ServiceProvider cacheServiceProvider(Object key, ServiceProvider service) {
+            seen.putIfAbsent(key, service == null ? Optional.<ServiceProvider>absent() : Optional.of(service));
+            return service;
+        }
+
+        @Override
+        public ServiceProvider getFactory(LookupContext context, Class<?> type) {
+            Optional<ServiceProvider> cached = seen.get(type);
+            if (cached != null) {
+                return cached.orNull();
+            }
+            ServiceProvider service = delegate.getFactory(context, type);
+            return cacheServiceProvider(type, service);
+        }
+
+        @Override
+        public void getAll(LookupContext context, Class<?> serviceType, List<ServiceProvider> result) {
+            List<ServiceProvider> services = allServicesCache.get(serviceType);
+            if (services != null) {
+                result.addAll(services);
+                return;
+            }
+            ArrayList<ServiceProvider> tmp = new ArrayList<ServiceProvider>();
+            delegate.getAll(context, serviceType, tmp);
+            allServicesCache.putIfAbsent(serviceType, tmp);
+            if (!tmp.isEmpty()) {
+                result.addAll(tmp);
+            }
+        }
+
+        @Override
+        public void stop() {
+            delegate.stop();
+            seen.clear();
+            allServicesCache.clear();
+        }
+    }
+
+    private static class CompositeProvider implements Provider {
+        private final Collection<Provider> providers;
+
+        private CompositeProvider(Collection<Provider> providers) {
+            this.providers = providers;
+        }
+
+        @Override
         public ServiceProvider getService(LookupContext context, TypeSpec serviceType) {
             for (Provider provider : providers) {
                 ServiceProvider service = provider.getService(context, serviceType);
@@ -899,6 +1046,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             return null;
         }
 
+        @Override
         public ServiceProvider getFactory(LookupContext context, Class<?> type) {
             for (Provider provider : providers) {
                 ServiceProvider factory = provider.getFactory(context, type);
@@ -909,12 +1057,14 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             return null;
         }
 
-        public <T> void getAll(LookupContext context, Class<T> serviceType, List<T> result) {
+        @Override
+        public void getAll(LookupContext context, Class<?> serviceType, List<ServiceProvider> result) {
             for (Provider provider : providers) {
                 provider.getAll(context, serviceType, result);
             }
         }
 
+        @Override
         public void stop() {
             try {
                 CompositeStoppable.stoppable(providers).stop();
@@ -931,6 +1081,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             this.parent = parent;
         }
 
+        @Override
         public ServiceProvider getFactory(LookupContext context, Class<?> type) {
             try {
                 Factory<?> factory = parent.getFactory(type);
@@ -944,6 +1095,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             return null;
         }
 
+        @Override
         public ServiceProvider getService(LookupContext context, TypeSpec serviceType) {
             try {
                 Object service = parent.get(serviceType.getType());
@@ -960,7 +1112,7 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         private ServiceProvider wrap(final Object instance) {
             return new ServiceProvider() {
                 public String getDisplayName() {
-                    return String.format("ServiceRegistry %s", parent);
+                    return "ServiceRegistry " + parent;
                 }
 
                 public Object get() {
@@ -973,16 +1125,23 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             };
         }
 
-        public <T> void getAll(LookupContext context, Class<T> serviceType, List<T> result) {
-            List<T> services = parent.getAll(serviceType);
+        @Override
+        public void getAll(LookupContext context, Class<?> serviceType, List<ServiceProvider> result) {
+            List<?> services = parent.getAll(serviceType);
             assert services != null : String.format("parent returned null for services of type %s", format(serviceType));
-            result.addAll(services);
+            for (Object service : services) {
+                result.add(wrap(service));
+            }
         }
 
+        @Override
         public void stop() {
         }
     }
 
+    /**
+     * Maintains state used while locating services and their dependencies.
+     */
     interface LookupContext {
         @Nullable
         ServiceProvider find(Type type, Provider provider);
@@ -1014,6 +1173,26 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                 return type.isAssignableFrom(other);
             }
             return false;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            ClassSpec classSpec = (ClassSpec) o;
+
+            return type != null ? type.equals(classSpec.type) : classSpec.type == null;
+
+        }
+
+        @Override
+        public int hashCode() {
+            return type.hashCode();
         }
     }
 
@@ -1048,6 +1227,35 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             }
             return false;
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            ParameterizedTypeSpec that = (ParameterizedTypeSpec) o;
+
+            if (!type.equals(that.type)) {
+                return false;
+            }
+            if (!rawType.equals(that.rawType)) {
+                return false;
+            }
+            return paramSpecs.equals(that.paramSpecs);
+
+        }
+
+        @Override
+        public int hashCode() {
+            int result = type.hashCode();
+            result = 31 * result + rawType.hashCode();
+            result = 31 * result + paramSpecs.hashCode();
+            return result;
+        }
     }
 
 
@@ -1077,7 +1285,8 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
         private static BiFunction<ServiceProvider, LookupContext, Provider> createServiceProviderFactory(final Type serviceType) {
             if (serviceType instanceof ParameterizedType) {
                 ParameterizedType parameterizedType = (ParameterizedType) serviceType;
-                if (parameterizedType.getRawType().equals(Factory.class)) {
+                Type rawType = parameterizedType.getRawType();
+                if (rawType.equals(Factory.class)) {
                     final Type typeArg = parameterizedType.getActualTypeArguments()[0];
                     if (typeArg instanceof Class) {
                         return new BiFunction<ServiceProvider, LookupContext, Provider>() {
@@ -1108,6 +1317,18 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
                                     }
                                 };
                             }
+                        }
+                    }
+                }
+                if (rawType instanceof Class && ((Class<?>) rawType).isAssignableFrom(List.class)) {
+                    Type typeArg = parameterizedType.getActualTypeArguments()[0];
+                    if (typeArg instanceof Class) {
+                        return new ServicesWithTypeLookup((Class<?>) typeArg);
+                    }
+                    if (typeArg instanceof WildcardType) {
+                        WildcardType wildcardType = (WildcardType) typeArg;
+                        if (wildcardType.getUpperBounds()[0] instanceof Class && wildcardType.getLowerBounds().length == 0) {
+                            return new ServicesWithTypeLookup((Class<?>) wildcardType.getUpperBounds()[0]);
                         }
                     }
                 }
@@ -1142,6 +1363,54 @@ public class DefaultServiceRegistry implements ServiceRegistry, Closeable {
             }
 
             throw new ServiceValidationException(String.format("Locating services with type %s is not supported.", format(serviceType)));
+        }
+
+        private static class CollectionServiceProvider implements ServiceProvider {
+            private final Type typeArg;
+            private final List<Object> services;
+            private final List<ServiceProvider> providers;
+
+            public CollectionServiceProvider(Type typeArg, List<Object> services, List<ServiceProvider> providers) {
+                this.typeArg = typeArg;
+                this.services = services;
+                this.providers = providers;
+            }
+
+            @Override
+            public String getDisplayName() {
+                return "services with type " + typeArg;
+            }
+
+            @Override
+            public Object get() {
+                return services;
+            }
+
+            @Override
+            public void requiredBy(Provider provider) {
+                for (ServiceProvider serviceProvider : providers) {
+                    serviceProvider.requiredBy(provider);
+                }
+            }
+        }
+
+        private static class ServicesWithTypeLookup implements BiFunction<ServiceProvider, LookupContext, Provider> {
+            private final Class<?> elementClass;
+
+            ServicesWithTypeLookup(Class<?> elementClass) {
+                this.elementClass = elementClass;
+            }
+
+            @Override
+            public ServiceProvider apply(final LookupContext lookupContext, final Provider provider) {
+                List<ServiceProvider> providers = new ArrayList<ServiceProvider>();
+                provider.getAll(lookupContext, elementClass, providers);
+                List<Object> services = new ArrayList<Object>(providers.size());
+                for (ServiceProvider serviceProvider : providers) {
+                    services.add(serviceProvider.get());
+                }
+                return new CollectionServiceProvider(elementClass, services, providers);
+            }
         }
     }
 }

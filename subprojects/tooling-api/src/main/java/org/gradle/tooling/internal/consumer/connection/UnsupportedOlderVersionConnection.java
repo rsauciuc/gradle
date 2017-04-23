@@ -20,9 +20,9 @@ import org.gradle.tooling.BuildAction;
 import org.gradle.tooling.UnsupportedVersionException;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
 import org.gradle.tooling.internal.build.VersionOnlyBuildEnvironment;
-import org.gradle.tooling.internal.consumer.Distribution;
 import org.gradle.tooling.internal.consumer.TestExecutionRequest;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
+import org.gradle.tooling.internal.protocol.ConnectionMetaDataVersion1;
 import org.gradle.tooling.internal.protocol.ConnectionVersion4;
 import org.gradle.tooling.model.build.BuildEnvironment;
 import org.gradle.tooling.model.internal.Exceptions;
@@ -30,31 +30,31 @@ import org.gradle.tooling.model.internal.Exceptions;
 /**
  * An adapter for unsupported connection using a {@code ConnectionVersion4} based provider.
  *
- * <p>Used for providers >= 1.0-milestone-3 and <= 1.0-milestone-7.</p>
+ * <p>Used for providers >= 1.0-milestone-3 and <= 1.2.</p>
  */
 public class UnsupportedOlderVersionConnection implements ConsumerConnection {
-    private final Distribution distribution;
     private final ProtocolToModelAdapter adapter;
     private final String version;
+    private final ConnectionMetaDataVersion1 metaData;
 
-    public UnsupportedOlderVersionConnection(Distribution distribution, ConnectionVersion4 delegate, ProtocolToModelAdapter adapter) {
-        this.distribution = distribution;
+    public UnsupportedOlderVersionConnection(ConnectionVersion4 delegate, ProtocolToModelAdapter adapter) {
         this.adapter = adapter;
-        version = delegate.getMetaData().getVersion();
+        this.version = delegate.getMetaData().getVersion();
+        this.metaData = delegate.getMetaData();
     }
 
     public void stop() {
     }
 
     public String getDisplayName() {
-        return distribution.getDisplayName();
+        return metaData.getDisplayName();
     }
 
     public <T> T run(Class<T> type, ConsumerOperationParameters operationParameters) throws UnsupportedOperationException, IllegalStateException {
         if (type.equals(BuildEnvironment.class)) {
             return adapter.adapt(type, doGetBuildEnvironment());
         }
-        throw fail();
+        throw new UnsupportedVersionException(String.format("Support for builds using Gradle versions older than 1.2 was removed in tooling API version 3.0. You are currently using Gradle version %s. You should upgrade your Gradle build to use Gradle 1.2 or later.", version));
     }
 
     private Object doGetBuildEnvironment() {
@@ -69,7 +69,4 @@ public class UnsupportedOlderVersionConnection implements ConsumerConnection {
         throw Exceptions.unsupportedFeature(operationParameters.getEntryPointName(), version, "2.6");
     }
 
-    private UnsupportedVersionException fail() {
-        return new UnsupportedVersionException(String.format("Support for Gradle version %s was removed in tooling API version 2.0. You should upgrade your Gradle build to use Gradle 1.0-milestone-8 or later.", version));
-    }
 }

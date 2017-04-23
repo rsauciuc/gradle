@@ -16,27 +16,29 @@
 
 package org.gradle.external.javadoc.internal;
 
-import org.gradle.external.javadoc.OptionLessJavadocOptionFileOption;
+import com.google.common.collect.Lists;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
-public class OptionLessStringsJavadocOptionFileOption implements OptionLessJavadocOptionFileOption<List<String>> {
+public class OptionLessStringsJavadocOptionFileOption implements OptionLessJavadocOptionFileOptionInternal<List<String>> {
     private List<String> value;
-
-    public OptionLessStringsJavadocOptionFileOption() {
-        value = new ArrayList<String>();
-    }
 
     public OptionLessStringsJavadocOptionFileOption(List<String> value) {
         this.value = value;
     }
 
+    @Override
+    public OptionLessStringsJavadocOptionFileOption duplicate() {
+        return new OptionLessStringsJavadocOptionFileOption(Lists.newArrayList(value));
+    }
+
+    @Override
     public List<String> getValue() {
         return value;
     }
 
+    @Override
     public void setValue(List<String> value) {
         if (value == null) {
             this.value.clear();
@@ -45,6 +47,7 @@ public class OptionLessStringsJavadocOptionFileOption implements OptionLessJavad
         }
     }
 
+    @Override
     public void write(JavadocOptionFileWriterContext writerContext) throws IOException {
         if (value != null && !value.isEmpty()) {
             for (String singleValue : value) {

@@ -16,33 +16,36 @@
 
 package org.gradle.integtests
 
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.internal.os.OperatingSystem
+import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.test.fixtures.archive.JarTestFixture
 
-public class MixedNativeAndJvmProjectIntegrationTest extends AbstractIntegrationSpec {
+public class MixedNativeAndJvmProjectIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
 
     def "can combine legacy java and cpp plugins in a single project"() {
         settingsFile << "rootProject.name = 'test'"
-        buildFile << '''
+        buildFile << """
 plugins {
     id 'java'
     id 'cpp'
 }
 
 model {
+    toolChains {
+        ${toolChain.buildScriptConfig}
+    }
     components {
         mainExe(NativeExecutableSpec)
         mainLib(NativeLibrarySpec)
     }
     tasks {
         checkBinaries(Task) {
-            def binaries = $.binaries
+            def binaries = \$.binaries
             doLast {
                 assert binaries.size() == 5
-                assert binaries.mainClasses instanceof ClassDirectoryBinarySpec
-                assert binaries.testClasses instanceof ClassDirectoryBinarySpec
+                assert binaries.main instanceof ClassDirectoryBinarySpec
+                assert binaries.test instanceof ClassDirectoryBinarySpec
                 assert binaries.mainExeExecutable instanceof NativeExecutableBinarySpec
                 assert binaries.mainLibSharedLibrary instanceof SharedLibraryBinarySpec
                 assert binaries.mainLibStaticLibrary instanceof StaticLibraryBinarySpec
@@ -50,19 +53,22 @@ model {
         }
     }
 }
-'''
+"""
         expect:
         succeeds "checkBinaries"
     }
 
     def "can combine jvm and native components in the same project"() {
-        buildFile << '''
+        buildFile << """
 plugins {
     id 'native-component'
     id 'jvm-component'
 }
 
 model {
+    toolChains {
+        ${toolChain.buildScriptConfig}
+    }
     components {
         nativeExe(NativeExecutableSpec)
         nativeLib(NativeLibrarySpec)
@@ -70,8 +76,8 @@ model {
     }
     tasks {
         create("validate") {
-            def components = $.components
-            def binaries = $.binaries
+            def components = \$.components
+            def binaries = \$.binaries
             doLast {
                 assert components.size() == 3
                 assert components.nativeExe instanceof NativeExecutableSpec
@@ -87,7 +93,7 @@ model {
         }
     }
 }
-'''
+"""
         expect:
         succeeds "validate"
     }
@@ -124,6 +130,9 @@ plugins {
 }
 
 model {
+    toolChains {
+        ${toolChain.buildScriptConfig}
+    }
     components {
         nativeApp(NativeExecutableSpec)
         jvmLib(JvmLibrarySpec)
@@ -151,8 +160,8 @@ model {
         executed ":jvmLibJar", ":nativeAppExecutable"
 
         and:
-        new JarTestFixture(file("build/jars/jvmLibJar/jvmLib.jar")).hasDescendants("org/gradle/test/Test.class", "test.txt");
+        new JarTestFixture(file("build/jars/jvmLib/jar/jvmLib.jar")).hasDescendants("org/gradle/test/Test.class", "test.txt");
         def nativeExeName = OperatingSystem.current().getExecutableName("nativeApp")
-        file("build/binaries/nativeAppExecutable/${nativeExeName}").assertExists()
+        file("build/exe/nativeApp/${nativeExeName}").assertExists()
     }
 }

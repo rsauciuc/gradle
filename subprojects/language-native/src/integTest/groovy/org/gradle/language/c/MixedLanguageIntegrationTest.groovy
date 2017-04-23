@@ -20,9 +20,7 @@ import org.gradle.integtests.fixtures.SourceFile
 import org.gradle.language.AbstractNativeLanguageIntegrationTest
 import org.gradle.nativeplatform.fixtures.app.HelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.MixedLanguageHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 
-@LeaksFileHandles
 class MixedLanguageIntegrationTest extends AbstractNativeLanguageIntegrationTest {
 
     HelloWorldApp helloWorldApp = new MixedLanguageHelloWorldApp(toolChain)
@@ -70,7 +68,7 @@ model {
         run "mainExecutable"
 
         then:
-        def mainExecutable = executable("build/binaries/mainExecutable/main")
+        def mainExecutable = executable("build/exe/main/main")
         mainExecutable.assertExists()
         mainExecutable.exec().out == helloWorldApp.englishOutput
     }
@@ -165,7 +163,7 @@ model {
         run "mainExecutable"
 
         then:
-        executable("build/binaries/mainExecutable/main").exec().out == HelloWorldApp.HELLO_WORLD + HelloWorldApp.HELLO_WORLD_FRENCH
+        executable("build/exe/main/main").exec().out == HelloWorldApp.HELLO_WORLD + HelloWorldApp.HELLO_WORLD_FRENCH
     }
 }
 

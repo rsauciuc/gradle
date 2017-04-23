@@ -15,20 +15,17 @@
  */
 package org.gradle.api.plugins.quality
 
-import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.plugins.ReportingBasePlugin
 import org.gradle.api.tasks.SourceSet
-import org.gradle.util.TestUtil
-import spock.lang.Specification
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
 import static org.gradle.api.tasks.TaskDependencyMatchers.dependsOn
 import static org.hamcrest.Matchers.*
 import static spock.util.matcher.HamcrestSupport.that
 
-class CheckstylePluginTest extends Specification {
-    DefaultProject project = TestUtil.createRootProject()
+class CheckstylePluginTest extends AbstractProjectBuilderSpec {
 
     def setup() {
         project.pluginManager.apply(CheckstylePlugin)
@@ -77,9 +74,9 @@ class CheckstylePluginTest extends Specification {
         def task = project.tasks.findByName(taskName)
         assert task instanceof Checkstyle
         task.with {
-            assert description == "Run Checkstyle analysis for ${sourceSet.name} classes"
-            assert checkstyleClasspath == project.configurations["checkstyle"]
-            assert classpath == sourceSet.output
+            assert description == "Run Checkstyle analysis for ${sourceSet.name} classes".toString()
+            assert checkstyleClasspath == project.configurations.checkstyle
+            assert classpath.files == (sourceSet.output + sourceSet.compileClasspath).files
             assert configFile == project.file("config/checkstyle/checkstyle.xml")
             assert config.inputFiles.singleFile == project.file("config/checkstyle/checkstyle.xml")
             assert configProperties == [:]
@@ -87,6 +84,8 @@ class CheckstylePluginTest extends Specification {
             assert reports.html.destination == project.file("build/reports/checkstyle/${sourceSet.name}.html")
             assert !ignoreFailures
             assert showViolations
+            assert maxErrors == 0
+            assert maxWarnings == Integer.MAX_VALUE
         }
     }
 
@@ -132,6 +131,8 @@ class CheckstylePluginTest extends Specification {
             reportsDir = project.file("checkstyle-reports")
             ignoreFailures = true
             showViolations = true
+            maxErrors = 1
+            maxWarnings = 1000
         }
 
         expect:
@@ -156,6 +157,8 @@ class CheckstylePluginTest extends Specification {
             assert reports.html.destination == project.file("checkstyle-reports/${sourceSet.name}.html")
             assert ignoreFailures
             assert showViolations
+            assert maxErrors == 1
+            assert maxWarnings == 1000
         }
     }
 

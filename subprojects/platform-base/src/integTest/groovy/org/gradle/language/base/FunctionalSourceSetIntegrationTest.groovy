@@ -30,24 +30,55 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
         class Rules extends RuleSource {
             @Model
             void fss(FunctionalSourceSet sources) {
-
             }
 
             @Mutate void printTask(ModelMap<Task> tasks, FunctionalSourceSet sources) {
                 tasks.create("printTask") {
-                  doLast {
-                    println sources
-                  }
-              }
+                    doLast {
+                        println "name: " + sources.name
+                        println "display-name: " + sources.displayName
+                        println "to-string: " + sources.toString()
+                    }
+                }
             }
-
         }
         apply plugin: Rules
         """
 
         expect:
         succeeds "printTask"
-        output.contains("FunctionalSourceSet 'fss'")
+        output.contains("name: fss")
+        output.contains("display-name: FunctionalSourceSet 'fss'")
+        output.contains("to-string: FunctionalSourceSet 'fss'")
+    }
+
+    def "can view a functional source set as a ModelElement"() {
+        buildScript """
+        apply plugin: 'language-base'
+
+        class Rules extends RuleSource {
+            @Model
+            void fss(FunctionalSourceSet sources) {
+            }
+
+            @Mutate void printTask(ModelMap<Task> tasks, @Path("fss") ModelElement sources) {
+                tasks.create("printTask") {
+                    doLast {
+                        println "name: " + sources.name
+                        println "display-name: " + sources.displayName
+                        println "to-string: " + sources.toString()
+                    }
+                }
+            }
+        }
+        apply plugin: Rules
+        """
+
+        expect:
+        succeeds "printTask"
+        output.contains("name: fss")
+        output.contains("display-name: FunctionalSourceSet 'fss'")
+        output.contains("to-string: FunctionalSourceSet 'fss'")
     }
 
     def "can create a top level functional source set via the model dsl"() {
@@ -63,12 +94,16 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
         succeeds "model"
     }
 
-    def "model report renders a functional source set"() {
+    def "model report renders a functional source set and elements"() {
         buildFile << """
         apply plugin: 'language-base'
 
+        ${registerJavaLanguage()}
+
         model {
-            functionalSources(FunctionalSourceSet)
+            functionalSources(FunctionalSourceSet) {
+                lssElement(SomeJavaSourceSet)
+            }
         }
         """
 
@@ -76,9 +111,17 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
         succeeds "model"
 
         then:
-        def modelNode = ModelReportOutput.from(output).modelNode
-        modelNode.functionalSources.@creator[0] == "functionalSources(org.gradle.language.base.FunctionalSourceSet) @ build.gradle line 5, column 13"
-        modelNode.functionalSources.@type[0] == "org.gradle.language.base.FunctionalSourceSet"
+        def reportOutput = ModelReportOutput.from(output)
+        reportOutput.hasNodeStructure {
+            functionalSources {
+                lssElement()
+            }
+        }
+        def functionalSourceSetCreator = "functionalSources(org.gradle.language.base.FunctionalSourceSet) { ... } @ build.gradle line 15, column 13"
+        reportOutput.modelNode.functionalSources.@type[0] == "org.gradle.language.base.FunctionalSourceSet"
+        reportOutput.modelNode.functionalSources.@creator[0] == functionalSourceSetCreator
+        reportOutput.modelNode.functionalSources.lssElement.@type[0] == "SomeJavaSourceSet"
+        reportOutput.modelNode.functionalSources.lssElement.@creator[0] == functionalSourceSetCreator + " > create(lssElement)"
     }
 
     def "can define a FunctionalSourceSet as a property of a managed type"() {
@@ -104,7 +147,7 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
         def buildType = ModelReportOutput.from(output).modelNode.buildType
 
         buildType.sources.@type[0] == 'org.gradle.language.base.FunctionalSourceSet'
-        buildType.sources.@creator[0] == 'Rules#buildType'
+        buildType.sources.@creator[0] == 'Rules#buildType(BuildType)'
     }
 
     def "can have FunctionalSourceSets as managed collection"() {
@@ -136,14 +179,14 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
         def buildType = ModelReportOutput.from(output).modelNode.buildType
 
         buildType.componentSources.@type[0] == 'org.gradle.model.ModelMap<org.gradle.language.base.FunctionalSourceSet>'
-        buildType.componentSources.@creator[0] == 'Rules#buildType'
+        buildType.componentSources.@creator[0] == 'Rules#buildType(BuildType)'
         buildType.componentSources.componentA.@type[0] == 'org.gradle.language.base.FunctionalSourceSet'
-        buildType.componentSources.componentA.@creator[0] == 'Rules#addSources > create(componentA)'
+        buildType.componentSources.componentA.@creator[0] == 'Rules#addSources(BuildType) > create(componentA)'
 
         buildType.testSources.@type[0] == 'org.gradle.model.ModelSet<org.gradle.language.base.FunctionalSourceSet>'
-        buildType.testSources.@creator[0] == 'Rules#buildType'
+        buildType.testSources.@creator[0] == 'Rules#buildType(BuildType)'
         buildType.testSources."0".@type[0] == 'org.gradle.language.base.FunctionalSourceSet'
-        buildType.testSources."0".@creator[0] == 'Rules#addSources > create()'
+        buildType.testSources."0".@creator[0] == 'Rules#addSources(BuildType) > create()'
     }
 
     def "can register a language source set"() {
@@ -156,7 +199,7 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
         class Rules extends RuleSource {
             @Model
             void functionalSources(FunctionalSourceSet sources) {
-                sources.create("myJavaSourceSet", JavaSourceSet) { LanguageSourceSet lss ->
+                sources.create("myJavaSourceSet", SomeJavaSourceSet) { LanguageSourceSet lss ->
                     lss.source.srcDir "src/main/myJavaSourceSet"
                 }
             }
@@ -175,7 +218,7 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
 
         model {
             functionalSources(FunctionalSourceSet){
-                myJavaSourceSet(JavaSourceSet) {
+                myJavaSourceSet(SomeJavaSourceSet) {
                     source {
                         srcDir "src/main/myJavaSourceSet"
                     }
@@ -189,7 +232,7 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         def modelNode = ModelReportOutput.from(output).modelNode
-        modelNode.functionalSources.myJavaSourceSet.@type[0] == 'org.gradle.language.java.JavaSourceSet'
+        modelNode.functionalSources.myJavaSourceSet.@type[0] == 'SomeJavaSourceSet'
         modelNode.sources.@nodeValue[0]  == '[]'
 
         and:
@@ -197,14 +240,115 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
 
     }
 
-    @NotYetImplemented
+    def "can reference sourceSet elements in a rule"() {
+        given:
+        buildFile << registerJavaLanguage()
+        buildFile << '''
+            model {
+                functionalSources(FunctionalSourceSet){
+                    myJavaSourceSet(SomeJavaSourceSet) {
+                        source {
+                            srcDir "src/main/myJavaSourceSet"
+                        }
+                    }
+                }
+                tasks {
+                    create("printSourceDisplayName") {
+                        def sources = $.functionalSources.myJavaSourceSet
+                        doLast {
+                            println "sources display name: ${sources.displayName}"
+                        }
+                    }
+                }
+            }
+        '''
+
+        when:
+        succeeds "printSourceDisplayName"
+
+        then:
+        output.contains "sources display name: SomeJava source 'myJavaSourceSet'"
+    }
+
+    def "can reference sourceSet elements using specialized type in a rule"() {
+        given:
+        buildFile << registerJavaLanguage()
+        buildFile << '''
+            class TaskRules extends RuleSource {
+                @Mutate
+                void addPrintSourceDisplayNameTask(ModelMap<Task> tasks, @Path("functionalSources.myJavaSourceSet") SomeJavaSourceSet sourceSet) {
+                    tasks.create("printSource") {
+                        doLast {
+                            println "sources display name: ${sourceSet.displayName}"
+                        }
+                    }
+                }
+            }
+
+            apply type: TaskRules
+            model {
+                functionalSources(FunctionalSourceSet){
+                    myJavaSourceSet(SomeJavaSourceSet) {
+                        source {
+                            srcDir "src/main/myJavaSourceSet"
+                        }
+                    }
+                }
+            }
+        '''
+
+        when:
+        succeeds "printSource"
+
+        then:
+        output.contains "sources display name: SomeJava source 'myJavaSourceSet'"
+    }
+
+    def "elements in FunctionalSourceSet are not created when defined"() {
+        when:
+        buildFile << """
+            ${registerJavaLanguage()}
+            model {
+                functionalSources(FunctionalSourceSet){
+                    ss1(SomeJavaSourceSet) {
+                        println "created ss1"
+                    }
+                    beforeEach {
+                        println "before \$it.name"
+                    }
+                    all {
+                        println "configured \$it.name"
+                    }
+                    afterEach {
+                        println "after \$it.name"
+                    }
+                    println "configured functionalSources"
+                }
+                tasks {
+                    verify(Task) {
+                        \$.functionalSources
+                    }
+                }
+            }
+        """
+        then:
+        succeeds "verify"
+        output.contains '''configured functionalSources
+before ss1
+created ss1
+configured ss1
+after ss1
+'''
+    }
+
+    @NotYetImplemented // Needs the ability to specify a rule for top-level nodes by type
     def "a LSS is initialized with a default source set"() {
         buildFile << """
         ${registerJavaLanguage()}
 
         model {
             functionalSources(FunctionalSourceSet){
-                myJavaSourceSet(JavaSourceSet)
+                myJavaSourceSet(SomeJavaSourceSet)
             }
         }
 
@@ -227,37 +371,32 @@ class FunctionalSourceSetIntegrationTest extends AbstractIntegrationSpec {
 
     private String registerJavaLanguage() {
         return """
-            import org.gradle.language.java.internal.DefaultJavaLanguageSourceSet
-
+            @Managed interface SomeJavaSourceSet extends LanguageSourceSet {}
             class JavaLangRuleSource extends RuleSource {
-
-                @LanguageType
-                void registerLanguage(LanguageTypeBuilder<JavaSourceSet> builder) {
-                    builder.setLanguageName("java");
-                    builder.defaultImplementation(DefaultJavaLanguageSourceSet.class);
+                @ComponentType
+                void registerLanguage(TypeBuilder<SomeJavaSourceSet> builder) {
                 }
-
-        }
-        apply plugin: JavaLangRuleSource
-        """
+            }
+            apply plugin: JavaLangRuleSource
+        """.stripIndent()
     }
 
 
     private String addPrintSourceDirTask(){
         """
-class PrintSourceDirectoryRules extends RuleSource {
-    @Mutate void printTask(ModelMap<Task> tasks, FunctionalSourceSet fss) {
-        tasks.create("printSourceDirs") {
-          doLast {
-            fss.each{ lss ->
-                println ("source dirs: \${lss.source.getSrcDirs()}")
+            class PrintSourceDirectoryRules extends RuleSource {
+                @Mutate void printTask(ModelMap<Task> tasks, FunctionalSourceSet fss) {
+                    tasks.create("printSourceDirs") {
+                      doLast {
+                        fss.each { lss ->
+                            println ("source dirs: \${lss.source.getSrcDirs()}")
+                        }
+                      }
+                  }
+                }
             }
-          }
-      }
-    }
-}
-apply plugin: PrintSourceDirectoryRules
-"""
+            apply plugin: PrintSourceDirectoryRules
+        """.stripIndent()
     }
 
 }

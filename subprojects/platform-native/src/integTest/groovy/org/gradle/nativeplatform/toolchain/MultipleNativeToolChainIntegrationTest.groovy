@@ -22,12 +22,11 @@ import org.gradle.nativeplatform.fixtures.AvailableToolChains
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.ToolChainRequirement
 import org.gradle.nativeplatform.fixtures.app.CppCompilerDetectingTestApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import org.junit.Assume
 
 @RequiresInstalledToolChain
-@LeaksFileHandles
 class MultipleNativeToolChainIntegrationTest extends AbstractIntegrationSpec {
     def helloWorld = new CppCompilerDetectingTestApp()
 
@@ -40,12 +39,15 @@ plugins { id 'cpp' }
     }
 
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-    @RequiresInstalledToolChain(ToolChainRequirement.Gcc)
+    @RequiresInstalledToolChain(ToolChainRequirement.GCC)
     def "can build with multiple tool chains"() {
         AvailableToolChains.InstalledToolChain x86ToolChain = OperatingSystem.current().isWindows() ?
-                AvailableToolChains.getToolChain(ToolChainRequirement.VisualCpp) :
-                AvailableToolChains.getToolChain(ToolChainRequirement.Clang)
-        AvailableToolChains.InstalledToolChain sparcToolChain = AvailableToolChains.getToolChain(ToolChainRequirement.Gcc)
+                AvailableToolChains.getToolChain(ToolChainRequirement.VISUALCPP) :
+                AvailableToolChains.getToolChain(ToolChainRequirement.CLANG)
+        AvailableToolChains.InstalledToolChain sparcToolChain = AvailableToolChains.getToolChain(ToolChainRequirement.GCC)
+
+        // This is a Junit class, but works in Spock too.
+        Assume.assumeNotNull(x86ToolChain?.buildScriptConfig, sparcToolChain?.buildScriptConfig)
 
         when:
         buildFile << """
@@ -78,9 +80,9 @@ model {
         succeeds 'mainI386Executable', 'mainSparcExecutable'
 
         and:
-        def i386Exe = x86ToolChain.executable(file("build/binaries/mainExecutable/i386/main"))
+        def i386Exe = x86ToolChain.executable(file("build/exe/main/i386/main"))
         assert i386Exe.exec().out == helloWorld.expectedOutput(x86ToolChain)
-        def sparcExe = sparcToolChain.executable(file("build/binaries/mainExecutable/sparc/main"))
+        def sparcExe = sparcToolChain.executable(file("build/exe/main/sparc/main"))
         assert sparcExe.exec().out == helloWorld.expectedOutput(sparcToolChain)
     }
 

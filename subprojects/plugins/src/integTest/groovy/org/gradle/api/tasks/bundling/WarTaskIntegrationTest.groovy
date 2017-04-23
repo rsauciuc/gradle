@@ -17,8 +17,11 @@
 package org.gradle.api.tasks.bundling
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.archives.TestReproducibleArchives
 import org.gradle.test.fixtures.archive.JarTestFixture
+import spock.lang.Issue
 
+@TestReproducibleArchives
 class WarTaskIntegrationTest extends AbstractIntegrationSpec {
 
     def canCreateAWarArchiveWithNoWebXml() {
@@ -277,5 +280,29 @@ class WarTaskIntegrationTest extends AbstractIntegrationSpec {
         def war = new JarTestFixture(file('build/test.war'))
         war.assertContainsFile('WEB-INF/web.xml')
         war.assertFileContent('WEB-INF/web.xml', 'good')
+    }
+
+    @Issue("GRADLE-3522")
+    def "war task doesn't trigger dependency resolution early"() {
+        when:
+        buildFile << """
+configurations {
+    conf
+}
+
+task assertUnresolved {
+    doLast {
+        assert configurations.conf.state == Configuration.State.UNRESOLVED
+    }
+}
+
+task war(type: War) {
+    dependsOn assertUnresolved
+    classpath = configurations.conf
+}
+"""
+
+        then:
+        succeeds "war"
     }
 }

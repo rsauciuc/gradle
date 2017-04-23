@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.gradle.internal.Cast;
+import org.gradle.internal.reflect.PropertyAccessorType;
 import org.gradle.model.internal.asm.AsmClassGeneratorUtils;
 
 import java.lang.annotation.Annotation;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 public class PropertyAccessorExtractionContext {
+    private final PropertyAccessorType accessorType;
     private final Collection<Method> declaringMethods;
     private final Method mostSpecificDeclaration;
     private final String mostSpecificSignature;
@@ -39,8 +41,9 @@ public class PropertyAccessorExtractionContext {
     private final boolean declaredAsAbstract;
     private final Map<Class<? extends Annotation>, Annotation> annotations;
 
-    public PropertyAccessorExtractionContext(Iterable<Method> declaringMethods) {
+    public PropertyAccessorExtractionContext(PropertyAccessorType accessorType, Iterable<Method> declaringMethods) {
         Method mostSpecificDeclaration = ModelSchemaUtils.findMostSpecificMethod(declaringMethods);
+        this.accessorType = accessorType;
         this.declaringMethods = ImmutableList.copyOf(declaringMethods);
         this.mostSpecificDeclaration = mostSpecificDeclaration;
         this.mostSpecificSignature = AsmClassGeneratorUtils.signature(mostSpecificDeclaration);
@@ -60,6 +63,10 @@ public class PropertyAccessorExtractionContext {
             }
         }
         return Collections.unmodifiableMap(annotations);
+    }
+
+    public PropertyAccessorType getAccessorType() {
+        return accessorType;
     }
 
     public Collection<Method> getDeclaringMethods() {
@@ -110,4 +117,8 @@ public class PropertyAccessorExtractionContext {
         return getters;
     }
 
+    @Override
+    public String toString() {
+        return String.format("%s.%s()/%s", mostSpecificDeclaration.getDeclaringClass().getSimpleName(), mostSpecificDeclaration.getName(), accessorType);
+    }
 }

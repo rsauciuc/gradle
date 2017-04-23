@@ -16,140 +16,79 @@
 
 package org.gradle.model.internal.registry;
 
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.LinkedHashMultimap;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.gradle.model.internal.core.ModelNode;
 import org.gradle.model.internal.core.ModelPath;
+import org.gradle.model.internal.type.ModelType;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
+import java.util.*;
 
 class RuleBindings {
-    private final ModelGraph modelGraph;
-    private final NodeIndex rulesBySubject;
-    private final NodeIndex rulesByInput;
-    private final Multimap<ModelPath, Reference> pathReferences = ArrayListMultimap.create();
-    private final Multimap<ModelPath, Reference> scopeReferences = ArrayListMultimap.create();
+    private final NodeAtStateIndex rulesBySubject;
+    private final NodeAtStateIndex rulesByInput;
+    private final PathPredicateIndex untypedPathReferences = new PathPredicateIndex();
+    private final PathPredicateIndex typedPathReferences = new PathPredicateIndex();
+    private final TypePredicateIndex scopeReferences = new TypePredicateIndex();
 
-    public RuleBindings(ModelGraph graph) {
-        this.modelGraph = graph;
-        rulesBySubject = new NodeIndex("rulesBySubject");
-        rulesByInput = new NodeIndex("rulesByInput");
+    public RuleBindings() {
+        rulesBySubject = new NodeAtStateIndex("rulesBySubject");
+        rulesByInput = new NodeAtStateIndex("rulesByInput");
     }
 
     public void nodeCreated(ModelNodeInternal node) {
-        for (Reference reference : pathReferences.get(node.getPath())) {
-            if (reference.binding.canBindInState(node.getState())) {
-                bound(reference, node);
-            }
-        }
+        untypedPathReferences.addNode(node);
     }
 
     public void nodeDiscovered(ModelNodeInternal node) {
-        for (Reference reference : pathReferences.get(node.getPath())) {
-            if (!reference.binding.isBound()) {
-                bound(reference, node);
-            }
-        }
-        addTypeMatches(node, scopeReferences.get(node.getPath()));
-        addTypeMatches(node, scopeReferences.get(node.getPath().getParent()));
-    }
-
-    private void addTypeMatches(ModelNodeInternal node, Collection<Reference> references) {
-        for (Reference reference : references) {
-            if (reference.binding.isTypeCompatible(node.getPromise())) {
-                bound(reference, node);
-            }
-        }
+        typedPathReferences.addNode(node);
+        scopeReferences.addNodeToScope(node.getPath(), node);
+        scopeReferences.addNodeToScope(node.getPath().getParent(), node);
     }
 
     private void bound(Reference reference, ModelNodeInternal node) {
         ModelBinding binding = reference.binding;
         binding.onBind(node);
-        if (binding.predicate.getState() == null) {
-            throw new IllegalArgumentException("No state specified for binding: " + binding);
-        }
         reference.index.put(new NodeAtState(node.getPath(), binding.predicate.getState()), reference.owner);
     }
 
     public void remove(ModelNodeInternal node) {
+        untypedPathReferences.removeNode(node);
+        typedPathReferences.removeNode(node);
+        scopeReferences.removeNodeFromScope(node.getPath(), node);
+        scopeReferences.removeNodeFromScope(node.getPath().getParent(), node);
         rulesBySubject.nodeRemoved(node);
         rulesByInput.nodeRemoved(node);
     }
 
-    public void remove(ModelNodeInternal node, RuleBinder ruleBinder) {
-        rulesBySubject.remove(node, ruleBinder);
-        rulesByInput.remove(node, ruleBinder);
-        removeReferences(node, ruleBinder, pathReferences);
-        removeReferences(node, ruleBinder, scopeReferences);
-    }
-
-    private void removeReferences(ModelNodeInternal node, RuleBinder ruleBinder, Multimap<ModelPath, Reference> references) {
-        Iterator<Reference> iterator = references.get(node.getPath()).iterator();
-        while (iterator.hasNext()) {
-            Reference reference = iterator.next();
-            if (reference.owner.equals(ruleBinder)) {
-                iterator.remove();
-            }
-        }
-    }
-
     public void add(RuleBinder ruleBinder) {
-        addRule(ruleBinder, rulesBySubject, subject(ruleBinder));
+        addRule(ruleBinder, rulesBySubject, ruleBinder.getSubjectBinding());
         for (ModelBinding binding : ruleBinder.getInputBindings()) {
             addRule(ruleBinder, rulesByInput, binding);
         }
     }
 
-    private void addRule(RuleBinder rule, NodeIndex index, ModelBinding binding) {
+    private void addRule(RuleBinder rule, NodeAtStateIndex index, ModelBinding binding) {
         Reference reference = new Reference(rule, index, binding);
         BindingPredicate predicate = binding.getPredicate();
         if (predicate.getPath() != null) {
             if (predicate.getScope() != null) {
                 throw new UnsupportedOperationException("Currently not implemented");
             }
-            ModelNodeInternal node = modelGraph.find(predicate.getPath());
-            if (node != null && reference.binding.canBindInState(node.getState())) {
-                bound(reference, node);
+            if (reference.binding.canBindInState(ModelNode.State.Registered)) {
+                untypedPathReferences.addReference(reference);
+            } else {
+                typedPathReferences.addReference(reference);
             }
-            // Need to continue to watch to deal with node removal
-            pathReferences.put(predicate.getPath(), reference);
         } else if (predicate.getScope() != null) {
-            for (ModelNodeInternal node : modelGraph.findAllInScope(predicate.getScope())) {
-                // Do not try to attach to nodes that are not Discovered yet
-                if (!node.isAtLeast(ModelNode.State.Discovered)) {
-                    continue;
-                }
-                if (binding.isTypeCompatible(node.getPromise())) {
-                    bound(reference, node);
-                }
-            }
-            // Need to continue to watch for potential later matches, which will make the binding ambiguous, and node removal
-            scopeReferences.put(predicate.getScope(), reference);
+            scopeReferences.addReference(reference);
         } else {
             throw new UnsupportedOperationException("Currently not implemented");
         }
     }
 
-    private ModelBinding subject(RuleBinder ruleBinder) {
-        if (ruleBinder.getSubjectBinding() != null) {
-            return ruleBinder.getSubjectBinding();
-        }
-        // Create a dummy binding. Could probably reorganise things to avoid this
-        return new ModelBinding(ruleBinder.getDescriptor(), ruleBinder.getSubjectReference(), true) {
-            @Override
-            public boolean canBindInState(ModelNode.State state) {
-                return true;
-            }
-        };
-    }
-
     private static void unbind(RuleBinder rule, ModelNodeInternal node) {
-        if (rule.getSubjectBinding() != null) {
-            rule.getSubjectBinding().onUnbind(node);
-        }
+        rule.getSubjectBinding().onUnbind(node);
         for (ModelBinding binding : rule.getInputBindings()) {
             binding.onUnbind(node);
         }
@@ -171,10 +110,10 @@ class RuleBindings {
 
     private static class Reference {
         final ModelBinding binding;
-        final NodeIndex index;
+        final NodeAtStateIndex index;
         final RuleBinder owner;
 
-        public Reference(RuleBinder owner, NodeIndex index, ModelBinding binding) {
+        public Reference(RuleBinder owner, NodeAtStateIndex index, ModelBinding binding) {
             this.owner = owner;
             this.index = index;
             this.binding = binding;
@@ -186,39 +125,184 @@ class RuleBindings {
         }
     }
 
-    private static class NodeIndex {
-        private final Multimap<NodeAtState, RuleBinder> boundAtState = LinkedHashMultimap.create();
+    private class PredicateMatches {
+        final List<Reference> references = new ArrayList<Reference>();
+        ModelNodeInternal match;
+
+        void match(ModelNodeInternal node) {
+            for (Reference reference : references) {
+                bound(reference, node);
+            }
+            match = node;
+        }
+
+        void add(Reference reference) {
+            references.add(reference);
+            if (match != null) {
+                bound(reference, match);
+            }
+        }
+
+        public void remove(ModelNodeInternal node) {
+            match = null;
+        }
+    }
+
+    private class PathPredicateIndex {
+        final Map<ModelPath, PredicateMatches> predicates = Maps.newLinkedHashMap();
+
+        public void addNode(ModelNodeInternal node) {
+            predicatesForPath(node.getPath()).match(node);
+        }
+
+        public void addReference(Reference reference) {
+            ModelPath path = reference.binding.getPredicate().getPath();
+            predicatesForPath(path).add(reference);
+        }
+
+        private PredicateMatches predicatesForPath(ModelPath path) {
+            PredicateMatches predicatesForReference = predicates.get(path);
+            if (predicatesForReference == null) {
+                predicatesForReference = new PredicateMatches();
+                predicates.put(path, predicatesForReference);
+            }
+            return predicatesForReference;
+        }
+
+        public void removeNode(ModelNodeInternal node) {
+            predicatesForPath(node.getPath()).remove(node);
+        }
+    }
+
+    private class ScopeIndex {
+        final Map<ModelType<?>, PredicateMatches> types = Maps.newLinkedHashMap();
+        final List<ModelNodeInternal> nodes = Lists.newArrayList();
+
+        public void addNode(ModelNodeInternal node) {
+            nodes.add(node);
+            for (Map.Entry<ModelType<?>, PredicateMatches> entry : types.entrySet()) {
+                if (node.canBeViewedAs(entry.getKey())) {
+                    entry.getValue().match(node);
+                }
+            }
+        }
+
+        public void removeNode(ModelNodeInternal node) {
+            nodes.remove(node);
+            for (PredicateMatches matches : types.values()) {
+                if (matches.match == node) {
+                    matches.remove(node);
+                }
+            }
+        }
+
+        public void addReference(Reference reference) {
+            ModelType<?> type = reference.binding.getPredicate().getType();
+            PredicateMatches predicateMatches = types.get(type);
+            boolean newType = predicateMatches == null;
+            if (predicateMatches == null) {
+                predicateMatches = new PredicateMatches();
+                types.put(type, predicateMatches);
+            }
+            predicateMatches.add(reference);
+            if (newType) {
+                for (ModelNodeInternal node : nodes) {
+                    if (node.canBeViewedAs(type)) {
+                        predicateMatches.match(node);
+                    }
+                }
+            }
+        }
+    }
+
+    private class TypePredicateIndex {
+        final Map<ModelPath, ScopeIndex> scopes = Maps.newLinkedHashMap();
+
+        public void addNodeToScope(ModelPath path, ModelNodeInternal node) {
+            scopeForPath(path).addNode(node);
+        }
+
+        public void removeNodeFromScope(ModelPath path, ModelNodeInternal node) {
+            scopeForPath(path).removeNode(node);
+        }
+
+        public void addReference(Reference reference) {
+            ModelPath path = reference.binding.getPredicate().getScope();
+            scopeForPath(path).addReference(reference);
+        }
+
+        private ScopeIndex scopeForPath(ModelPath path) {
+            ScopeIndex scope = scopes.get(path);
+            if (scope == null) {
+                scope = new ScopeIndex();
+                scopes.put(path, scope);
+            }
+            return scope;
+        }
+    }
+
+    private static class NodeAtStateIndex {
+        private final EnumMap<ModelNode.State, Map<String, List<RuleBinder>>> boundAtState = Maps.newEnumMap(ModelNode.State.class);
 
         private final String name;
 
-        private NodeIndex(String name) {
+        private NodeAtStateIndex(String name) {
             this.name = name;
+        }
+
+        private Map<String, List<RuleBinder>> getByState(ModelNode.State state) {
+            Map<String, List<RuleBinder>> map = boundAtState.get(state);
+            if (map == null) {
+                map = new HashMap<String, List<RuleBinder>>(64);
+                boundAtState.put(state, map);
+            }
+            return map;
         }
 
         public void nodeRemoved(ModelNodeInternal node) {
             // This could be more efficient; assume that removal happens much less often than addition
             for (ModelNode.State state : ModelNode.State.values()) {
-                for (RuleBinder rule : boundAtState.removeAll(new NodeAtState(node.getPath(), state))) {
-                    unbind(rule, node);
+                Map<String, List<RuleBinder>> byState = getByState(state);
+                List<RuleBinder> remove = byState.remove(node.getPath().toString());
+                if (remove != null) {
+                    for (RuleBinder rule : remove) {
+                        unbind(rule, node);
+                    }
                 }
             }
         }
 
         public void put(NodeAtState nodeAtState, RuleBinder binder) {
-            boundAtState.put(nodeAtState, binder);
+            Map<String, List<RuleBinder>> byState = getByState(nodeAtState.state);
+            String path = nodeAtState.path.toString();
+            List<RuleBinder> byPath = getByPath(byState, path);
+            if (!byPath.contains(binder)) {
+                byPath.add(binder);
+            }
+        }
+
+        private List<RuleBinder> getByPath(Map<String, List<RuleBinder>> byState, String path) {
+            List<RuleBinder> ruleBinders = byState.get(path);
+            if (ruleBinders == null) {
+                ruleBinders = new LinkedList<RuleBinder>();
+                byState.put(path, ruleBinders);
+            }
+            return ruleBinders;
         }
 
         /**
          * Returns rules for given target at state.
          */
         public Collection<RuleBinder> get(NodeAtState nodeAtState) {
-            Collection<RuleBinder> result = boundAtState.get(nodeAtState);
-            return result == null ? Collections.<RuleBinder>emptyList() : result;
+            return getByPath(getByState(nodeAtState.state), nodeAtState.path.toString());
         }
 
         public void remove(ModelNodeInternal node, RuleBinder ruleBinder) {
             unbind(ruleBinder, node);
-            boundAtState.values().remove(ruleBinder);
+            for (ModelNode.State state : ModelNode.State.values()) {
+                Map<String, List<RuleBinder>> byState = getByState(state);
+                getByPath(byState, node.getPath().toString()).clear();
+            }
         }
 
         @Override

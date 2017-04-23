@@ -25,11 +25,15 @@ dependencies {
     compile project(':plugins')
     compile project(':ear')
     compile project(':toolingApi')
+    compile project(':compositeBuilds')
     compile libraries.slf4j_api
     compile libraries.inject
 
     testCompile libraries.xmlunit
+    testCompile libraries.equalsVerifier
     testCompile project(':dependencyManagement')
+
 }
 
 useTestFixtures()
+useTestFixtures(project: ":dependencyManagement")

@@ -16,6 +16,7 @@
 
 package org.gradle.external.javadoc.internal;
 
+import com.google.common.collect.Lists;
 import org.jmock.Expectations;
 import org.jmock.integration.junit4.JUnit4Mockery;
 import org.jmock.lib.legacy.ClassImposteriser;
@@ -37,7 +38,7 @@ public class OptionLessStringsJavadocOptionFileOptionTest {
         context.setImposteriser(ClassImposteriser.INSTANCE);
         writerContextMock = context.mock(JavadocOptionFileWriterContext.class);
 
-        optionLessStringsOption = new OptionLessStringsJavadocOptionFileOption();
+        optionLessStringsOption = new OptionLessStringsJavadocOptionFileOption(Lists.<String>newArrayList());
     }
 
     @Test
@@ -46,10 +47,10 @@ public class OptionLessStringsJavadocOptionFileOptionTest {
         final String secondValue = "secondValue";
 
         context.checking(new Expectations() {{
-            one(writerContextMock).write(firstValue);
-            one(writerContextMock).newLine();
-            one(writerContextMock).write(secondValue);
-            one(writerContextMock).newLine();
+            oneOf(writerContextMock).write(firstValue);
+            oneOf(writerContextMock).newLine();
+            oneOf(writerContextMock).write(secondValue);
+            oneOf(writerContextMock).newLine();
         }});
 
         optionLessStringsOption.write(writerContextMock);

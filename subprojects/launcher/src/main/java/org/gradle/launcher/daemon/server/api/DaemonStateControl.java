@@ -24,7 +24,7 @@ public interface DaemonStateControl {
      *
      * <p>The daemon will stop accepting new work, so that subsequent calls to {@link #runCommand} will fail with {@link DaemonUnavailableException}.
      */
-    void requestStop();
+    void requestStop(String reason);
 
     /**
      * Requests a forceful stops of the daemon. Does not wait until the daemon is idle to begin stopping. The stop will happen asynchronously, and this method does not block.
@@ -33,13 +33,25 @@ public interface DaemonStateControl {
      *
      * <p>The daemon will stop accepting new work, so that subsequent calls to {@link #runCommand} will failing with {@link DaemonUnavailableException}.
      */
-    void requestForcefulStop();
+    void requestForcefulStop(String reason);
+
+    /**
+     * Returns the current state of the daemon
+     *
+     * @return The current state of the daemon
+     */
+    State getState();
+
+    /**
+     * Requests that a running build be canceled.  Note that this method does NOT block until the operation has been cancelled.
+     */
+    void requestCancel();
 
     /**
      * Communicates a request for build cancellation. Note that this method blocks until the operation has been cancelled.
      *
      * <p>If any long running command is currently running, this method does block for certain time to give chance to perform cancellation, and if the command
-     * doesn't finnish in a timely manner a request for forceful stop will be issued ({@link #requestForcefulStop()}.</p>
+     * doesn't finnish in a timely manner a request for forceful stop will be issued ({@link #requestForcefulStop(String reason)}.</p>
      */
     void cancelBuild();
 
@@ -62,4 +74,6 @@ public interface DaemonStateControl {
      * The caller should note that the command may still be running at the time the method returns but should consider the command as abandoned.
      */
     void runCommand(Runnable command, String commandDisplayName) throws DaemonUnavailableException, DaemonStoppedException;
+
+    enum State {Idle, Busy, Canceled, StopRequested, Stopped, Broken}
 }

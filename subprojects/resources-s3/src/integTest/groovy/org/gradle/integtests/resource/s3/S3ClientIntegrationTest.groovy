@@ -15,20 +15,35 @@
  */
 
 package org.gradle.integtests.resource.s3
-import com.amazonaws.services.s3.model.*
+
+import com.amazonaws.services.s3.model.CreateBucketRequest
+import com.amazonaws.services.s3.model.DeleteBucketRequest
+import com.amazonaws.services.s3.model.DeleteObjectRequest
+import com.amazonaws.services.s3.model.ListObjectsRequest
+import com.amazonaws.services.s3.model.ObjectListing
+import com.amazonaws.services.s3.model.Region
+import com.amazonaws.services.s3.model.S3Object
+import com.amazonaws.services.s3.model.S3ObjectSummary
 import com.google.common.base.Optional
 import org.apache.commons.io.IOUtils
+import org.gradle.api.GradleException
 import org.gradle.integtests.resource.s3.fixtures.S3Server
+import org.gradle.internal.IoActions
 import org.gradle.internal.credentials.DefaultAwsCredentials
 import org.gradle.internal.resource.transport.aws.s3.S3Client
 import org.gradle.internal.resource.transport.aws.s3.S3ConnectionProperties
 import org.gradle.internal.resource.transport.aws.s3.S3RegionalResource
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.Requires
 import org.junit.Rule
 import spock.lang.Ignore
+import spock.lang.Issue
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Unroll
+
+import static org.gradle.util.TestPrecondition.FIX_TO_WORK_ON_JAVA9
+import static org.gradle.util.TestPrecondition.JDK9_OR_LATER
 
 class S3ClientIntegrationTest extends Specification {
 
@@ -51,12 +66,31 @@ class S3ClientIntegrationTest extends Specification {
         awsCredentials.setSecretKey(secret)
     }
 
+    @Requires(JDK9_OR_LATER)
+    def "should inform the user to add the 'java.xml.bind' jigsaw module"() {
+        given:
+        def s3Client = new S3Client(null, new S3ConnectionProperties())
+
+        when:
+        s3Client.put(null, null, null)
+
+        then:
+        GradleException jigsawException = thrown()
+        jigsawException.getMessage().contains('-addmods java.xml.bind')
+    }
+
     @Unroll
+    @Requires(FIX_TO_WORK_ON_JAVA9)
+    @Issue("Currently the 'javax.xml.bind' jigsaw module is not automatically required on the Gradle Jvm")
     def "should perform #authenticationType put get and list on an S3 bucket"() {
         setup:
         def fileContents = 'This is only a test'
         File file = temporaryFolder.createFile(FILE_NAME)
         file << fileContents
+        def directSubdirectories = ['some-dir', 'second-dir', 'some-other-dir']
+        directSubdirectories.each { temporaryFolder.createDir(it) }
+
+        temporaryFolder.createDir('some-dir', 'not-direct')
 
         server.stubPutFile(file, "/${bucketName}/maven/release/$FILE_NAME")
 
@@ -78,7 +112,10 @@ class S3ClientIntegrationTest extends Specification {
         when:
         server.stubMetaData(file, "/${bucketName}/maven/release/$FILE_NAME")
         S3Object data = s3Client.getMetaData(uri)
-        def metadata = data.getObjectMetadata()
+        def metadata = null
+        IoActions.withResource(data) {
+            metadata = data.getObjectMetadata()
+        }
 
         then:
         metadata.getContentLength() == 0
@@ -89,21 +126,20 @@ class S3ClientIntegrationTest extends Specification {
 
         then:
         S3Object object = s3Client.getResource(uri)
-        object.metadata.getContentLength() == fileContents.length()
-        object.metadata.getETag() ==~ /\w{32}/
-        ByteArrayOutputStream outStream = new ByteArrayOutputStream()
-        IOUtils.copyLarge(object.getObjectContent(), outStream);
-        outStream.toString() == fileContents
+        IoActions.withResource(object) {
+            object.metadata.getContentLength() == fileContents.length()
+            object.metadata.getETag() ==~ /\w{32}/
+            ByteArrayOutputStream outStream = new ByteArrayOutputStream()
+            IOUtils.copyLarge(object.getObjectContent(), outStream);
+            outStream.toString() == fileContents
+        }
 
         when:
         server.stubListFile(temporaryFolder.testDirectory, bucketName)
 
         then:
-        def files = s3Client.list(new URI("s3://${bucketName}/maven/release/"))
-        !files.isEmpty()
-        files.each {
-            assert it.contains(".")
-        }
+        def listing = s3Client.listDirectChildren(new URI("s3://${bucketName}/maven/release/"))
+        listing as Set == ([FILE_NAME] + directSubdirectories) as Set
 
         where:
         authenticationImpl | authenticationType
@@ -115,7 +151,7 @@ class S3ClientIntegrationTest extends Specification {
      * Allows for quickly making real aws requests during development
      */
     @Ignore
-    def "should interact with real S3"() {
+    def "should interact with real S3 using KEY/SECRET pair"() {
         DefaultAwsCredentials credentials = new DefaultAwsCredentials()
         String bucketName = System.getenv('G_S3_BUCKET')
         credentials.setAccessKey(System.getenv('G_AWS_ACCESS_KEY_ID'))
@@ -130,8 +166,47 @@ class S3ClientIntegrationTest extends Specification {
         def stream = new FileInputStream(file)
         def uri = new URI("s3://${bucketName}/maven/release/${new Date().getTime()}-mavenTest.txt")
         s3Client.put(stream, file.length(), uri)
+        s3Client.getResource(new URI("s3://${bucketName}/maven/release/idontExist.txt")).close()
+    }
+
+    @Ignore
+    def "should interact with real S3 using KEY/SECRET/TOKEN triplet"() {
+        DefaultAwsCredentials credentials = new DefaultAwsCredentials()
+        String bucketName = System.getenv('G_S3_BUCKET')
+        credentials.setAccessKey(System.getenv('G_AWS_ACCESS_KEY_ID'))
+        credentials.setSecretKey(System.getenv('G_AWS_SECRET_ACCESS_KEY'))
+        credentials.setSessionToken(System.getenv('G_AWS_SESSION_TOKEN'))
+
+        S3Client s3Client = new S3Client(credentials, new S3ConnectionProperties())
+
+        def fileContents = 'This is only a test'
+        File file = temporaryFolder.createFile(FILE_NAME)
+        file << fileContents
+
+        expect:
+        def stream = new FileInputStream(file)
+        def uri = new URI("s3://${bucketName}/maven/release/${new Date().getTime()}-mavenTest.txt")
+        s3Client.put(stream, file.length(), uri)
         s3Client.getResource(new URI("s3://${bucketName}/maven/release/idontExist.txt"))
     }
+
+    @Ignore
+    def "should interact with real S3 using SDK delegation"() {
+        String bucketName = System.getenv('G_S3_BUCKET')
+
+        S3Client s3Client = new S3Client(new S3ConnectionProperties())
+
+        def fileContents = 'This is only a test'
+        File file = temporaryFolder.createFile(FILE_NAME)
+        file << fileContents
+
+        expect:
+        def stream = new FileInputStream(file)
+        def uri = new URI("s3://${bucketName}/maven/release/${new Date().getTime()}-mavenTest.txt")
+        s3Client.put(stream, file.length(), uri)
+        s3Client.getResource(new URI("s3://${bucketName}/maven/release/idontExist.txt"))
+    }
+
 
     @Ignore
     def "should use region specific endpoints to interact with buckets in all regions"() {
@@ -168,7 +243,7 @@ class S3ClientIntegrationTest extends Specification {
             s3Client.put(new FileInputStream(file), file.length(), uri)
 
             println "------Getting object"
-            s3Client.getResource(uri)
+            s3Client.getResource(uri).close()
 
             ListObjectsRequest listObjectsRequest = new ListObjectsRequest()
                     .withBucketName(bucketName)

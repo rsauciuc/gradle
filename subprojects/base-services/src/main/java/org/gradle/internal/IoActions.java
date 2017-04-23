@@ -19,7 +19,12 @@ package org.gradle.internal;
 import org.gradle.api.Action;
 import org.gradle.api.UncheckedIOException;
 
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.Closeable;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
 
 /**
@@ -72,19 +77,40 @@ public abstract class IoActions {
     public static <T extends Closeable> void withResource(T resource, Action<? super T> action) {
         try {
             action.execute(resource);
-        } catch(Throwable t) {
-            try {
-                resource.close();
-            } catch (IOException e) {
-                // Ignored
-            }
+        } catch (Throwable t) {
+            closeQuietly(resource);
             throw UncheckedException.throwAsUncheckedException(t);
         }
+        uncheckedClose(resource);
+    }
 
+    /**
+     * Closes the given resource rethrowing any {@link IOException} as a {@link UncheckedIOException}.
+     *
+     * @param resource The resource to be closed
+     */
+    public static void uncheckedClose(Closeable resource) {
         try {
-            resource.close();
+            if (resource != null) {
+                resource.close();
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Closes the given resource silently ignoring any {@link IOException}.
+     *
+     * @param resource The resource to be closed
+     */
+    public static void closeQuietly(Closeable resource) {
+        try {
+            if (resource != null) {
+                resource.close();
+            }
+        } catch (IOException e) {
+            // Ignored
         }
     }
 

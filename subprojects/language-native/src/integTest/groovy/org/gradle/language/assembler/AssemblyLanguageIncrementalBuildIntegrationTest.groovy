@@ -20,13 +20,11 @@ import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.app.HelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.MixedLanguageHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import spock.lang.IgnoreIf
 
-@LeaksFileHandles
 class AssemblyLanguageIncrementalBuildIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
 
     HelloWorldApp app = new MixedLanguageHelloWorldApp(AbstractInstalledToolChainIntegrationSpec.toolChain)
@@ -62,7 +60,7 @@ class AssemblyLanguageIncrementalBuildIntegrationTest extends AbstractInstalledT
 
         run "installMainExecutable"
 
-        install = installation("build/install/mainExecutable")
+        install = installation("build/install/main")
     }
 
     @IgnoreIf({GradleContextualExecuter.parallel})
@@ -75,7 +73,6 @@ class AssemblyLanguageIncrementalBuildIntegrationTest extends AbstractInstalledT
     }
 
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-    @LeaksFileHandles
     def "reassembles binary with assembler option change"() {
         when:
         buildFile << """
@@ -113,13 +110,13 @@ class AssemblyLanguageIncrementalBuildIntegrationTest extends AbstractInstalledT
         then:
         executedAndNotSkipped ":assembleHelloSharedLibraryHelloAsm"
 
-        // TODO:DAZ Need to have valid x86-64 sources, so that we can verify the output: currently we're producing a binary that won't work on x86-64
+        // Need to have valid x86-64 sources, so that we can verify the output: currently we're producing a binary that won't work on x86-64
     }
 
     @IgnoreIf({GradleContextualExecuter.parallel})
     def "cleans up stale object files when source file renamed"() {
-        def oldObjFile = objectFileFor(asmSourceFile, "build/objs/helloSharedLibrary/helloAsm")
-        def newObjFile = objectFileFor(file('src/hello/asm/changed_sum.s'), "build/objs/helloSharedLibrary/helloAsm")
+        def oldObjFile = objectFileFor(asmSourceFile, "build/objs/hello/shared/helloAsm")
+        def newObjFile = objectFileFor(file('src/hello/asm/changed_sum.s'), "build/objs/hello/shared/helloAsm")
         assert oldObjFile.file
         assert !newObjFile.file
 

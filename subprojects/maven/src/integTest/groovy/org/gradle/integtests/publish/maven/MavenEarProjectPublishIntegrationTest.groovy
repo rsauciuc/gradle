@@ -18,12 +18,9 @@ package org.gradle.integtests.publish.maven
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class MavenEarProjectPublishIntegrationTest extends AbstractIntegrationSpec {
-    def setup() {
-        overrideMavenLocal()
-    }
-
     public void "publishes EAR only for mixed java and WAR and EAR project"() {
         given:
+        using m2 //uploadArchives leaks into local ~/.m2
         file("settings.gradle") << "rootProject.name = 'publishTest' "
 
         and:
@@ -40,7 +37,7 @@ repositories {
 }
 
 dependencies {
-    compile "commons-collections:commons-collections:3.2.1"
+    compile "commons-collections:commons-collections:3.2.2"
     runtime "commons-io:commons-io:1.4"
 }
 

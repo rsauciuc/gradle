@@ -18,7 +18,6 @@ package org.gradle.api.internal.tasks.compile;
 
 import org.gradle.internal.Factory;
 import org.gradle.internal.SystemProperties;
-import org.gradle.internal.jvm.JdkTools;
 import org.gradle.internal.jvm.Jvm;
 
 import javax.tools.JavaCompiler;
@@ -40,6 +39,7 @@ public class JavaHomeBasedJavaCompilerFactory implements Factory<JavaCompiler>, 
         this.systemJavaCompilerFactory = systemJavaCompilerFactory;
     }
 
+    @Override
     public JavaCompiler create() {
         JavaCompiler compiler = findCompiler();
 
@@ -61,18 +61,21 @@ public class JavaHomeBasedJavaCompilerFactory implements Factory<JavaCompiler>, 
     }
 
     public static class CurrentJvmJavaHomeFactory implements Factory<File>, Serializable {
+        @Override
         public File create() {
             return Jvm.current().getJavaHome();
         }
     }
 
     public static class SystemPropertiesJavaHomeFactory implements Factory<File>, Serializable {
+        @Override
         public File create() {
             return SystemProperties.getInstance().getJavaHomeDir();
         }
     }
 
     public static class SystemJavaCompilerFactory implements Factory<JavaCompiler>, Serializable {
+        @Override
         public JavaCompiler create() {
             return JdkTools.current().getSystemJavaCompiler();
         }

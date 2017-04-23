@@ -18,6 +18,15 @@ Useful links:
 The stories found here use the terminology defined in the `buildingJavaLibraries.xml` chapter. Please make sure you have those terms in mind before going further.
 
 
+# ASM 6
+
+This section lists the mandatory items to be fixes as soon as ASM 6 is available. ASM is the library we use to parse classes,
+and it is used in a lot of different places in Gradle. The ASM 5 library cannot read the Java 9 class format
+(version 53). We have worked around this in several places of Gradle:
+
+- remove usages of `org.gradle.util.internal.Java9ClassReader` and replace them with a standard `org.objectweb.asm.ClassReader`
+- remove hack in `org.gradle.test.fixtures.file.ClassFile`
+
 # Feature: Java library author specifies library API
 
 Given a description of the API of a library, Gradle will prevent at compile time the consumers of a library from using classes that are not part of the API of the library. This is intended to help teams materialize and describe the APIs of and dependencies between the various components of their software stack, and enforce the boundaries between them, helping prepare them for transition to the Java module system.
@@ -142,7 +151,15 @@ creation of a static initializer that we want to avoid).
 ## Story: Java source is not recompiled when signature of the undeclared API of a dependent library has not changed
 
 If a component doesn't declare an API, produce a stubbed API jar like in the case an API is declared. Consider all packages as belonging to the API.
-This story should include performance tests that prove that incremental builds are faster:
+
+### Test cases
+
+- An API jar is created when no API is declared
+- API jar contains all classes, but no resources
+- API jar is a stubbed jar
+- Building the API jar should not trigger generation of the runtime jar
+
+As part of this story, we should ensure that the performance tests that prove that incremental builds are faster, get even faster. In particular, the tests found in `JavaSoftwareModelCompileAvoidancePerformanceTest` should perform significantly faster for the `WithoutApi` cases.
 
 - because downstream dependencies are not recompiled when the API signature doesn't change
 - because it is done independently of the fact a component declares an API or not
@@ -541,3 +558,140 @@ Abstractly:
 - runtime image is an executable with a single target native platform
 - runtime image is a bundle of modules
 - modular JVM is a JVM platform with a single target native platform that can host jars, multi-version jars, modular jars
+
+# Gradle and JDK9 Status Today (2016/03/30)
+
+This section is for recording issues with Gradle and the JDK 9 libraries and runtime. There is currently just one
+distributions of Jdk 9 available for 64-bit OS X (this is down from two in the past.)
+
+- **Jdk 9 (with Jigsaw)** Java HotSpot(TM) 64-Bit Server VM (build 9-ea+111, mixed mode)
+
+In the following scenarios, we describe how Gradle version 2.12 behaves running with this jdk.
+
+## Scenario 1: Simple Gradle Build
+
+In this scenario, we have the following `build.gradle` file:
+
+```
+task printProps {
+  doLast {
+    println "Favorite Color: " + System.properties['favoriteColor']
+  }
+}
+```
+
+### Gradle 2.12 and Jdk 9 (with Jigsaw) -- Success
+
+```
+$> gradle printProps -s
+Parallel execution is an incubating feature.
+:printProps
+Favorite Color: green
+
+BUILD SUCCESSFUL
+
+Total time: 0.666 sec
+```
+
+## Scenario 2: Simple Java Library
+
+In this scenario, we run `gradle init --type java-library` and then `gradle build`
+
+### Gradle 2.12 with Jdk 9 (with Jigsaw) -- Failure
+
+```
+$> gradle init --type java-library
+Parallel execution is an incubating feature.
+:wrapper
+:init
+
+BUILD SUCCESSFUL
+
+Total time: 0.709 secs
+
+$> gradle build -s
+Parallel execution is an incubating feature.
+:compileJava FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava'.
+> Could not create an instance of type com.sun.tools.javac.api.JavacTool.
+
+* Try:
+Run with --info or --debug option to get more log output.
+
+* Exception is:
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':compileJava'.
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeActions(ExecuteActionsTaskExecuter.java:69)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:46)
+	at org.gradle.api.internal.tasks.execution.PostExecutionAnalysisTaskExecuter.execute(PostExecutionAnalysisTaskExecuter.java:35)
+	at org.gradle.api.internal.tasks.execution.SkipUpToDateTaskExecuter.execute(SkipUpToDateTaskExecuter.java:64)
+	at org.gradle.api.internal.tasks.execution.ValidatingTaskExecuter.execute(ValidatingTaskExecuter.java:58)
+	at org.gradle.api.internal.tasks.execution.SkipEmptySourceFilesTaskExecuter.execute(SkipEmptySourceFilesTaskExecuter.java:52)
+	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:52)
+	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:53)
+	at org.gradle.api.internal.tasks.execution.ExecuteAtMostOnceTaskExecuter.execute(ExecuteAtMostOnceTaskExecuter.java:43)
+	at org.gradle.execution.taskgraph.DefaultTaskGraphExecuter$EventFiringTaskWorker.execute(DefaultTaskGraphExecuter.java:203)
+	at org.gradle.execution.taskgraph.DefaultTaskGraphExecuter$EventFiringTaskWorker.execute(DefaultTaskGraphExecuter.java:185)
+	at org.gradle.execution.taskgraph.AbstractTaskPlanExecutor$TaskExecutorWorker.processTask(AbstractTaskPlanExecutor.java:66)
+	at org.gradle.execution.taskgraph.AbstractTaskPlanExecutor$TaskExecutorWorker.run(AbstractTaskPlanExecutor.java:50)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:54)
+	at org.gradle.internal.concurrent.StoppableExecutorImpl$1.run(StoppableExecutorImpl.java:40)
+Caused by: org.gradle.internal.reflect.ObjectInstantiationException: Could not create an instance of type com.sun.tools.javac.api.JavacTool.
+	at org.gradle.internal.reflect.DirectInstantiator.newInstance(DirectInstantiator.java:53)
+	at org.gradle.internal.reflect.DirectInstantiator.instantiate(DirectInstantiator.java:29)
+	at org.gradle.internal.jvm.JdkTools.getSystemJavaCompiler(JdkTools.java:74)
+	at org.gradle.api.internal.tasks.compile.JavaHomeBasedJavaCompilerFactory$SystemJavaCompilerFactory.create(JavaHomeBasedJavaCompilerFactory.java:81)
+	at org.gradle.api.internal.tasks.compile.JavaHomeBasedJavaCompilerFactory$SystemJavaCompilerFactory.create(JavaHomeBasedJavaCompilerFactory.java:78)
+	at org.gradle.api.internal.tasks.compile.JavaHomeBasedJavaCompilerFactory.findCompiler(JavaHomeBasedJavaCompilerFactory.java:58)
+	at org.gradle.api.internal.tasks.compile.JavaHomeBasedJavaCompilerFactory.create(JavaHomeBasedJavaCompilerFactory.java:45)
+	at org.gradle.api.internal.tasks.compile.JavaHomeBasedJavaCompilerFactory.create(JavaHomeBasedJavaCompilerFactory.java:28)
+	at org.gradle.api.internal.tasks.compile.JdkJavaCompiler.createCompileTask(JdkJavaCompiler.java:56)
+	at org.gradle.api.internal.tasks.compile.JdkJavaCompiler.execute(JdkJavaCompiler.java:45)
+	at org.gradle.api.internal.tasks.compile.JdkJavaCompiler.execute(JdkJavaCompiler.java:33)
+	at org.gradle.api.internal.tasks.compile.NormalizingJavaCompiler.delegateAndHandleErrors(NormalizingJavaCompiler.java:104)
+	at org.gradle.api.internal.tasks.compile.NormalizingJavaCompiler.execute(NormalizingJavaCompiler.java:53)
+	at org.gradle.api.internal.tasks.compile.NormalizingJavaCompiler.execute(NormalizingJavaCompiler.java:38)
+	at org.gradle.api.internal.tasks.compile.CleaningJavaCompilerSupport.execute(CleaningJavaCompilerSupport.java:35)
+	at org.gradle.api.internal.tasks.compile.CleaningJavaCompilerSupport.execute(CleaningJavaCompilerSupport.java:25)
+	at org.gradle.api.tasks.compile.JavaCompile.performCompilation(JavaCompile.java:163)
+	at org.gradle.api.tasks.compile.JavaCompile.compile(JavaCompile.java:145)
+	at org.gradle.api.tasks.compile.JavaCompile.compile(JavaCompile.java:93)
+	at org.gradle.internal.reflect.JavaMethod.invoke(JavaMethod.java:75)
+	at org.gradle.api.internal.project.taskfactory.AnnotationProcessingTaskFactory$IncrementalTaskAction.doExecute(AnnotationProcessingTaskFactory.java:244)
+	at org.gradle.api.internal.project.taskfactory.AnnotationProcessingTaskFactory$StandardTaskAction.execute(AnnotationProcessingTaskFactory.java:220)
+	at org.gradle.api.internal.project.taskfactory.AnnotationProcessingTaskFactory$IncrementalTaskAction.execute(AnnotationProcessingTaskFactory.java:231)
+	at org.gradle.api.internal.project.taskfactory.AnnotationProcessingTaskFactory$StandardTaskAction.execute(AnnotationProcessingTaskFactory.java:209)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeAction(ExecuteActionsTaskExecuter.java:80)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeActions(ExecuteActionsTaskExecuter.java:61)
+	... 14 more
+Caused by: java.lang.IllegalAccessException: class org.gradle.internal.reflect.DirectInstantiator cannot access class com.sun.tools.javac.api.JavacTool (in module jdk.compiler) because module jdk.compiler does not export com.sun.tools.javac.api to unnamed module @6c9f5c0d
+	at org.gradle.internal.reflect.DirectInstantiator.newInstance(DirectInstantiator.java:49)
+	... 39 more
+
+
+BUILD FAILED
+
+Total time: 1.527 secs
+```
+
+According to this [slide
+deck](http://openjdk.java.net/projects/jigsaw/talks/prepare-for-jdk9-j1-2015.pdf),
+it looks like we should just be able to work around this by passing
+"-XaddExports" as JVM options when invoking the build, but that has not worked for
+me yet.
+
+Also, the problem seems to come from our use of a private
+implementation detail behind the `JavaCompiler` interface. We are
+creating an isolated classLoader with only the tools.jar on it, and
+then attempting to create an instance of the
+`com.sun.tools.javac.api.JavacTool` class rather than getting a
+`JavaCompiler` from `ToolsProvider.getSystemJavaCompiler()` method as
+suggested by [the
+documentation](http://download.java.net/jdk9/docs/api/javax/tools/JavaCompiler.html).
+
+I don't currently understand why we need to isolate ourselves from the
+application `ClassLoader` or exactly how this is accomplished, but I
+wonder if there might be another way to achieve the same results.

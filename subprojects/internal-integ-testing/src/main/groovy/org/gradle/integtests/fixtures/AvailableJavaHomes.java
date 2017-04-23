@@ -19,16 +19,18 @@ import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import net.rubygrapefruit.platform.SystemInfo;
 import net.rubygrapefruit.platform.WindowsRegistry;
 import org.gradle.api.JavaVersion;
 import org.gradle.api.Nullable;
 import org.gradle.api.specs.Spec;
-import org.gradle.api.specs.Specs;
+import org.gradle.integtests.fixtures.executer.GradleDistribution;
+import org.gradle.integtests.fixtures.executer.UnderDevelopmentGradleDistribution;
 import org.gradle.integtests.fixtures.jvm.InstalledJvmLocator;
 import org.gradle.integtests.fixtures.jvm.JvmInstallation;
 import org.gradle.internal.SystemProperties;
-import org.gradle.internal.jvm.JavaInfo;
 import org.gradle.internal.jvm.Jre;
 import org.gradle.internal.jvm.Jvm;
 import org.gradle.internal.nativeintegration.filesystem.FileCanonicalizer;
@@ -38,29 +40,71 @@ import org.gradle.testfixtures.internal.NativeServicesTestFixture;
 import org.gradle.util.CollectionUtils;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Allows the tests to get hold of an alternative Java installation when needed.
  */
-abstract public class AvailableJavaHomes {
+public abstract class AvailableJavaHomes {
     private static List<JvmInstallation> jvms;
+    private static GradleDistribution underTest = new UnderDevelopmentGradleDistribution();
 
     @Nullable
-    public static JavaInfo getJava5() {
+    public static Jvm getJava5() {
         return getJdk(JavaVersion.VERSION_1_5);
     }
 
     @Nullable
-    public static JavaInfo getJdk6() {
+    public static Jvm getJdk6() {
         return getJdk(JavaVersion.VERSION_1_6);
     }
 
     @Nullable
-    public static JavaInfo getJdk(final JavaVersion version) {
-        return getAvailableJdk(new Spec<JvmInstallation>() {
+    public static Jvm getJdk(final JavaVersion version) {
+        return Iterables.getFirst(getAvailableJdks(version), null);
+    }
+
+    /**
+     * Returns a JDK for each of the given java versions, if available.
+     */
+    public static List<Jvm> getJdks(final String... versions) {
+        List<JavaVersion> javaVersions = Lists.transform(Arrays.asList(versions), new Function<String, JavaVersion>() {
+            @Override
+            public JavaVersion apply(@javax.annotation.Nullable String version) {
+                return JavaVersion.toVersion(version);
+            }
+        });
+        return getJdks(Iterables.toArray(javaVersions, JavaVersion.class));
+    }
+
+    /**
+     * Returns a JDK for each of the given java versions, if available.
+     */
+    public static List<Jvm> getJdks(JavaVersion... versions) {
+        final Set<JavaVersion> remaining = Sets.newHashSet(versions);
+        return getAvailableJdks(new Spec<JvmInstallation>() {
+            @Override
+            public boolean isSatisfiedBy(JvmInstallation element) {
+                return remaining.remove(element.getJavaVersion());
+            }
+        });
+    }
+
+    /**
+     * Returns all JDKs for the given java version.
+     */
+    public static List<Jvm> getAvailableJdks(final JavaVersion version) {
+        return getAvailableJdks(new Spec<JvmInstallation>() {
             @Override
             public boolean isSatisfiedBy(JvmInstallation element) {
                 return version.equals(element.getJavaVersion());
@@ -68,11 +112,17 @@ abstract public class AvailableJavaHomes {
         });
     }
 
-    public static List<JavaInfo> getAvailableJdks() {
-        return getAvailableJdks(Specs.satisfyAll());
+    public static List<Jvm> getAvailableJvms() {
+        return FluentIterable.from(getJvms())
+            .transform(new Function<JvmInstallation, Jvm>() {
+                @Override
+                public Jvm apply(JvmInstallation input) {
+                    return Jvm.discovered(input.getJavaHome(), input.getJavaVersion());
+                }
+            }).toList();
     }
 
-    public static List<JavaInfo> getAvailableJdks(final Spec<? super JvmInstallation> filter) {
+    public static List<Jvm> getAvailableJdks(final Spec<? super JvmInstallation> filter) {
         return FluentIterable.from(getJvms())
             .filter(new Predicate<JvmInstallation>() {
                 @Override
@@ -80,34 +130,54 @@ abstract public class AvailableJavaHomes {
                     return input.isJdk() && filter.isSatisfiedBy(input);
                 }
             })
-            .transform(new Function<JvmInstallation, JavaInfo>() {
+            .transform(new Function<JvmInstallation, Jvm>() {
                 @Override
-                public JavaInfo apply(JvmInstallation input) {
-                    return Jvm.forHome(input.getJavaHome());
+                public Jvm apply(JvmInstallation input) {
+                    return Jvm.discovered(input.getJavaHome(), input.getJavaVersion());
                 }
             }).toList();
     }
 
-    public static JavaInfo getAvailableJdk(final Spec<? super JvmInstallation> filter) {
+    public static Map<Jvm, JavaVersion> getAvailableJdksWithVersion() {
+        Map<Jvm, JavaVersion> result = new HashMap<Jvm, JavaVersion>();
+        for (JavaVersion javaVersion : JavaVersion.values()) {
+            for (Jvm javaInfo : getAvailableJdks(javaVersion)) {
+                result.put(javaInfo, javaVersion);
+            }
+        }
+        return result;
+    }
+
+    public static Jvm getAvailableJdk(final Spec<? super JvmInstallation> filter) {
         return Iterables.getFirst(getAvailableJdks(filter), null);
     }
 
+    private static boolean isSupportedVersion(JvmInstallation jvmInstallation) {
+        return underTest.worksWith(Jvm.discovered(jvmInstallation.getJavaHome(), jvmInstallation.getJavaVersion()));
+    }
+
+    /**
+     * Returns a JDK is that has a different Java home to the current one, and which is supported by the Gradle version under test.
+     */
     @Nullable
-    public static JavaInfo getDifferentJdk() {
+    public static Jvm getDifferentJdk() {
         return getAvailableJdk(new Spec<JvmInstallation>() {
             @Override
             public boolean isSatisfiedBy(JvmInstallation element) {
-                return !element.getJavaHome().equals(Jvm.current().getJavaHome());
+                return !element.getJavaHome().equals(Jvm.current().getJavaHome()) && isSupportedVersion(element);
             }
         });
     }
 
+    /**
+     * Returns a JDK is that has a different Java version to the current one, and which is supported by the Gradle version under test.
+     */
     @Nullable
-    public static JavaInfo getDifferentVersion() {
+    public static Jvm getDifferentVersion() {
         return getAvailableJdk(new Spec<JvmInstallation>() {
             @Override
             public boolean isSatisfiedBy(JvmInstallation element) {
-                return !element.getJavaVersion().equals(Jvm.current().getJavaVersion());
+                return !element.getJavaVersion().equals(Jvm.current().getJavaVersion()) && isSupportedVersion(element);
             }
         });
     }
@@ -138,6 +208,9 @@ abstract public class AvailableJavaHomes {
             jvms.addAll(new DevInfrastructureJvmLocator(fileCanonicalizer).findJvms());
             InstalledJvmLocator installedJvmLocator = new InstalledJvmLocator(OperatingSystem.current(), Jvm.current(), nativeServices.get(WindowsRegistry.class), nativeServices.get(SystemInfo.class), fileCanonicalizer);
             jvms.addAll(installedJvmLocator.findJvms());
+            if (OperatingSystem.current().isLinux()) {
+                jvms.addAll(new BaseDirJvmLocator(fileCanonicalizer, new File("/opt")).findJvms());
+            }
             jvms.addAll(new HomeDirJvmLocator(fileCanonicalizer).findJvms());
             // Order from most recent to least recent
             Collections.sort(jvms, new Comparator<JvmInstallation>() {
@@ -185,18 +258,20 @@ abstract public class AvailableJavaHomes {
         }
     }
 
-    private static class HomeDirJvmLocator {
+    private static class BaseDirJvmLocator {
         private static final Pattern JDK_DIR = Pattern.compile("jdk(\\d+\\.\\d+\\.\\d+(_\\d+)?)");
-        final FileCanonicalizer fileCanonicalizer;
+        private final FileCanonicalizer fileCanonicalizer;
+        private final File baseDir;
 
-        private HomeDirJvmLocator(FileCanonicalizer fileCanonicalizer) {
+        private BaseDirJvmLocator(FileCanonicalizer fileCanonicalizer, File baseDir) {
             this.fileCanonicalizer = fileCanonicalizer;
+            this.baseDir = baseDir;
         }
 
         public List<JvmInstallation> findJvms() {
             Set<File> javaHomes = new HashSet<File>();
             List<JvmInstallation> jvms = new ArrayList<JvmInstallation>();
-            for (File file : new File(SystemProperties.getInstance().getUserHome()).listFiles()) {
+            for (File file : baseDir.listFiles()) {
                 Matcher matcher = JDK_DIR.matcher(file.getName());
                 if (!matcher.matches()) {
                     continue;
@@ -212,6 +287,13 @@ abstract public class AvailableJavaHomes {
                 jvms.add(new JvmInstallation(JavaVersion.toVersion(version), version, file, true, JvmInstallation.Arch.Unknown));
             }
             return jvms;
+        }
+    }
+
+    private static class HomeDirJvmLocator extends BaseDirJvmLocator {
+
+        private HomeDirJvmLocator(FileCanonicalizer fileCanonicalizer) {
+            super(fileCanonicalizer, new File(SystemProperties.getInstance().getUserHome()));
         }
     }
 }

@@ -16,15 +16,12 @@
 
 package org.gradle.plugins.ide.internal.resolver.model;
 
-import org.gradle.api.artifacts.Configuration;
-
 import java.io.File;
 
 public class IdeLocalFileDependency extends IdeDependency {
     private final File file;
 
-    public IdeLocalFileDependency(Configuration declaredConfiguration, File file) {
-        super(declaredConfiguration);
+    public IdeLocalFileDependency(File file) {
         this.file = file;
     }
 

@@ -19,21 +19,21 @@ package org.gradle.api.publish.ivy.internal.publication;
 import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.XmlProvider;
-import org.gradle.api.artifacts.Module;
 import org.gradle.api.internal.UserCodeAction;
+import org.gradle.api.internal.artifacts.Module;
 import org.gradle.api.publish.ivy.IvyArtifact;
 import org.gradle.api.publish.ivy.IvyConfiguration;
 
 import org.gradle.api.publish.ivy.IvyExtraInfoSpec;
 import org.gradle.api.publish.ivy.internal.dependency.IvyDependencyInternal;
 import org.gradle.api.publish.ivy.internal.publisher.IvyPublicationIdentity;
-import org.gradle.listener.ActionBroadcast;
+import org.gradle.internal.MutableActionSet;
 
 import java.util.Set;
 
 public class DefaultIvyModuleDescriptorSpec implements IvyModuleDescriptorSpecInternal {
 
-    private final ActionBroadcast<XmlProvider> xmlActions = new ActionBroadcast<XmlProvider>();
+    private final MutableActionSet<XmlProvider> xmlActions = new MutableActionSet<XmlProvider>();
     private final IvyPublicationInternal ivyPublication;
     private String status = Module.DEFAULT_STATUS;
     private String branch;

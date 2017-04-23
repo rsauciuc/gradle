@@ -46,7 +46,7 @@ import java.util.List;
  * GradleRunner instances are not thread safe and cannot be used concurrently.
  * However, multiple instances are able to be used concurrently.
  * <p>
- * Please see <a href="https://docs.gradle.org/current/userguide/test_kit.html">the Gradle TestKit User Guide chapter</a> for more information.
+ * Please see <a href="https://docs.gradle.org/current/userguide/test_kit.html" target="_top">the Gradle TestKit User Guide chapter</a> for more information.
  *
  * @since 2.6
  */
@@ -176,7 +176,7 @@ public abstract class GradleRunner {
      * A project directory must be set.
      * This method must be called before {@link #build()} or {@link #buildAndFail()}.
      * <p>
-     * All builds executed with the runner effectively implicitly add the {@code --no-search-upwards} argument.
+     * All builds executed with the runner effectively implicitly add the {@code --no-search-upward} argument.
      * This suppresses Gradle's default behaviour of searching upwards through the file system in order to find the root of the current project tree.
      * This default behaviour is often utilised when focusing on a particular build within a multi-project build.
      * This behaviour is suppressed due to test builds being executed potentially being created within a “real build”
@@ -228,6 +228,33 @@ public abstract class GradleRunner {
      * @since 2.8
      */
     public abstract List<? extends File> getPluginClasspath();
+
+    /**
+     * Sets the plugin classpath based on the Gradle plugin development plugin conventions.
+     * <p>
+     * The 'java-gradle-plugin' generates a file describing the plugin under test and makes it available to the test runtime.
+     * This method configures the runner to use this file.
+     * Please consult the Gradle documentation of this plugin for more information.
+     * <p>
+     * This method looks for a file named {@code plugin-under-test-metadata.properties} on the runtime classpath,
+     * and uses the {@code implementation-classpath} as the classpath, which is expected to a {@link File#pathSeparatorChar} joined string.
+     * If the plugin metadata file cannot be resolved an {@link InvalidPluginMetadataException} is thrown.
+     * <p>
+     * Plugins from classpath are able to be resolved using the <code>plugins { }</code> syntax in the build under test.
+     * Please consult the TestKit Gradle User Guide chapter for more information and usage examples.
+     * <p>
+     * Calling this method will replace any previous classpath specified via {@link #withPluginClasspath(Iterable)} and vice versa.
+     * <p>
+     * <b>Note:</b> this method will cause an {@link InvalidRunnerConfigurationException} to be emitted when the build is executed,
+     * if the version of Gradle executing the build (i.e. not the version of the runner) is earlier than Gradle 2.8 as those versions do not support this feature.
+     * Please consult the TestKit Gradle User Guide chapter alternative strategies that can be used for older Gradle versions.
+     *
+     * @return this
+     * @see #withPluginClasspath(Iterable)
+     * @see #getPluginClasspath()
+     * @since 2.13
+     */
+    public abstract GradleRunner withPluginClasspath() throws InvalidPluginMetadataException;
 
     /**
      * Sets the injected plugin classpath for the build.

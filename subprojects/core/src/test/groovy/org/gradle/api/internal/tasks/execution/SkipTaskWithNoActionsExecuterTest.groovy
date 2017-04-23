@@ -18,6 +18,7 @@ package org.gradle.api.internal.tasks.execution
 import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.tasks.TaskExecuter
 import org.gradle.api.internal.tasks.TaskExecutionContext
+import org.gradle.api.internal.tasks.TaskExecutionOutcome
 import org.gradle.api.internal.tasks.TaskStateInternal
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.TaskDependency
@@ -41,34 +42,37 @@ class SkipTaskWithNoActionsExecuterTest extends Specification {
 
     def skipsTaskWithNoActionsAndMarksUpToDateIfAllItsDependenciesWereSkipped() {
         given:
-        task.actions >> []
+        task.taskActions >> []
         dependencyState.skipped >> true
 
         when:
         executor.execute(task, state, executionContext)
 
         then:
-        1 * state.upToDate()
+        1 * state.setActionable(false)
+        1 * state.setOutcome(TaskExecutionOutcome.UP_TO_DATE)
         0 * target._
         0 * state._
     }
 
     def skipsTaskWithNoActionsAndMarksOutOfDateDateIfAnyOfItsDependenciesWereNotSkipped() {
         given:
-        task.actions >> []
+        task.taskActions >> []
         dependencyState.skipped >> false
 
         when:
         executor.execute(task, state, executionContext)
 
         then:
+        1 * state.setActionable(false)
+        1 * state.setOutcome(TaskExecutionOutcome.EXECUTED)
         0 * target._
         0 * state._
     }
 
     def executesTaskWithActions() {
         given:
-        task.actions >> [{} as TaskAction]
+        task.taskActions >> [{} as TaskAction]
 
         when:
         executor.execute(task, state, executionContext)

@@ -26,10 +26,12 @@ import org.gradle.api.Project;
 @Incubating
 public class PlayPlugin implements Plugin<Project> {
 
+    @Override
     public void apply(final Project project) {
         project.getPluginManager().apply(PlayApplicationPlugin.class);
         project.getPluginManager().apply(PlayTestPlugin.class);
         project.getPluginManager().apply(PlayJavaScriptPlugin.class);
         project.getPluginManager().apply(PlayDistributionPlugin.class);
+        project.getPluginManager().apply("org.gradle.play-ide");
     }
 }

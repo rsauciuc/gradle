@@ -18,9 +18,9 @@ package org.gradle.plugin.use.resolve.service
 
 import org.gradle.integtests.fixtures.CrossVersionIntegrationSpec
 import org.gradle.integtests.fixtures.TargetVersions
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.plugin.PluginBuilder
 import org.gradle.test.fixtures.server.http.MavenHttpModule
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.junit.Rule
 
 @TargetVersions(["2.1+"])
@@ -52,8 +52,10 @@ class PluginResolutionCachingCrossVersionIntegrationTest extends CrossVersionInt
         service.start()
         file("build.gradle") << """
             plugins { id '$PLUGIN_ID' version '$VERSION' }
-            task pluginApplied << {
-                assert project.pluginApplied
+            task pluginApplied {
+                doLast {
+                    assert project.pluginApplied
+                }
             }
         """
 

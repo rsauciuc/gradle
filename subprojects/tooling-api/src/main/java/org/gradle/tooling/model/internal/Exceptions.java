@@ -18,7 +18,6 @@ package org.gradle.tooling.model.internal;
 
 import org.gradle.tooling.UnknownModelException;
 import org.gradle.tooling.UnsupportedVersionException;
-import org.gradle.tooling.exceptions.UnsupportedOperationConfigurationException;
 import org.gradle.tooling.internal.consumer.Distribution;
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping;
 import org.gradle.tooling.internal.protocol.InternalUnsupportedModelException;
@@ -38,13 +37,8 @@ public class Exceptions {
         return String.format("Unsupported method: %s."
                 + "\nThe version of Gradle you connect to does not support that method."
                 + "\nTo resolve the problem you can change/upgrade the target version of Gradle you connect to."
-                + "\nAlternatively, you can ignore this exception and read other information from the model."
-                , method);
-    }
-
-    public static UnsupportedOperationConfigurationException unsupportedOperationConfiguration(String operation, String targetVersion, String versionAdded) {
-        return new UnsupportedOperationConfigurationException(String.format("The version of Gradle you are using (%s) does not support the %s configuration option. Support for this is available in Gradle %s and all later versions.",
-                targetVersion, operation, versionAdded));
+                + "\nAlternatively, you can ignore this exception and read other information from the model.",
+            method);
     }
 
     public static UnknownModelException unsupportedModel(Class<?> modelType, String targetVersion) {

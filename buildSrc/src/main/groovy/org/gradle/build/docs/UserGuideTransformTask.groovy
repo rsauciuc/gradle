@@ -17,16 +17,25 @@
 
 package org.gradle.build.docs
 
-import groovy.xml.dom.DOMCategory
 import org.gradle.api.DefaultTask
 import org.gradle.api.InvalidUserDataException
+import org.gradle.api.file.FileCollection
+import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import org.gradle.build.docs.dsl.links.ClassLinkMetaData
 import org.gradle.build.docs.dsl.links.LinkMetaData
 import org.gradle.build.docs.model.ClassMetaDataRepository
 import org.gradle.build.docs.model.SimpleClassMetaDataRepository
 import org.w3c.dom.Document
 import org.w3c.dom.Element
-import org.gradle.api.tasks.*
 
 /**
  * Transforms userguide source into docbook, replacing custom XML elements.
@@ -37,35 +46,45 @@ import org.gradle.api.tasks.*
  * <li>A directory containing the snippets for the samples to be included in the document, as produced by {@link ExtractSnippetsTask}.</li>
  * <li>Meta-info about the canonical documentation for each class referenced in the document, as produced by {@link org.gradle.build.docs.dsl.docbook.AssembleDslDocTask}.</li>
  * </ul>
+ *
  */
-public class UserGuideTransformTask extends DefaultTask {
+@CacheableTask
+class UserGuideTransformTask extends DefaultTask {
+
     @Input
     String getVersion() { return project.version.toString() }
 
     def javadocUrl
-    def groovydocUrl
     def dsldocUrl
     def websiteUrl
 
+    @PathSensitive(PathSensitivity.NONE)
     @InputFile
     File sourceFile
+
+    @PathSensitive(PathSensitivity.NONE)
     @InputFile
     File linksFile
+
     @OutputFile
     File destFile
+
+    @PathSensitive(PathSensitivity.RELATIVE)
     @InputDirectory
     File snippetsDir
-    @Input
-    Set<String> tags = new HashSet()
 
-    final SampleElementValidator validator = new SampleElementValidator();
+    @PathSensitive(PathSensitivity.RELATIVE)
+    @InputFiles
+    @Optional
+    FileCollection includes
+
+    @Input
+    Set<String> tags = new LinkedHashSet()
+
+    final SampleElementValidator validator = new SampleElementValidator()
 
     @Input String getJavadocUrl() {
         javadocUrl
-    }
-
-    @Input String getGroovydocUrl() {
-        groovydocUrl
     }
 
     @Input String getDsldocUrl() {
@@ -85,24 +104,20 @@ public class UserGuideTransformTask extends DefaultTask {
     }
 
     private def transformImpl(Document doc) {
-        use(DOMCategory) {
-            use(BuildableDOMCategory) {
-                addVersionInfo(doc)
-                applyConditionalChunks(doc)
-                transformSamples(doc)
-                transformApiLinks(doc)
-                transformWebsiteLinks(doc)
-                fixProgramListings(doc)
-            }
+        use(BuildableDOMCategory) {
+            addVersionInfo(doc)
+            applyConditionalChunks(doc)
+            transformSamples(doc)
+            transformApiLinks(doc)
+            transformWebsiteLinks(doc)
+            fixProgramListings(doc)
         }
     }
 
     def addVersionInfo(Document doc) {
         Element releaseInfo = doc.createElement('releaseinfo')
         releaseInfo.appendChild(doc.createTextNode(version.toString()))
-        if (doc.documentElement.bookinfo[0]) {
-            doc.documentElement.bookinfo[0].appendChild(releaseInfo)
-        }
+        doc.documentElement.bookinfo[0]?.appendChild(releaseInfo)
     }
 
     def fixProgramListings(Document doc) {
@@ -112,14 +127,14 @@ public class UserGuideTransformTask extends DefaultTask {
     }
 
     static String normalise(String content) {
-        return content.replace('\t', '    ').stripIndent().replace('\r\n', '\n')
+        content.replace('\t', '    ').stripIndent().replace('\r\n', '\n')
     }
 
     def transformApiLinks(Document doc) {
         ClassMetaDataRepository<ClassLinkMetaData> linkRepository = new SimpleClassMetaDataRepository<ClassLinkMetaData>()
         linkRepository.load(linksFile)
 
-        doc.documentElement.depthFirst().findAll { it.name() == 'apilink' }.each {Element element ->
+        findAll(doc, 'apilink').each { Element element ->
             String className = element.'@class'
             if (!className) {
                 throw new RuntimeException('No "class" attribute specified for <apilink> element.')
@@ -135,8 +150,8 @@ public class UserGuideTransformTask extends DefaultTask {
             String href
             if (style == 'dsldoc') {
                 href = "$dsldocUrl/${className}.html"
-            } else if (style == "groovydoc" || style == "javadoc") {
-                def base = style == "groovydoc" ? groovydocUrl : javadocUrl
+            } else if (style == "javadoc") {
+                def base = javadocUrl
                 def packageName = classMetaData.packageName
                 href = "$base/${packageName.replace('.', '/')}/${className.substring(packageName.length()+1)}.html"
             } else {
@@ -159,7 +174,7 @@ public class UserGuideTransformTask extends DefaultTask {
     }
 
     def transformWebsiteLinks(Document doc) {
-        doc.documentElement.depthFirst().findAll { it.name() == 'ulink' }.each {Element element ->
+        findAll(doc, 'ulink').each { Element element ->
             String url = element.'@url'
             if (url.startsWith('website:')) {
                 url = url.substring(8)
@@ -172,27 +187,22 @@ public class UserGuideTransformTask extends DefaultTask {
     }
 
     def transformSamples(Document doc) {
-        XIncludeAwareXmlProvider samplesXmlProvider = new XIncludeAwareXmlProvider()
-        samplesXmlProvider.emptyDoc() << {
-            samples()
-        }
-        Element samplesXml = samplesXmlProvider.root.documentElement
         String lastTitle
         String lastId
         Element lastExampleElement
-        doc.documentElement.depthFirst().findAll { it.name() == 'sample' }.each { Element element ->
-            validator.validate(element)
-            String sampleId = element.'@id'
-            String srcDir = element.'@dir'
+        findAll(doc, 'sample').each { Element sampleElement ->
+
+            validator.validate(sampleElement)
+
+            String sampleId = sampleElement.'@id'
+            String srcDir = sampleElement.'@dir'
 
             // This class handles the responsibility of adding the location tips to the first child of first
             // example defined in the sample.
-            SampleElementLocationHandler locationHandler = new SampleElementLocationHandler(doc, element, srcDir)
+            SampleElementLocationHandler locationHandler = new SampleElementLocationHandler(doc, sampleElement, srcDir)
             SampleLayoutHandler layoutHandler = new SampleLayoutHandler(srcDir)
 
-            samplesXml << { sample(id: sampleId, dir: srcDir) }
-
-            String title = element.'@title'
+            String title = sampleElement.'@title'
 
             Element exampleElement = lastExampleElement
 
@@ -207,21 +217,20 @@ public class UserGuideTransformTask extends DefaultTask {
             lastTitle = title
             lastExampleElement = exampleElement
 
-            element.children().each {Element child ->
+            sampleElement.children().each { Element child ->
                 if (child.name() == 'sourcefile') {
                     String file = child.'@file'
 
-                    Element sourcefileTitle = doc.createElement("para")
+                    Element sourceFileTitle = doc.createElement("para")
                     Element commandElement = doc.createElement('filename')
                     commandElement.appendChild(doc.createTextNode(file))
-                    sourcefileTitle.appendChild(commandElement)
-                    exampleElement.appendChild(sourcefileTitle);
+                    sourceFileTitle.appendChild(commandElement)
+                    exampleElement.appendChild(sourceFileTitle)
 
                     Element programListingElement = doc.createElement('programlisting')
                     if (file.endsWith('.gradle') || file.endsWith('.groovy') || file.endsWith('.java')) {
                         programListingElement.setAttribute('language', 'java')
-                    }
-                    else if (file.endsWith('.xml')) {
+                    } else if (file.endsWith('.xml')) {
                         programListingElement.setAttribute('language', 'xml')
                     }
                     File srcFile
@@ -236,13 +245,7 @@ public class UserGuideTransformTask extends DefaultTask {
                 } else if (child.name() == 'output') {
                     String args = child.'@args'
                     String outputFile = child.'@outputFile' ?: "${sampleId}.out"
-                    boolean ignoreExtraLines = child.'@ignoreExtraLines' ?: false
-                    boolean ignoreLineOrder = child.'@ignoreLineOrder' ?: false
-                    boolean expectFailure = child.'@expectFailure' ?: false
                     boolean hidden = child.'@hidden' ?: false
-
-                    samplesXml << { sample(id: sampleId, dir: srcDir, args: args, outputFile: outputFile,
-                                           ignoreExtraLines: ignoreExtraLines, ignoreLineOrder: ignoreLineOrder, expectFailure: expectFailure) }
 
                     if (!hidden) {
                         Element outputTitle = doc.createElement("para")
@@ -257,23 +260,15 @@ public class UserGuideTransformTask extends DefaultTask {
                         screenElement.appendChild(doc.createTextNode("> gradle $args\n" + normalise(srcFile.text)))
                         exampleElement.appendChild(screenElement)
                     }
-                } else if (child.name() == 'test') {
-                    String args = child.'@args'
-                    samplesXml << { sample(id: sampleId, dir: srcDir, args: args) }
                 } else if (child.name() == 'layout') {
-                    String args = child.'@after'
-                    Element sampleElement = samplesXml << { sample(id: sampleId, dir: srcDir, args: args) }
-                    layoutHandler.handle(child.text(), exampleElement, sampleElement)
+                    layoutHandler.handle(child.text(), exampleElement)
                 }
 
                 locationHandler.processSampleLocation(exampleElement)
             }
-            element.parentNode.insertBefore(exampleElement, element)
-            element.parentNode.removeChild(element)
+            sampleElement.parentNode.insertBefore(exampleElement, sampleElement)
+            sampleElement.parentNode.removeChild(sampleElement)
         }
-
-        File samplesFile = new File(destFile.parentFile, 'samples.xml')
-        samplesXmlProvider.write(samplesFile, true)
     }
 
     void applyConditionalChunks(Document doc) {
@@ -282,5 +277,9 @@ public class UserGuideTransformTask extends DefaultTask {
                 element.parentNode.removeChild(element)
             }
         }
+    }
+
+    static def findAll(Document doc, String byName) {
+        doc.documentElement.depthFirst().findAll { it.name() == byName }
     }
 }

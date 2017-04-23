@@ -17,13 +17,20 @@
 package org.gradle.internal.resource.transfer;
 
 import org.gradle.api.Nullable;
-import org.gradle.internal.resource.ResourceException;
+import org.gradle.api.resources.ResourceException;
 
 import java.net.URI;
 import java.util.List;
 
 public interface ExternalResourceLister {
+
+    /**
+     * Lists the direct children of the parent resource
+     *
+     * @param parent the resource to list from
+     * @return A list of the direct children of the <code>parent</code>
+     */
     @Nullable
-    public List<String> list(URI parent) throws ResourceException;
+    List<String> list(URI parent) throws ResourceException;
 
 }

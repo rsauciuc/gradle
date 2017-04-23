@@ -39,7 +39,6 @@ class CustomComponentJarBinariesIntegrationTest extends AbstractIntegrationSpec 
 
         buildFile << """
 import org.gradle.jvm.platform.internal.DefaultJavaPlatform
-import org.gradle.platform.base.internal.BinaryNamingSchemeBuilder
 
 plugins {
     id 'jvm-component'
@@ -47,15 +46,14 @@ plugins {
 }
 
 @Managed
-interface SampleLibrarySpec extends ComponentSpec {}
+interface SampleLibrarySpec extends GeneralComponentSpec {}
 
 class SampleLibraryRules extends RuleSource {
     @ComponentType
-    void registerSampleLibrarySpecType(ComponentTypeBuilder<SampleLibrarySpec> builder) {}
+    void registerSampleLibrarySpecType(TypeBuilder<SampleLibrarySpec> builder) {}
 
     @ComponentBinaries
     public void createBinaries(ModelMap<JarBinarySpec> binaries, SampleLibrarySpec library,
-                               BinaryNamingSchemeBuilder namingSchemeBuilder,
                                @Path("buildDir") File buildDir) {
         def platform = DefaultJavaPlatform.current()
         binaries.create("jar") { binary ->
@@ -104,12 +102,12 @@ model {
                 assert compileLib1JarLib1Java.source.files*.name == [ "Lib1.java" ]
                 assert compileLib2JarLib2Java.source.files*.name == [ "Lib2.java" ]
                 assert compileSampleLibJarSampleLibLib.source.files*.name == [ "Sample.java" ]
-                assert compileSampleLibJarSampleLibBin.source.files*.name == [ "Bin.java" ]
+                assert compileSampleLibJarSampleLibJarBin.source.files*.name == [ "Bin.java" ]
 
                 assert compileLib1JarLib1Java.classpath.files*.name == []
                 assert compileLib2JarLib2Java.classpath.files*.name == []
                 assert compileSampleLibJarSampleLibLib.classpath.files*.name == [ "lib1.jar" ]
-                assert compileSampleLibJarSampleLibBin.classpath.files*.name == [ "lib2.jar" ]
+                assert compileSampleLibJarSampleLibJarBin.classpath.files*.name == [ "lib2.jar" ]
             }
         }
     }
@@ -120,8 +118,8 @@ model {
         succeeds "sampleLibJar", "validate"
 
         then:
-        executed ":lib1Jar", ":lib2Jar"
-        new JarTestFixture(file("build/jars/sampleLibJar/sampleLib.jar")).hasDescendants(
+        executed ":lib1ApiJar", ":lib2ApiJar"
+        new JarTestFixture(file("build/jars/sampleLib/jar/sampleLib.jar")).hasDescendants(
             "Sample.class",
             "sample.properties",
 

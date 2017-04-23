@@ -17,20 +17,35 @@ package org.gradle.api.internal.artifacts.ivyservice.ivyresolve;
 
 import org.gradle.StartParameter;
 import org.gradle.api.Action;
+import org.gradle.api.Nullable;
 import org.gradle.api.artifacts.cache.ArtifactResolutionControl;
 import org.gradle.api.artifacts.cache.DependencyResolutionControl;
 import org.gradle.api.artifacts.cache.ModuleResolutionControl;
 import org.gradle.api.artifacts.cache.ResolutionRules;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
-import org.gradle.internal.component.model.*;
+import org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy.ExternalResourceCachePolicy;
 import org.gradle.api.internal.component.ArtifactType;
+import org.gradle.api.resources.ResourceException;
+import org.gradle.internal.component.model.ComponentArtifactMetadata;
+import org.gradle.internal.component.model.ComponentOverrideMetadata;
+import org.gradle.internal.component.model.ComponentResolveMetadata;
+import org.gradle.internal.component.model.DependencyMetadata;
+import org.gradle.internal.component.model.ModuleSource;
 import org.gradle.internal.resolve.ArtifactResolveException;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.internal.resolve.result.BuildableArtifactResolveResult;
 import org.gradle.internal.resolve.result.BuildableArtifactSetResolveResult;
+import org.gradle.internal.resolve.result.BuildableComponentArtifactsResolveResult;
 import org.gradle.internal.resolve.result.BuildableModuleComponentMetaDataResolveResult;
 import org.gradle.internal.resolve.result.BuildableModuleVersionListingResolveResult;
+import org.gradle.internal.resource.local.LocalResource;
+import org.gradle.internal.resource.metadata.ExternalResourceMetaData;
+import org.gradle.internal.resource.transfer.ExternalResourceConnector;
+import org.gradle.internal.resource.transfer.ExternalResourceReadResponse;
 
+import java.io.IOException;
+import java.net.URI;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class StartParameterResolutionOverride {
@@ -103,24 +118,77 @@ public class StartParameterResolutionOverride {
             return "offline remote";
         }
 
-        public void listModuleVersions(DependencyMetaData dependency, BuildableModuleVersionListingResolveResult result) {
+        @Override
+        public void listModuleVersions(DependencyMetadata dependency, BuildableModuleVersionListingResolveResult result) {
             result.failed(new ModuleVersionResolveException(dependency.getRequested(), String.format("No cached version listing for %s available for offline mode.", dependency.getRequested())));
         }
 
+        @Override
         public void resolveComponentMetaData(ModuleComponentIdentifier moduleComponentIdentifier, ComponentOverrideMetadata requestMetaData, BuildableModuleComponentMetaDataResolveResult result) {
             result.failed(new ModuleVersionResolveException(moduleComponentIdentifier, String.format("No cached version of %s available for offline mode.", moduleComponentIdentifier.getDisplayName())));
         }
 
-        public void resolveModuleArtifacts(ComponentResolveMetaData component, ArtifactType artifactType, BuildableArtifactSetResolveResult result) {
+        @Override
+        public void resolveArtifactsWithType(ComponentResolveMetadata component, ArtifactType artifactType, BuildableArtifactSetResolveResult result) {
             result.failed(new ArtifactResolveException(component.getComponentId(), "No cached version available for offline mode"));
         }
 
-        public void resolveModuleArtifacts(ComponentResolveMetaData component, ComponentUsage componentUsage, BuildableArtifactSetResolveResult result) {
+        @Override
+        public void resolveArtifacts(ComponentResolveMetadata component, BuildableComponentArtifactsResolveResult result) {
             result.failed(new ArtifactResolveException(component.getComponentId(), "No cached version available for offline mode"));
         }
 
-        public void resolveArtifact(ComponentArtifactMetaData artifact, ModuleSource moduleSource, BuildableArtifactResolveResult result) {
+        @Override
+        public void resolveArtifact(ComponentArtifactMetadata artifact, ModuleSource moduleSource, BuildableArtifactResolveResult result) {
             result.failed(new ArtifactResolveException(artifact.getId(), "No cached version available for offline mode"));
+        }
+    }
+
+    public ExternalResourceCachePolicy overrideExternalResourceCachePolicy(ExternalResourceCachePolicy original) {
+        if (startParameter.isOffline()) {
+            return new ExternalResourceCachePolicy() {
+                @Override
+                public boolean mustRefreshExternalResource(long ageMillis) {
+                    return false;
+                }
+            };
+        }
+        return original;
+    }
+
+    public ExternalResourceConnector overrideExternalResourceConnnector(ExternalResourceConnector original) {
+        if (startParameter.isOffline()) {
+            return new OfflineExternalResourceConnector();
+        }
+        return original;
+    }
+
+    private static class OfflineExternalResourceConnector implements ExternalResourceConnector {
+        @Nullable
+        @Override
+        public ExternalResourceReadResponse openResource(URI location, boolean revalidate) throws ResourceException {
+            throw offlineResource(location);
+        }
+
+        @Nullable
+        @Override
+        public ExternalResourceMetaData getMetaData(URI location, boolean revalidate) throws ResourceException {
+            throw offlineResource(location);
+        }
+
+        @Nullable
+        @Override
+        public List<String> list(URI parent) throws ResourceException {
+            throw offlineResource(parent);
+        }
+
+        @Override
+        public void upload(LocalResource resource, URI destination) throws IOException {
+            throw new ResourceException(destination, String.format("Cannot upload to '%s' in offline mode.", destination));
+        }
+
+        private ResourceException offlineResource(URI source) {
+            return new ResourceException(source, String.format("No cached resource '%s' available for offline mode.", source));
         }
     }
 }

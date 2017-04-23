@@ -18,7 +18,6 @@ package org.gradle.integtests.samples
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.Sample
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.ports.ReleasingPortAllocator
 import org.junit.Rule
@@ -32,7 +31,7 @@ class SamplesWebProjectIntegrationTest extends AbstractIntegrationSpec {
     def "can build war"() {
         when:
         sample sample
-        run 'clean', 'assemble'
+        runWithExpectedDeprecationWarning('clean', 'assemble')
 
         then:
         TestFile tmpDir = file('unjar')
@@ -53,59 +52,7 @@ class SamplesWebProjectIntegrationTest extends AbstractIntegrationSpec {
                 'webapp.html')
     }
 
-    @LeaksFileHandles
-    def "can execute servlet"() {
-        given:
-        def httpPort = portAllocator.assignPort()
-        def stopPort = portAllocator.assignPort()
-        def url = "http://localhost:${httpPort}/customized/hello"
-
-        // Inject some int test stuff
-        sample.dir.file('build.gradle') << """
-import org.gradle.api.plugins.jetty.internal.Monitor
-
-httpPort = ${httpPort}
-stopPort = ${stopPort}
-
-println "http port = \$httpPort, stop port = \$stopPort"
-
-ext.url = new URL("${url}")
-
-[jettyRun, jettyRunWar]*.daemon = true
-[jettyRun, jettyRunWar]*.doLast {
-   if (getStopPort() != null && getStopPort() > 0 && getStopKey() != null) {
-      Monitor monitor = new Monitor(getStopPort(), getStopKey(), server.getProxiedObject());
-      monitor.start();
-   }
-}
-
-task runTest(dependsOn: jettyRun) << {
-    callServlet()
-}
-
-task runWarTest(dependsOn: jettyRunWar) << {
-    callServlet()
-}
-
-private void callServlet() {
-    println url.text
-}
-
-[runTest, runWarTest]*.finalizedBy jettyStop
-"""
-
-        when:
-        sample sample
-        run 'runTest'
-
-        then:
-        output.contains('Hello Gradle')
-
-        when:
-        sample sample
-        run 'runWarTest'
-
-        then:
-        output.contains('Hello Gradle')
+    private void runWithExpectedDeprecationWarning(String... tasks) {
+        result = executer.withTasks(tasks).expectDeprecationWarning().run()
     }
 }

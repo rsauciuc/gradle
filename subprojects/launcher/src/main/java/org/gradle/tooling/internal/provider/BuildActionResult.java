@@ -17,14 +17,15 @@
 package org.gradle.tooling.internal.provider;
 
 import org.gradle.api.Nullable;
+import org.gradle.tooling.internal.provider.serialization.SerializedPayload;
 
 import java.io.Serializable;
 
 public class BuildActionResult implements Serializable {
     @Nullable
-    final SerializedPayload result;
+    public final SerializedPayload result;
     @Nullable
-    final SerializedPayload failure;
+    public final SerializedPayload failure;
 
     public BuildActionResult(SerializedPayload result, SerializedPayload failure) {
         this.result = result;

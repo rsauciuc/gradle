@@ -142,6 +142,9 @@
                 <td>org.gradle.api.initialization.Settings</td>
             </tr>
             <tr>
+                <td>org.gradle.api.initialization.IncludedBuild</td>
+            </tr>
+            <tr>
                 <td>org.gradle.api.Script</td>
             </tr>
             <tr>
@@ -175,6 +178,9 @@
                 <td>org.gradle.api.dsl.ConventionProperty</td>
             </tr>
             <tr>
+                <td>org.gradle.plugin.repository.GradlePluginPortal</td>
+            </tr>
+            <tr>
                 <td>org.gradle.api.plugins.ExtensionAware</td>
             </tr>
             <tr>
@@ -182,18 +188,6 @@
             </tr>
             <tr>
                 <td>org.gradle.api.publish.PublishingExtension</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.reporting.Report</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.reporting.Reporting</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.reporting.ReportContainer</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.reporting.ReportingExtension</td>
             </tr>
             <tr>
                 <td>org.gradle.api.publish.ivy.IvyPublication</td>
@@ -208,6 +202,9 @@
                 <td>org.gradle.api.publish.ivy.IvyModuleDescriptorSpec</td>
             </tr>
             <tr>
+                <td>org.gradle.plugin.repository.IvyPluginRepository</td>
+            </tr>
+            <tr>
                 <td>org.gradle.api.publish.maven.MavenPublication</td>
             </tr>
             <tr>
@@ -220,10 +217,22 @@
                 <td>org.gradle.api.publish.maven.MavenPom</td>
             </tr>
             <tr>
+                <td>org.gradle.plugin.repository.MavenPluginRepository</td>
+            </tr>
+            <tr>
                 <td>org.gradle.plugin.use.PluginDependenciesSpec</td>
             </tr>
             <tr>
                 <td>org.gradle.plugin.use.PluginDependencySpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.plugin.management.PluginManagementSpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.plugin.repository.PluginRepositoriesSpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.plugin.repository.PluginRepository</td>
             </tr>
             <tr>
                 <td>org.gradle.api.resources.ResourceHandler</td>
@@ -287,6 +296,23 @@
     </section>
 
     <section>
+        <title>Build Cache types</title>
+        <para>Types used to connect to and configure the build cache:</para>
+        <table>
+            <title>Build Cache types</title>
+            <tr>
+                <td>org.gradle.caching.configuration.BuildCacheConfiguration</td>
+            </tr>
+            <tr>
+                <td>org.gradle.caching.local.DirectoryBuildCache</td>
+            </tr>
+            <tr>
+                <td>org.gradle.caching.http.HttpBuildCache</td>
+            </tr>
+        </table>
+    </section>
+
+    <section>
         <title>Help Task types</title>
         <para>Below are the task types that are available for every Gradle project.
             Those task types can also be declared and configured directly in the build script.
@@ -310,6 +336,9 @@
             </tr>
             <tr>
                 <td>org.gradle.api.reporting.components.ComponentReport</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.dependents.DependentComponentsReport</td>
             </tr>
             <tr>
                 <td>org.gradle.api.reporting.model.ModelReport</td>
@@ -383,6 +412,9 @@
                 <td>org.gradle.testing.jacoco.tasks.JacocoMerge</td>
             </tr>
             <tr>
+                <td>org.gradle.testing.jacoco.tasks.JacocoCoverageVerification</td>
+            </tr>
+            <tr>
                 <td>org.gradle.api.tasks.bundling.Jar</td>
             </tr>
             <tr>
@@ -396,15 +428,6 @@
             </tr>
             <tr>
                 <td>org.gradle.api.plugins.quality.JDepend</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.plugins.jetty.JettyRun</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.plugins.jetty.JettyRunWar</td>
-            </tr>
-            <tr>
-                <td>org.gradle.api.plugins.jetty.JettyStop</td>
             </tr>
             <tr>
                 <td>org.gradle.api.plugins.quality.Pmd</td>
@@ -428,12 +451,6 @@
                 <td>org.gradle.plugins.signing.Sign</td>
             </tr>
             <tr>
-                <td>org.gradle.api.plugins.sonar.SonarAnalyze</td>
-            </tr>
-            <tr>
-                <td>org.gradle.sonar.runner.tasks.SonarRunner</td>
-            </tr>
-            <tr>
                 <td>org.gradle.api.tasks.Sync</td>
             </tr>
             <tr>
@@ -455,7 +472,42 @@
                 <td>org.gradle.api.tasks.wrapper.Wrapper</td>
             </tr>
             <tr>
+                <td>org.gradle.api.tasks.WriteProperties</td>
+            </tr>
+            <tr>
                 <td>org.gradle.api.tasks.bundling.Zip</td>
+            </tr>
+        </table>
+    </section>
+
+    <section>
+        <title>Reporting types</title>
+        <para>Listed below are some of the types which are used when generating reports:</para>
+        <table>
+            <title>Reporting types</title>
+            <tr>
+                <td>org.gradle.api.reporting.CustomizableHtmlReport</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.SingleFileReport</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.DirectoryReport</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.plugins.quality.FindBugsXmlReport</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.Report</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.Reporting</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.ReportContainer</td>
+            </tr>
+            <tr>
+                <td>org.gradle.api.reporting.ReportingExtension</td>
             </tr>
         </table>
     </section>
@@ -563,6 +615,15 @@
                 <td>org.gradle.nativeplatform.NativeLibrarySpec</td>
             </tr>
             <tr>
+                <td>org.gradle.nativeplatform.test.NativeTestSuiteSpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.nativeplatform.test.cunit.CUnitTestSuiteSpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.nativeplatform.test.googletest.GoogleTestTestSuiteSpec</td>
+            </tr>
+            <tr>
                 <td>org.gradle.nativeplatform.NativeBinarySpec</td>
             </tr>
             <tr>
@@ -576,6 +637,15 @@
             </tr>
             <tr>
                 <td>org.gradle.nativeplatform.StaticLibraryBinarySpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.nativeplatform.test.NativeTestSuiteBinarySpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.nativeplatform.test.cunit.CUnitTestSuiteBinarySpec</td>
+            </tr>
+            <tr>
+                <td>org.gradle.nativeplatform.test.googletest.GoogleTestTestSuiteBinarySpec</td>
             </tr>
             <tr>
                 <td>org.gradle.nativeplatform.platform.NativePlatform</td>
@@ -594,18 +664,6 @@
             </tr>
             <tr>
                 <td>org.gradle.nativeplatform.toolchain.VisualCpp</td>
-            </tr>
-            <tr>
-                <td>org.gradle.nativeplatform.test.NativeTestSuiteSpec</td>
-            </tr>
-            <tr>
-                <td>org.gradle.nativeplatform.test.NativeTestSuiteBinarySpec</td>
-            </tr>
-            <tr>
-                <td>org.gradle.nativeplatform.test.cunit.CUnitTestSuiteSpec</td>
-            </tr>
-            <tr>
-                <td>org.gradle.nativeplatform.test.googletest.GoogleTestTestSuiteSpec</td>
             </tr>
             <tr>
                 <td>org.gradle.language.assembler.AssemblerSourceSet</td>
@@ -714,6 +772,18 @@
             </tr>
             <tr>
                 <td>org.gradle.play.distribution.PlayDistributionContainer</td>
+            </tr>
+            <tr>
+                <td>org.gradle.language.twirl.TwirlSourceSet</td>
+            </tr>
+            <tr>
+                <td>org.gradle.language.routes.RoutesSourceSet</td>
+            </tr>
+            <tr>
+                <td>org.gradle.language.coffeescript.CoffeeScriptSourceSet</td>
+            </tr>
+            <tr>
+                <td>org.gradle.language.javascript.JavaScriptSourceSet</td>
             </tr>
         </table>
     </section>

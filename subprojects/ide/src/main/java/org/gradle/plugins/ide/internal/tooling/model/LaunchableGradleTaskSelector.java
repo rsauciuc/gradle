@@ -18,9 +18,10 @@ package org.gradle.plugins.ide.internal.tooling.model;
 
 import org.gradle.TaskExecutionRequest;
 import org.gradle.api.Nullable;
+import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier;
 import org.gradle.tooling.internal.protocol.InternalLaunchable;
-import org.gradle.tooling.model.TaskSelector;
 
+import java.io.File;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
@@ -28,13 +29,14 @@ import java.util.List;
 /**
  * Data used for {@link org.gradle.tooling.model.TaskSelector}.
  */
-public class LaunchableGradleTaskSelector implements TaskSelector, InternalLaunchable, TaskExecutionRequest, Serializable {
+public class LaunchableGradleTaskSelector implements InternalLaunchable, TaskExecutionRequest, Serializable {
     private String name;
+    private String path;
     private String displayName;
     private String description;
     private String taskName;
-    private String projectPath;
     private boolean isPublic;
+    private DefaultProjectIdentifier projectIdentifier;
 
     public String getName() {
         return name;
@@ -74,12 +76,7 @@ public class LaunchableGradleTaskSelector implements TaskSelector, InternalLaunc
     }
 
     public String getProjectPath() {
-        return projectPath;
-    }
-
-    public LaunchableGradleTaskSelector setProjectPath(String projectPath) {
-        this.projectPath = projectPath;
-        return this;
+        return projectIdentifier.getProjectPath();
     }
 
     public boolean isPublic() {
@@ -88,6 +85,29 @@ public class LaunchableGradleTaskSelector implements TaskSelector, InternalLaunc
 
     public LaunchableGradleTaskSelector setPublic(boolean isPublic) {
         this.isPublic = isPublic;
+        return this;
+    }
+
+    public DefaultProjectIdentifier getProjectIdentifier() {
+        return projectIdentifier;
+    }
+
+    @Override
+    public File getRootDir() {
+        return projectIdentifier.getBuildIdentifier().getRootDir();
+    }
+
+    public LaunchableGradleTaskSelector setProjectIdentifier(DefaultProjectIdentifier projectIdentifier) {
+        this.projectIdentifier = projectIdentifier;
+        return this;
+    }
+
+    public String getPath() {
+        return path;
+    }
+
+    public LaunchableGradleTaskSelector setPath(String path) {
+        this.path = path;
         return this;
     }
 

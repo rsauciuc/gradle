@@ -17,8 +17,8 @@
 package org.gradle.internal.resource.transfer
 
 import org.gradle.internal.resource.metadata.ExternalResourceMetaData
-import org.gradle.logging.ProgressLogger
-import org.gradle.logging.ProgressLoggerFactory
+import org.gradle.internal.logging.progress.ProgressLogger
+import org.gradle.internal.logging.progress.ProgressLoggerFactory
 import spock.lang.Specification
 import spock.lang.Unroll
 
@@ -38,10 +38,10 @@ class ProgressLoggingExternalResourceAccessorTest extends Specification {
     @Unroll
     def "delegates #method to delegate resource accessor"() {
         when:
-        progressLoggerAccessor."$method"(new URI("location"))
+        progressLoggerAccessor."$method"(new URI("location"), false)
 
         then:
-        1 * accessor."$method"(new URI("location"))
+        1 * accessor."$method"(new URI("location"), false)
 
         where:
         method << ['getMetaData', 'openResource']
@@ -49,10 +49,10 @@ class ProgressLoggingExternalResourceAccessorTest extends Specification {
 
     def "getResource returns null when delegate returns null"() {
         setup:
-        accessor.openResource(new URI("location")) >> null
+        accessor.openResource(new URI("location"), false) >> null
 
         when:
-        def loadedResource = progressLoggerAccessor.openResource(new URI("location"))
+        def loadedResource = progressLoggerAccessor.openResource(new URI("location"), false)
 
         then:
         loadedResource == null
@@ -60,10 +60,10 @@ class ProgressLoggingExternalResourceAccessorTest extends Specification {
 
     def "wraps response in delegate"() {
         setup:
-        accessor.openResource(new URI("location")) >> externalResource
+        accessor.openResource(new URI("location"), false) >> externalResource
 
         when:
-        def loadedResource = progressLoggerAccessor.openResource(new URI("location"))
+        def loadedResource = progressLoggerAccessor.openResource(new URI("location"), false)
 
         then:
         loadedResource != null
@@ -80,12 +80,12 @@ class ProgressLoggingExternalResourceAccessorTest extends Specification {
 
     def "fires progress events as content is read"() {
         setup:
-        accessor.openResource(new URI("location")) >> externalResource
+        accessor.openResource(new URI("location"), false) >> externalResource
         metaData.getContentLength() >> 4096
         externalResource.openStream() >> new ByteArrayInputStream(new byte[4096])
 
         when:
-        def resource = progressLoggerAccessor.openResource(new URI("location"))
+        def resource = progressLoggerAccessor.openResource(new URI("location"), false)
         def inputStream = resource.openStream()
         inputStream.read()
         inputStream.read()
@@ -99,21 +99,21 @@ class ProgressLoggingExternalResourceAccessorTest extends Specification {
         then:
         1 * progressLoggerFactory.newOperation(_) >> progressLogger
         1 * progressLogger.started()
-        1 * progressLogger.progress('1 KB/4 KB downloaded')
-        1 * progressLogger.progress('3 KB/4 KB downloaded')
-        1 * progressLogger.progress('4 KB/4 KB downloaded')
+        1 * progressLogger.progress('1 KB/4 KB downloaded: location')
+        1 * progressLogger.progress('3 KB/4 KB downloaded: location')
+        1 * progressLogger.progress('4 KB/4 KB downloaded: location')
         1 * progressLogger.completed()
         0 * progressLogger.progress(_)
     }
 
     def "fires complete event when response closed with partially read stream"() {
         setup:
-        accessor.openResource(new URI("location")) >> externalResource
+        accessor.openResource(new URI("location"), false) >> externalResource
         metaData.getContentLength() >> 4096
         externalResource.openStream() >> new ByteArrayInputStream(new byte[4096])
 
         when:
-        def resource = progressLoggerAccessor.openResource(new URI("location"))
+        def resource = progressLoggerAccessor.openResource(new URI("location"), false)
         def inputStream = resource.openStream()
         inputStream.read(new byte[1600])
         resource.close()
@@ -121,19 +121,19 @@ class ProgressLoggingExternalResourceAccessorTest extends Specification {
         then:
         1 * progressLoggerFactory.newOperation(_) >> progressLogger
         1 * progressLogger.started()
-        1 * progressLogger.progress('1 KB/4 KB downloaded')
+        1 * progressLogger.progress('1 KB/4 KB downloaded: location')
         1 * progressLogger.completed()
         0 * progressLogger.progress(_)
     }
 
     def "no progress events logged for resources smaller 1024 bytes"() {
         setup:
-        accessor.openResource(new URI("location")) >> externalResource
+        accessor.openResource(new URI("location"), false) >> externalResource
         metaData.getContentLength() >> 1023
         externalResource.openStream() >> new ByteArrayInputStream(new byte[1023])
 
         when:
-        def resource = progressLoggerAccessor.openResource(new URI("location"))
+        def resource = progressLoggerAccessor.openResource(new URI("location"), false)
         def inputStream = resource.openStream()
         inputStream.read(new byte[1024])
         resource.close()

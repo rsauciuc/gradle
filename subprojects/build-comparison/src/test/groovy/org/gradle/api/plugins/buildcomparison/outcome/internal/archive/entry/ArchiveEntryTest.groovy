@@ -18,6 +18,7 @@ package org.gradle.api.plugins.buildcomparison.outcome.internal.archive.entry
 
 import com.google.common.collect.ImmutableList
 import com.google.common.collect.ImmutableSet
+import groovy.transform.CompileStatic
 import spock.lang.Specification
 
 class ArchiveEntryTest extends Specification {
@@ -49,7 +50,7 @@ class ArchiveEntryTest extends Specification {
 
         when:
         def a3 = ArchiveEntry.of(props)
-        a1 = ArchiveEntry.of(props + [subEntries: ImmutableSet.of(a3)])
+        a1 = ArchiveEntry.of(props + [subEntries: set(a3)])
 
         then:
         a1 != a2
@@ -57,7 +58,7 @@ class ArchiveEntryTest extends Specification {
         a1.hashCode() != a2.hashCode()
 
         when:
-        a2 = ArchiveEntry.of(props + [subEntries: ImmutableSet.of(a3)])
+        a2 = ArchiveEntry.of(props + [subEntries: set(a3)])
 
         then:
         a1 == a2
@@ -66,7 +67,7 @@ class ArchiveEntryTest extends Specification {
 
         when:
         def a4 = ArchiveEntry.of(props + [size: 20])
-        a1 = ArchiveEntry.of(props + [subEntries: ImmutableSet.of(a4)])
+        a1 = ArchiveEntry.of(props + [subEntries: set(a4)])
 
         then:
         a1 != a2
@@ -88,6 +89,11 @@ class ArchiveEntryTest extends Specification {
         a1 != a2
         a2 != a1
         a1.hashCode() != a2.hashCode()
+    }
+
+    @CompileStatic // Workaround for https://issues.apache.org/jira/browse/GROOVY-7879 on Java 9
+    static <T> ImmutableSet<T> set(T entry) {
+        ImmutableSet.of(entry)
     }
 
     def "path ordering"() {

@@ -17,17 +17,20 @@
 package org.gradle.language
 
 import org.gradle.integtests.fixtures.SourceFile
-import org.gradle.language.fixtures.app.*
+import org.gradle.language.fixtures.app.DuplicateAssemblerBaseNamesTestApp
+import org.gradle.language.fixtures.app.DuplicateCBaseNamesTestApp
+import org.gradle.language.fixtures.app.DuplicateCppBaseNamesTestApp
+import org.gradle.language.fixtures.app.DuplicateMixedSameBaseNamesTestApp
+import org.gradle.language.fixtures.app.DuplicateObjectiveCBaseNamesTestApp
+import org.gradle.language.fixtures.app.DuplicateObjectiveCppBaseNamesTestApp
+import org.gradle.language.fixtures.app.DuplicateWindowsResourcesBaseNamesTestApp
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 
-import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VisualCpp
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VISUALCPP
 
-// TODO add coverage for mixed sources
-@LeaksFileHandles
 class DuplicateBaseNamesIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
 
     def "can have sourcefiles with same base name but different directories"() {
@@ -57,7 +60,7 @@ model {
             """
         expect:
         succeeds "mainExecutable"
-        executable("build/binaries/mainExecutable/main").exec().out == expectedOutput
+        executable("build/exe/main/main").exec().out == expectedOutput
         where:
         testApp                                              |   expectedOutput
         new DuplicateCBaseNamesTestApp()                     |    "foo1foo2"
@@ -123,7 +126,7 @@ model {
 
         expect:
         succeeds "mainExecutable"
-        executable("build/binaries/mainExecutable/main").exec().out == "fooFromC\nfooFromCpp\nfooFromAsm\n"
+        executable("build/exe/main/main").exec().out == "fooFromC\nfooFromCpp\nfooFromAsm\n"
     }
 
     @Requires(TestPrecondition.OBJECTIVE_C_SUPPORT)
@@ -145,12 +148,12 @@ model {
             """
         expect:
         succeeds "mainExecutable"
-        executable("build/binaries/mainExecutable/main").exec().out == "foo1foo2"
+        executable("build/exe/main/main").exec().out == "foo1foo2"
         where:
         testApp << [ new DuplicateObjectiveCBaseNamesTestApp(), new DuplicateObjectiveCppBaseNamesTestApp() ]
     }
 
-    @RequiresInstalledToolChain(VisualCpp)
+    @RequiresInstalledToolChain(VISUALCPP)
     def "windows-resources can have sourcefiles with same base name but different directories"() {
         setup:
         def testApp = new DuplicateWindowsResourcesBaseNamesTestApp();
@@ -172,6 +175,6 @@ model {
             """
         expect:
         succeeds "mainExecutable"
-        executable("build/binaries/mainExecutable/main").exec().out == "foo1foo2"
+        executable("build/exe/main/main").exec().out == "foo1foo2"
     }
 }

@@ -18,34 +18,30 @@ package org.gradle.model.internal.manage.schema.extract;
 
 import com.google.common.base.Equivalence;
 import com.google.common.base.Function;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableListMultimap;
+import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Multimaps;
+import com.google.common.collect.Ordering;
 import groovy.lang.GroovyObject;
-import org.gradle.api.Nullable;
-import org.gradle.internal.Cast;
-import org.gradle.internal.reflect.MethodSignatureEquivalence;
+import org.gradle.internal.reflect.GroovyMethods;
+import org.gradle.internal.reflect.Types.TypeVisitor;
 import org.gradle.model.Managed;
-import org.gradle.util.CollectionUtils;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+import static org.gradle.internal.reflect.Methods.SIGNATURE_EQUIVALENCE;
+import static org.gradle.internal.reflect.Types.walkTypeHierarchy;
 
 public class ModelSchemaUtils {
-    private static final Equivalence<Method> METHOD_EQUIVALENCE = new MethodSignatureEquivalence();
-
-    private static final Set<Equivalence.Wrapper<Method>> IGNORED_METHODS = ImmutableSet.copyOf(
-        Iterables.transform(
-            Iterables.concat(
-                Arrays.asList(Object.class.getMethods()),
-                Arrays.asList(GroovyObject.class.getMethods())
-            ), new Function<Method, Equivalence.Wrapper<Method>>() {
-                public Equivalence.Wrapper<Method> apply(@Nullable Method input) {
-                    return METHOD_EQUIVALENCE.wrap(input);
-                }
-            }
-        )
-    );
+    public static final List<Class<?>> IGNORED_OBJECT_TYPES = ImmutableList.of(Object.class, GroovyObject.class);
 
     /**
      * Returns all candidate methods for schema generation declared by the given type and its super-types indexed by name.
@@ -63,66 +59,45 @@ public class ModelSchemaUtils {
      *
      * <p>Methods are returned in the order of their specialization, most specialized methods first.</p>
      */
-    public static <T> ListMultimap<String, Method> getCandidateMethods(Class<T> clazz) {
-        final ImmutableListMultimap.Builder<String, Method> methodsBuilder = ImmutableListMultimap.builder();
-        walkTypeHierarchy(clazz, new TypeVisitor<T>() {
+    public static <T> CandidateMethods getCandidateMethods(Class<T> clazz) {
+        final ImmutableListMultimap.Builder<String, Method> methodsByNameBuilder = ImmutableListMultimap.builder();
+        walkTypeHierarchy(clazz, IGNORED_OBJECT_TYPES, new TypeVisitor<T>() {
             @Override
             public void visitType(Class<? super T> type) {
-                for (Method method : type.getDeclaredMethods()) {
-                    if (isIgnoredMethod(method)) {
+                Method[] declaredMethods = type.getDeclaredMethods();
+                // Sort of determinism
+                Arrays.sort(declaredMethods, Ordering.usingToString());
+                for (Method method : declaredMethods) {
+                    if (ModelSchemaUtils.isIgnoredMethod(method)) {
                         continue;
                     }
-
-                    methodsBuilder.put(method.getName(), method);
+                    methodsByNameBuilder.put(method.getName(), method);
                 }
             }
         });
-        return methodsBuilder.build();
+        ImmutableListMultimap<String, Method> methodsByName = methodsByNameBuilder.build();
+        ImmutableSortedMap.Builder<String, Map<Equivalence.Wrapper<Method>, Collection<Method>>> candidatesBuilder = ImmutableSortedMap.naturalOrder();
+        for (String methodName : methodsByName.keySet()) {
+            ImmutableList<Method> methodsWithSameName = methodsByName.get(methodName);
+            ListMultimap<Equivalence.Wrapper<Method>, Method> equivalenceIndex = Multimaps.index(methodsWithSameName, new Function<Method, Equivalence.Wrapper<Method>>() {
+                @Override
+                public Equivalence.Wrapper<Method> apply(Method method) {
+                    return SIGNATURE_EQUIVALENCE.wrap(method);
+                }
+            });
+            candidatesBuilder.put(methodName, equivalenceIndex.asMap());
+        }
+        return new CandidateMethods(candidatesBuilder.build());
     }
 
-    public static boolean isIgnoredMethod(Method method) {
+    private static boolean isIgnoredMethod(Method method) {
         int modifiers = method.getModifiers();
-        if (method.isSynthetic() || Modifier.isStatic(modifiers) || !Modifier.isPublic(modifiers)) {
+        if (method.isSynthetic() || Modifier.isStatic(modifiers)) {
             return true;
         }
 
         // Ignore overrides of Object and GroovyObject methods
-        return IGNORED_METHODS.contains(METHOD_EQUIVALENCE.wrap(method));
-    }
-
-    /**
-     * Visits all types in a type hierarchy in breadth-first order, super-classes first and then implemented interfaces.
-     *
-     * @param clazz the type of whose type hierarchy to visit.
-     * @param visitor the visitor to call for each type in the hierarchy.
-     */
-    public static <T> void walkTypeHierarchy(Class<T> clazz, TypeVisitor<? extends T> visitor) {
-        Set<Class<?>> seenInterfaces = Sets.newHashSet();
-        Queue<Class<? super T>> queue = new ArrayDeque<Class<? super T>>();
-        queue.add(clazz);
-        Class<? super T> type;
-        while ((type = queue.poll()) != null) {
-            // Do not process Object's or GroovyObject's methods
-            if (type.equals(Object.class) || type.equals(GroovyObject.class)) {
-                continue;
-            }
-
-            visitor.visitType(type);
-
-            Class<? super T> superclass = type.getSuperclass();
-            if (superclass != null) {
-                queue.add(superclass);
-            }
-            for (Class<?> iface : type.getInterfaces()) {
-                if (seenInterfaces.add(iface)) {
-                    queue.add(Cast.<Class<? super T>>uncheckedCast(iface));
-                }
-            }
-        }
-    }
-
-    public interface TypeVisitor<T> {
-        void visitType(Class<? super T> type);
+        return GroovyMethods.isObjectMethod(method);
     }
 
     /**
@@ -159,41 +134,5 @@ public class ModelSchemaUtils {
      */
     public static boolean isMethodDeclaredInManagedType(Method method) {
         return method.getDeclaringClass().isAnnotationPresent(Managed.class);
-    }
-
-    /**
-     * Returns the declarations of overridden methods, or null if there are no override.
-     */
-    @Nullable
-    public static List<List<Method>> getOverriddenMethods(Collection<Method> methods) {
-        ImmutableList.Builder<List<Method>> builder = ImmutableList.builder();
-        if (methods.size() > 1) {
-            ListMultimap<Integer, Method> equivalenceIndex = Multimaps.index(methods, new Function<Method, Integer>() {
-                public Integer apply(Method method) {
-                    return METHOD_EQUIVALENCE.hash(method);
-                }
-            });
-            for (List<Method> overriddenChain : Multimaps.asMap(equivalenceIndex).values()) {
-                if (overriddenChain.size() > 1) {
-                    builder.add(overriddenChain);
-                }
-            }
-        }
-        List<List<Method>> overridden = builder.build();
-        return overridden.isEmpty() ? null : overridden;
-    }
-
-    /**
-     * Returns the different overloaded versions of a method, or null if there are no overloads.
-     */
-    @Nullable
-    public static List<Method> getOverloadedMethods(Collection<Method> methods) {
-        if (methods.size() > 1) {
-            List<Method> deduped = CollectionUtils.dedup(methods, METHOD_EQUIVALENCE);
-            if (deduped.size() > 1) {
-                return deduped;
-            }
-        }
-        return null;
     }
 }

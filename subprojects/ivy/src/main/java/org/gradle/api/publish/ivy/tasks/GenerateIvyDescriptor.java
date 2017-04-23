@@ -19,7 +19,6 @@ package org.gradle.api.publish.ivy.tasks;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Incubating;
 import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.publish.ivy.IvyArtifact;
 import org.gradle.api.publish.ivy.IvyConfiguration;
 import org.gradle.api.publish.ivy.IvyModuleDescriptorSpec;
@@ -27,8 +26,10 @@ import org.gradle.api.publish.ivy.internal.dependency.IvyDependencyInternal;
 import org.gradle.api.publish.ivy.internal.publication.IvyModuleDescriptorSpecInternal;
 import org.gradle.api.publish.ivy.internal.publisher.IvyDescriptorFileGenerator;
 import org.gradle.api.specs.Specs;
+import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.internal.file.PathToFileResolver;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -50,7 +51,7 @@ public class GenerateIvyDescriptor extends DefaultTask {
     }
 
     @Inject
-    protected FileResolver getFileResolver() {
+    protected PathToFileResolver getFileResolver() {
         throw new UnsupportedOperationException();
     }
 
@@ -59,6 +60,7 @@ public class GenerateIvyDescriptor extends DefaultTask {
      *
      * @return The module descriptor.
      */
+    @Internal
     public IvyModuleDescriptorSpec getDescriptor() {
         return descriptor;
     }

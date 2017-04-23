@@ -41,7 +41,7 @@
                 <td><literal>null</literal></td>
             </tr>
             <tr>
-                <td>overview</td>
+                <td>overviewText</td>
                 <td><literal>null</literal></td>
             </tr>
             <tr>
@@ -63,6 +63,14 @@
             <tr>
                 <td>source</td>
                 <td><literal>sourceSets.main.groovy</literal></td>
+            </tr>
+            <tr>
+                <td>noTimestamp</td>
+                <td><literal>false</literal></td>
+            </tr>
+            <tr>
+                <td>noVersionStamp</td>
+                <td><literal>false</literal></td>
             </tr>
         </table>
     </section>

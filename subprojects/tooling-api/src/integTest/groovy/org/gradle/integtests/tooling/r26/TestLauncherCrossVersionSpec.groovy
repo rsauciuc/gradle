@@ -20,20 +20,29 @@ import groovy.transform.stc.ClosureParams
 import groovy.transform.stc.SimpleType
 import org.gradle.api.GradleException
 import org.gradle.integtests.tooling.TestLauncherSpec
+import org.gradle.integtests.tooling.fixture.ProgressEvents
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.TestResultHandler
 import org.gradle.integtests.tooling.fixture.ToolingApiVersion
-import org.gradle.tooling.*
+import org.gradle.tooling.BuildCancelledException
+import org.gradle.tooling.BuildException
+import org.gradle.tooling.ListenerFailedException
+import org.gradle.tooling.ProjectConnection
+import org.gradle.tooling.TestExecutionException
+import org.gradle.tooling.TestLauncher
 import org.gradle.tooling.events.ProgressEvent
 import org.gradle.tooling.events.ProgressListener
+import org.gradle.tooling.events.task.TaskSkippedResult
 import org.gradle.tooling.events.test.TestOperationDescriptor
 import org.gradle.tooling.exceptions.UnsupportedBuildArgumentException
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.util.GradleVersion
 
 @ToolingApiVersion(">=2.6")
 @TargetGradleVersion(">=2.6")
 class TestLauncherCrossVersionSpec extends TestLauncherSpec {
+
+
+    public static final GradleVersion GRADLE_VERSION_34 = GradleVersion.version("3.4")
 
     def "test launcher api fires progress events"() {
         given:
@@ -42,15 +51,14 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
         launchTests(testDescriptors("example.MyTest"));
         then:
         events.assertIsABuild()
-        events.operation("Task :compileJava").successful
-        events.operation("Task :processResources").successful
+        assertTaskOperationSuccesfulOrSkippedWithNoSource(":compileJava")
+        assertTaskOperationSuccesfulOrSkippedWithNoSource(":processResources")
         events.operation("Task :classes").successful
         events.operation("Task :compileTestJava").successful
-        events.operation("Task :processTestResources").successful
+        assertTaskOperationSuccesfulOrSkippedWithNoSource(":processTestResources")
         events.operation("Task :testClasses").successful
         events.operation("Task :test").successful
         events.operation("Task :secondTest").successful
-
         events.operation("Gradle Test Run :test").successful
         events.operation("Gradle Test Executor 1").successful
         events.operation("Gradle Test Run :secondTest").successful
@@ -130,10 +138,13 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
         assertTaskNotExecuted(":test")
     }
 
-    @Requires(TestPrecondition.JDK7_OR_LATER)
     def "can run and cancel test execution in continuous mode"() {
         given:
+        events.skipValidation = true
         collectDescriptorsFromBuild()
+        and: // Need to run the test task beforehand, since continuous build doesn't handle the new directories created after 'clean'
+        launchTests(testDescriptors("example.MyTest", null, ":secondTest"))
+
         when:
         withConnection { connection ->
             withCancellation { cancellationToken ->
@@ -153,6 +164,8 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
                 assertTestNotExecuted(className: "example.MyTest", methodName: "foo4", task: ":secondTest")
                 assert events.tests.size() == 6
                 events.clear()
+
+                // Change the tests sources and wait for the tests to run again
                 changeTestSource()
                 waitingForBuild()
             }
@@ -166,7 +179,7 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
         assertTestExecuted(className: "example.MyTest", methodName: "foo2", task: ":secondTest")
         assertTestExecuted(className: "example.MyTest", methodName: "foo3", task: ":secondTest")
         assertTestExecuted(className: "example.MyTest", methodName: "foo4", task: ":secondTest")
-        events.tests.size() == 8
+        events.tests.size() in [8, 16] // also accept it as a valid result when the build gets executed twice.
     }
 
     public <T> T withCancellation(@ClosureParams(value = SimpleType, options = ["org.gradle.tooling.CancellationToken"]) Closure<T> cl) {
@@ -400,6 +413,19 @@ class TestLauncherCrossVersionSpec extends TestLauncherSpec {
             }
         }
     }
+
+    def assertTaskOperationSuccesfulOrSkippedWithNoSource(String taskPath) {
+        ProgressEvents.Operation operation = events.operation("Task $taskPath")
+        if (targetVersion < GRADLE_VERSION_34) {
+            assert operation.successful
+        } else {
+            assert operation.result instanceof TaskSkippedResult
+            assert operation.result.skipMessage == "NO-SOURCE"
+        }
+        true
+    }
+
+
 
     def testCode() {
         settingsFile << "rootProject.name = 'testproject'\n"

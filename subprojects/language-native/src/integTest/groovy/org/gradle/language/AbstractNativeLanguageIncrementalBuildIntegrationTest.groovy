@@ -31,8 +31,8 @@ import spock.lang.Ignore
 import spock.lang.IgnoreIf
 import spock.lang.Issue
 
-import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.GccCompatible
-import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VisualCpp
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.GCC_COMPATIBLE
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VISUALCPP
 import static org.gradle.util.TextUtil.escapeString
 
 abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
@@ -108,7 +108,7 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         given:
         run "installMainExecutable"
 
-        def install = installation("build/install/mainExecutable")
+        def install = installation("build/install/main")
 
         when:
         sourceFile.text = app.alternateMainSource.content
@@ -146,24 +146,21 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
 
         executedAndNotSkipped mainCompileTask
 
-        // Visual C++ compiler embeds a timestamp in every object file, so relinking is always required after recompiling
-        if (AbstractInstalledToolChainIntegrationSpec.toolChain.visualCpp) {
-            executedAndNotSkipped ":linkMainExecutable"
-            executedAndNotSkipped ":mainExecutable"
-        } else if(objectiveCWithAslr()){
-            executed ":linkHelloSharedLibrary", ":helloSharedLibrary"
+        if (nonDeterministicCompilation()) {
+            // Relinking may (or may not) be required after recompiling
             executed ":linkMainExecutable", ":mainExecutable"
         } else {
             skipped ":linkMainExecutable"
             skipped ":mainExecutable"
         }
     }
+
     @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
     def "recompiles library and relinks executable with library source file change"() {
         given:
         run "installMainExecutable"
         maybeWait()
-        def install = installation("build/install/mainExecutable")
+        def install = installation("build/install/main")
 
         when:
         for (int i = 0; i < librarySourceFiles.size(); i++) {
@@ -203,11 +200,8 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         executedAndNotSkipped libraryCompileTask
         executedAndNotSkipped mainCompileTask
 
-        // Visual C++ compiler embeds a timestamp in every object file, so relinking is always required after recompiling
-        if (AbstractInstalledToolChainIntegrationSpec.toolChain.visualCpp) {
-            executedAndNotSkipped ":linkHelloSharedLibrary", ":helloSharedLibrary"
-            executedAndNotSkipped ":linkMainExecutable", ":mainExecutable"
-        } else if(objectiveCWithAslr()){
+        if (nonDeterministicCompilation()) {
+            // Relinking may (or may not) be required after recompiling
             executed ":linkHelloSharedLibrary", ":helloSharedLibrary"
             executed ":linkMainExecutable", ":mainExecutable"
         } else {
@@ -231,17 +225,19 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         executedAndNotSkipped libraryCompileTask
         executedAndNotSkipped mainCompileTask
 
-        // Visual C++ compiler embeds a timestamp in every object file, so relinking is always required after recompiling
-        if (AbstractInstalledToolChainIntegrationSpec.toolChain.visualCpp) {
-            executedAndNotSkipped ":linkHelloSharedLibrary", ":helloSharedLibrary"
-            executedAndNotSkipped ":linkMainExecutable", ":mainExecutable"
-        } else if(objectiveCWithAslr()){
+        if (nonDeterministicCompilation()) {
+            // Relinking may (or may not) be required after recompiling
             executed ":linkHelloSharedLibrary", ":helloSharedLibrary"
             executed ":linkMainExecutable", ":mainExecutable"
         } else {
             skipped ":linkHelloSharedLibrary", ":helloSharedLibrary"
             skipped ":linkMainExecutable", ":mainExecutable"
         }
+    }
+
+    private boolean nonDeterministicCompilation() {
+        // Visual C++ compiler embeds a timestamp in every object file, and ASLR is non-deterministic
+        AbstractInstalledToolChainIntegrationSpec.toolChain.visualCpp || objectiveCWithAslr()
     }
 
     // compiling Objective-C and Objective-Cpp with clang generates
@@ -258,7 +254,7 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         given:
         run "installMainExecutable"
 
-        def install = installation("build/install/mainExecutable")
+        def install = installation("build/install/main")
 
         when:
         buildFile << """
@@ -305,15 +301,20 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
             }
         }
         components {
-            main.targetPlatform "platform_x86"
-            hello.targetPlatform "platform_x86"
+            main {
+                targetPlatform 'platform_x86'
+            }
+            hello {
+                targetPlatform 'platform_x86'
+            }
         }
     }
 """
         run "mainExecutable"
 
         when:
-        buildFile.text = buildFile.text.replace("platform_x86", "platform_x64")
+        buildFile.text = buildFile.text.replace("'platform_x86'", " 'platform_x64'")
+        sleep(500)
         run "mainExecutable"
 
         then:
@@ -326,7 +327,7 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         given:
         run "mainExecutable", "helloStaticLibrary"
 
-        def executable = executable("build/binaries/mainExecutable/main")
+        def executable = executable("build/exe/main/main")
         def snapshot = executable.snapshot()
 
         when:
@@ -348,7 +349,7 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         run "mainExecutable"
 
         when:
-        def executable = executable("build/binaries/mainExecutable/main")
+        def executable = executable("build/exe/main/main")
         def snapshot = executable.snapshot()
 
         and:
@@ -379,7 +380,8 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         and:
         executable.assertExists()
 
-        if (toolChain.id != "mingw") { // Identical binary is produced on mingw
+        // Identical binaries produced on mingw and gcc cygwin
+        if (!(toolChain.id in ["mingw", "gcccygwin"])) {
             executable.assertHasChangedSince(snapshot)
         }
     }
@@ -417,13 +419,17 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         run "helloStaticLibrary"
 
         then:
-        String objectFilesPath = "build/objs/helloStaticLibrary/hello${sourceType}"
+        String objectFilesPath = "build/objs/hello/static/hello${sourceType}"
         def oldObjFile = objectFileFor(librarySourceFiles[0], objectFilesPath)
         def newObjFile = objectFileFor( librarySourceFiles[0].getParentFile().file("changed_${librarySourceFiles[0].name}"), objectFilesPath)
         assert oldObjFile.file
         assert !newObjFile.file
 
-        assert staticLibrary("build/binaries/helloStaticLibrary/hello").listObjectFiles().contains(oldObjFile.name)
+        try {
+            assert staticLibrary("build/libs/hello/static/hello").listObjectFiles().contains(oldObjFile.name)
+        } catch (UnsupportedOperationException ignored) {
+            // Toolchain doesn't support this.
+        }
 
         when:
         librarySourceFiles.each { rename(it) }
@@ -439,11 +445,15 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         newObjFile.file
 
         and:
-        assert staticLibrary("build/binaries/helloStaticLibrary/hello").listObjectFiles().contains(newObjFile.name)
-        assert !staticLibrary("build/binaries/helloStaticLibrary/hello").listObjectFiles().contains(oldObjFile.name)
+        try {
+            assert staticLibrary("build/libs/hello/static/hello").listObjectFiles().contains(newObjFile.name)
+            assert !staticLibrary("build/libs/hello/static/hello").listObjectFiles().contains(oldObjFile.name)
+        } catch (UnsupportedOperationException ignored) {
+            // Toolchain doesn't support this.
+        }
     }
 
-    @RequiresInstalledToolChain(GccCompatible)
+    @RequiresInstalledToolChain(GCC_COMPATIBLE)
     def "recompiles binary when imported header file changes"() {
         sourceFile.text = sourceFile.text.replaceFirst('#include "hello.h"', "#import \"hello.h\"")
         if(buildingCorCppWithGcc()) {
@@ -480,20 +490,20 @@ abstract class AbstractNativeLanguageIncrementalBuildIntegrationTest extends Abs
         }
     }
 
-    @RequiresInstalledToolChain(VisualCpp)
+    @RequiresInstalledToolChain(VISUALCPP)
     def "cleans up stale debug files when changing from debug to non-debug"() {
 
         given:
         buildFile << """
             model {
                 binaries {
-                    all { ${compilerTool}.args ${toolChain.meets(ToolChainRequirement.VisualCpp2013) ? "'/Zi', '/FS'" : "'/Zi'"}; linker.args '/DEBUG'; }
+                    all { ${compilerTool}.args ${toolChain.meets(ToolChainRequirement.VISUALCPP_2013_OR_NEWER) ? "'/Zi', '/FS'" : "'/Zi'"}; linker.args '/DEBUG'; }
                 }
             }
         """
         run "mainExecutable"
 
-        def executable = executable("build/binaries/mainExecutable/main")
+        def executable = executable("build/exe/main/main")
         executable.assertDebugFileExists()
 
         when:
@@ -572,7 +582,7 @@ model {
 """
         then:
         succeeds "mainExecutable"
-        executable("build/binaries/mainExecutable/main").exec().out == "HELLO\n"
+        executable("build/exe/main/main").exec().out == "HELLO\n"
 
         when:
         headerFile.text = """
@@ -584,17 +594,8 @@ model {
         executedAndNotSkipped "compileMainExecutableMainCpp"
     }
 
-
     def buildingCorCppWithGcc() {
-        return toolChain.meets(ToolChainRequirement.Gcc) && (sourceType == "C" || sourceType == "Cpp")
-    }
-
-    private void maybeWait() {
-        if (toolChain.visualCpp) {
-            def now = System.currentTimeMillis()
-            def nextSecond = now % 1000
-            Thread.sleep(1200 - nextSecond)
-        }
+        return toolChain.meets(ToolChainRequirement.GCC) && (sourceType == "C" || sourceType == "Cpp")
     }
 
     static boolean rename(TestFile sourceFile) {

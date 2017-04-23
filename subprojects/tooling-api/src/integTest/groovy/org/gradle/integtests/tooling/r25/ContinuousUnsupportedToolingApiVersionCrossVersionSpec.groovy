@@ -27,7 +27,7 @@ import spock.lang.Timeout
 
 class ContinuousUnsupportedToolingApiVersionCrossVersionSpec extends ToolingApiSpecification {
     @Timeout(120)
-    @ToolingApiVersion(ToolingApiVersions.PRE_CANCELLATION)
+    @ToolingApiVersion(">=2.0 <2.1")
     @TargetGradleVersion(GradleVersions.SUPPORTS_CONTINUOUS)
     def "client receives appropriate error if continuous build attempted using client that does not support cancellation"() {
         when:
@@ -40,14 +40,14 @@ class ContinuousUnsupportedToolingApiVersionCrossVersionSpec extends ToolingApiS
         }
 
         then:
-        def e = thrown(GradleConnectionException)
-        e.message.startsWith("Could not execute build using")
-        e.cause.message == "Continuous build requires Tooling API client version 2.1 or later."
+        caughtGradleConnectionException = thrown(GradleConnectionException)
+        caughtGradleConnectionException.message.startsWith("Could not execute build using")
+        caughtGradleConnectionException.cause.message == "Continuous build requires Tooling API client version 2.1 or later."
     }
 
     @Timeout(120)
     @ToolingApiVersion(ToolingApiVersions.SUPPORTS_CANCELLATION)
-    @TargetGradleVersion(GradleVersions.PRE_CONTINUOUS)
+    @TargetGradleVersion(">=1.2 <2.5")
     def "client receives appropriate error target Gradle version does not support cancellation"() {
         when:
         buildFile.text = "apply plugin: 'java'"

@@ -35,7 +35,7 @@ public class BooleanJavadocOptionFileOptionTest {
         context.setImposteriser(ClassImposteriser.INSTANCE);
         writerContextMock = context.mock(JavadocOptionFileWriterContext.class);
 
-        booleanOption = new BooleanJavadocOptionFileOption(optionName);
+        booleanOption = new BooleanJavadocOptionFileOption(optionName, null);
     }
 
     @Test
@@ -55,7 +55,7 @@ public class BooleanJavadocOptionFileOptionTest {
         booleanOption.setValue(true);
 
         context.checking(new Expectations() {{
-            one(writerContextMock).writeOption(optionName);
+            oneOf(writerContextMock).writeOption(optionName);
         }});
 
         booleanOption.write(writerContextMock);

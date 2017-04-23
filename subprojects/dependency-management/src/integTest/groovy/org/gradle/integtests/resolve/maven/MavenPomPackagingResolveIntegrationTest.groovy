@@ -141,7 +141,7 @@ if (project.hasProperty('skipCache')) {
         // New artifact is detected
         when:
         server.resetExpectations()
-        snapshotA.metaData.expectGet()
+        snapshotA.metaData.expectHead()
         snapshotA.pom.expectHead()
         snapshotA.artifact.expectHead()
         snapshotA.artifact.expectGet()
@@ -157,7 +157,7 @@ if (project.hasProperty('skipCache')) {
         // Jar artifact removal is detected
         when:
         server.resetExpectations()
-        snapshotA.metaData.expectGet()
+        snapshotA.metaData.expectHead()
         snapshotA.pom.expectHead()
         snapshotA.artifact.expectHeadMissing()
 
@@ -213,31 +213,6 @@ if (project.hasProperty('skipCache')) {
         and:
         file('libs').assertHasDescendants('projectA-1.0.jar')
         file('libs/projectA-1.0.jar').assertIsCopyOf(projectARepo1.artifactFile)
-
-        // Check caching
-        when:
-        server.resetExpectations()
-        then:
-        succeeds 'retrieve'
-    }
-
-    @Issue('GRADLE-2188')
-    def "where 'module.custom' exists, will use it as main artifact for pom with packaging 'custom'"() {
-        when:
-        buildWithDependencies("compile 'group:projectA:1.0'")
-        projectARepo1.hasPackaging("custom").hasType("custom").publish()
-
-        and:
-        projectARepo1.pom.expectGet()
-        projectARepo1.artifact.expectHead()
-        projectARepo1.artifact.expectGet()
-
-        then:
-        succeeds 'retrieve'
-
-        and:
-        file('libs').assertHasDescendants('projectA-1.0.custom')
-        file('libs/projectA-1.0.custom').assertIsCopyOf(projectARepo1.artifactFile)
 
         // Check caching
         when:
@@ -302,7 +277,7 @@ compile('group:projectA:1.0') {
 compile 'group:mavenProject:1.0'
 """)
         def mavenProject = repo1.module('group', 'mavenProject', '1.0').hasPackaging('pom')
-                .dependsOn('group', 'projectA', '1.0', 'zip', 'compile').publishPom()
+                .dependsOn('group', 'projectA', '1.0', 'zip', 'compile', null).publishPom()
         projectARepo1.hasPackaging("custom")
         projectARepo1.artifact(type: 'zip')
         projectARepo1.publish()

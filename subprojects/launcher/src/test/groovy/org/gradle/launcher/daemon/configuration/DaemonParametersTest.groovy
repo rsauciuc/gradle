@@ -34,12 +34,12 @@ class DaemonParametersTest extends Specification {
 
     def "has reasonable default values"() {
         expect:
-        parameters.daemonUsage == DaemonUsage.IMPLICITLY_DISABLED
+        parameters.enabled
         parameters.idleTimeout == DaemonParameters.DEFAULT_IDLE_TIMEOUT
+        parameters.periodicCheckInterval == DaemonParameters.DEFAULT_PERIODIC_CHECK_INTERVAL_MILLIS
         parameters.baseDir == new File(new BuildLayoutParameters().getGradleUserHomeDir(), "daemon")
         parameters.systemProperties.isEmpty()
-        parameters.effectiveJvmArgs.size() == 1 + 3 // + 1 because effective JVM args contains -Dfile.encoding, +3 for locale props
-        parameters.idleTimeout == DaemonParameters.DEFAULT_IDLE_TIMEOUT
+        parameters.effectiveJvmArgs.size() == 1  + 3 // + 1 because effective JVM args contains -Dfile.encoding, +3 for locale props
     }
 
     def "setting jvm to null means use the current jvm"() {
@@ -98,8 +98,7 @@ class DaemonParametersTest extends Specification {
         parameters.setDebug(parseBoolean(flag))
 
         then:
-        parameters.effectiveJvmArgs.contains("-Xdebug") == parseBoolean(flag)
-        parameters.effectiveJvmArgs.contains("-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=5005") == parseBoolean(flag)
+        parameters.effectiveJvmArgs.contains("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005") == parseBoolean(flag)
 
         where:
         flag << ["true", "false"]
@@ -111,8 +110,7 @@ class DaemonParametersTest extends Specification {
         parameters.applyDefaultsFor(jvmDefault)
 
         then:
-        parameters.effectiveJvmArgs.contains("-Xdebug")
-        parameters.effectiveJvmArgs.contains("-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=5005")
+        parameters.effectiveJvmArgs.contains("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005")
 
         where:
         jvmDefault << [JavaVersion.VERSION_1_8, JavaVersion.VERSION_1_9]
@@ -120,17 +118,19 @@ class DaemonParametersTest extends Specification {
 
     def "can enable the daemon"() {
         when:
-        def parametersWithEnabledDaemon = parameters().setEnabled(true)
+        def daemonParameters = parameters()
+        daemonParameters.setEnabled(true)
 
         then:
-        parametersWithEnabledDaemon.daemonUsage == DaemonUsage.EXPLICITLY_ENABLED
+        daemonParameters.enabled
     }
 
     def "can explicitly disable the daemon"() {
         when:
-        def parametersWithDisabledDaemon = parameters().setEnabled(false)
+        def daemonParameters = parameters()
+        daemonParameters.setEnabled(false)
 
         then:
-        parametersWithDisabledDaemon.daemonUsage == DaemonUsage.EXPLICITLY_DISABLED
+        !daemonParameters.enabled
     }
 }

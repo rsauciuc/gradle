@@ -19,9 +19,9 @@ import org.gradle.test.fixtures.HttpModule
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.maven.DelegatingMavenModule
 import org.gradle.test.fixtures.maven.MavenFileModule
-import org.gradle.test.fixtures.maven.MavenModule
+import org.gradle.test.fixtures.maven.RemoteMavenModule
 
-class MavenHttpModule extends DelegatingMavenModule<MavenHttpModule> implements MavenModule, HttpModule {
+class MavenHttpModule extends DelegatingMavenModule<MavenHttpModule> implements RemoteMavenModule, HttpModule {
     private final HttpServer server
     private final String moduleRootPath
     private final MavenFileModule backingModule
@@ -75,6 +75,13 @@ class MavenHttpModule extends DelegatingMavenModule<MavenHttpModule> implements 
 
     MavenHttpModule allowAll() {
         server.allowGetOrHead(moduleVersionPath, backingModule.moduleDir)
+        return this
+    }
+
+    MavenHttpModule revalidate() {
+        server.allowGetOrHeadMissing(pomPath)
+        server.allowGetOrHeadMissing(metaDataPath)
+        server.allowGetOrHeadWithRevalidate(artifactPath, artifactFile)
         return this
     }
 

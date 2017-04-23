@@ -36,7 +36,7 @@ public class EnumJavadocOptionFileOptionTest {
         context.setImposteriser(ClassImposteriser.INSTANCE);
         writerContextMock = context.mock(JavadocOptionFileWriterContext.class);
 
-        enumOption = new EnumJavadocOptionFileOption<JavadocMemberLevel>(optionName);
+        enumOption = new EnumJavadocOptionFileOption<JavadocMemberLevel>(optionName, null);
     }
 
     @Test
@@ -49,7 +49,7 @@ public class EnumJavadocOptionFileOptionTest {
         enumOption.setValue(JavadocMemberLevel.PUBLIC);
 
         context.checking(new Expectations() {{
-            one(writerContextMock).writeOption("public");
+            oneOf(writerContextMock).writeOption("public");
         }});
 
         enumOption.write(writerContextMock);

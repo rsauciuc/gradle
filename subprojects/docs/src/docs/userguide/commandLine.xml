@@ -113,11 +113,10 @@
             </listitem>
         </varlistentry>
         <varlistentry>
-            <term>
-                <option>--gui</option>
+            <term><option>--include-build</option>
             </term>
             <listitem>
-                <para>Launches the Gradle GUI. See <xref linkend="tutorial_gradle_gui"/>.
+                <para>Run the build as a composite, including the specified build. See <xref linkend="composite_builds"/>.
                 </para>
             </listitem>
         </varlistentry>
@@ -178,7 +177,8 @@
             <listitem>
                 <para>
                     Build projects in parallel. Gradle will attempt to determine the optimal number of executor threads to use.
-                    This option should only be used with decoupled projects (see <xref linkend="sec:decoupled_projects"/>).
+                    This option should only be used with decoupled projects (see <xref linkend="sec:decoupled_projects"/>). For limitations
+                    of this option please see <xref linkend="sec:parallel_execution"/>.
                 </para>
             </listitem>
         </varlistentry>
@@ -189,7 +189,6 @@
             <listitem>
                 <para>
                     Sets the maximum number of workers that Gradle may use. For example<literal>--max-workers=3</literal>.  The default is the number of processors.
-                    This option replaces <literal>--parallel-threads</literal> when used in conjuction with <literal>--parallel</literal>.
                 </para>
             </listitem>
         </varlistentry>
@@ -266,6 +265,22 @@
             </listitem>
         </varlistentry>
         <varlistentry>
+            <term><option>--scan (incubating)</option>
+            </term>
+            <listitem>
+                <para>Creates a build scan. Gradle will emit a warning if the build scan plugin has not been applied. For more information about build scans, please visit <ulink url="https://gradle.com/scans">https://gradle.com/scans</ulink>.
+                </para>
+            </listitem>
+        </varlistentry>
+        <varlistentry>
+            <term><option>--no-scan (incubating)</option>
+            </term>
+            <listitem>
+                <para>Disables the creation of a build scan. For more information about build scans, please visit <ulink url="https://gradle.com/scans">https://gradle.com/scans</ulink>.
+                </para>
+            </listitem>
+        </varlistentry>
+        <varlistentry>
             <term>
                 <option>-t</option>, <option>--continuous (incubating)</option>
             </term>
@@ -274,7 +289,7 @@
             </listitem>
         </varlistentry>
         <varlistentry>
-            <term><option>-u</option>, <option>--no-search-upwards</option>
+            <term><option>-u</option>, <option>--no-search-upward</option>
             </term>
             <listitem>
                 <para>Don't search in parent directories for a
@@ -292,6 +307,14 @@
             </listitem>
         </varlistentry>
         <varlistentry>
+            <term>
+                <option>-w</option>, <option>--warn</option>
+            </term>
+            <listitem>
+                <para>Set log level to warn. See <xref linkend="logging"/></para>
+            </listitem>
+        </varlistentry>
+        <varlistentry>
             <term><option>-x</option>, <option>--exclude-task</option>
             </term>
             <listitem>
@@ -303,34 +326,7 @@
     <para>The above information is printed to the console when you execute <userinput>gradle -h</userinput>.
     </para>
 
-    <section>
-        <title>Deprecated command-line options</title>
-        <variablelist>
-            <varlistentry>
-                <term>
-                    <option>--no-color</option>
-                </term>
-                <listitem>
-                    <para>Do not use color in the console output. This option has been replaced by the <option>--console plain</option> option.</para>
-                </listitem>
-            </varlistentry>
-            <varlistentry>
-                <term>
-                    <option>--parallel-threads</option>
-                </term>
-                <listitem>
-                    <para>
-                        Build projects in parallel, using the specified number of executor threads.
-                        For example<literal>--parallel-threads=3</literal>.
-                        This option should only be used with decoupled projects (see <xref linkend="sec:decoupled_projects"/>).
-                        This option has been replaced by <literal>--max-workers</literal>.
-                    </para>
-                </listitem>
-            </varlistentry>
-        </variablelist>
-    </section>
-
-    <section id='daemon_cli'>
+    <section id="daemon_cli">
         <title>Daemon command-line options</title>
         <para>The
             <xref linkend="gradle_daemon"/>
@@ -376,6 +372,16 @@
             </varlistentry>
             <varlistentry>
                 <term>
+                    <option>--status</option>
+                </term>
+                <listitem>
+                    <para>List running and recently stopped Gradle daemons.
+                        Only displays daemons of the same Gradle version.
+                    </para>
+                </listitem>
+            </varlistentry>
+            <varlistentry>
+                <term>
                     <option>--stop</option>
                 </term>
                 <listitem>
@@ -388,7 +394,7 @@
         </variablelist>
     </section>
 
-    <section>
+    <section id="sec:cli_system_properties">
         <title>System properties</title>
         <para>The following system properties are available for the
             <command>gradle</command>
@@ -410,7 +416,7 @@
         </para>
     </section>
 
-    <section>
+    <section id="sec:cli_environment_variables">
         <title>Environment variables</title>
         <para>The following environment variables are available for the
             <command>gradle</command>

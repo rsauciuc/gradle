@@ -20,7 +20,7 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
 
-    def "rule can create a map interface backed managed model elements"() {
+    def "rule can create a map of model elements"() {
         when:
         buildScript '''
             @Managed
@@ -71,7 +71,7 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
         output.contains "things: a:1,b:2"
     }
 
-    def "rule can create a managed collection of abstract class backed managed model elements"() {
+    def "rule can create a map of abstract class backed managed model elements"() {
         when:
         buildScript '''
             @Managed
@@ -123,6 +123,88 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
         output.contains "things: a:1,b:2"
     }
 
+    def "rule can create a map of various supported types"() {
+        // TODO - can't actually add anything to these maps yet
+        when:
+        buildScript '''
+            @Managed
+            interface Thing extends Named {
+              void setValue(String value)
+              String getValue()
+            }
+
+            class Rules extends RuleSource {
+              @Model
+              void mapThings(ModelMap<ModelMap<Thing>> things) {
+              }
+              @Model
+              void setThings(ModelMap<ModelSet<Thing>> things) {
+              }
+              @Model
+              void setStrings(ModelMap<Set<String>> strings) {
+              }
+            }
+
+            apply type: Rules
+
+            model {
+              mapThings {
+              }
+              setThings {
+              }
+              setStrings {
+              }
+              tasks {
+                create("print") {
+                  doLast {
+                    println "mapThings: " + $.mapThings.keySet()
+                    println "setThings: " + $.setThings.keySet()
+                    println "setStrings: " + $.setStrings.keySet()
+                  }
+                }
+              }
+            }
+        '''
+
+        then:
+        succeeds "print"
+
+        and:
+        output.contains "mapThings: []"
+        output.contains "setThings: []"
+        output.contains "setStrings: []"
+    }
+
+    def "fails when rule creates a map of unsupported type"() {
+        when:
+        buildScript '''
+            @Managed
+            interface Container {
+              ModelMap<InputStream> getThings()
+            }
+
+            model {
+              container(Container)
+              tasks {
+                create("print") {
+                  doLast {
+                    println $.container
+                  }
+                }
+              }
+            }
+        '''
+
+        then:
+        fails "print"
+
+        and:
+        failure.assertHasCause("Exception thrown while executing model rule: container(Container) @ build.gradle line 8, column 15")
+        failure.assertHasCause("""A model element of type: 'Container' can not be constructed.
+Its property 'org.gradle.model.ModelMap<java.io.InputStream> things' is not a valid managed collection
+A managed collection can not contain 'java.io.InputStream's""")
+    }
+
     def "reports failure that occurs in collection item initializer"() {
         when:
         buildScript '''
@@ -152,7 +234,7 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
 
         and:
         failure.assertHasDescription('A problem occurred configuring root project')
-        failure.assertHasCause('Exception thrown while executing model rule: Rules#people > create(foo)')
+        failure.assertHasCause('Exception thrown while executing model rule: Rules#people(ModelMap<Person>) > create(foo)')
         failure.assertHasCause('broken')
     }
 
@@ -183,8 +265,8 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
         fails "tasks"
 
         and:
-        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#people")
-        failure.assertHasCause("Attempt to read a write only view of model of type 'org.gradle.model.ModelMap<Person>' given to rule 'RulePlugin#people'")
+        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#people(ModelMap<Person>)")
+        failure.assertHasCause("Attempt to read from a write only view of model element 'people' of type 'ModelMap<Person>' given to rule RulePlugin#people(ModelMap<Person>)")
     }
 
     def "cannot mutate when used as an input"() {
@@ -210,11 +292,46 @@ class ManagedModelMapIntegrationTest extends AbstractIntegrationSpec {
         '''
 
         then:
-        fails "tasks"
+        fails()
 
         and:
-        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#mutate")
-        failure.assertHasCause("Attempt to mutate closed view of model of type 'org.gradle.model.ModelMap<Person>' given to rule 'RulePlugin#mutate'")
+        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#mutate(ModelMap<Task>, ModelMap<Person>)")
+        failure.assertHasCause("Attempt to modify a read only view of model element 'people' of type 'ModelMap<Person>' given to rule RulePlugin#mutate(ModelMap<Task>, ModelMap<Person>)")
+    }
+
+    def "cannot mutate when used as subject of validate rule"() {
+        when:
+        buildScript '''
+            @Managed
+            interface Person extends Named {
+              String getValue()
+              void setValue(String string)
+            }
+
+            class RulePlugin extends RuleSource {
+                @Model
+                void people(ModelMap<Person> people) {
+                }
+
+                @Validate
+                void check(ModelMap<Person> people) {
+                    people.create("another")
+                }
+
+                @Mutate
+                void mutate(ModelMap<Task> tasks, ModelMap<Person> people) {
+                }
+            }
+
+            apply type: RulePlugin
+        '''
+
+        then:
+        fails()
+
+        and:
+        failure.assertHasCause("Exception thrown while executing model rule: RulePlugin#check(ModelMap<Person>)")
+        failure.assertHasCause("Attempt to modify a read only view of model element 'people' of type 'ModelMap<Person>' given to rule RulePlugin#check(ModelMap<Person>)")
     }
 
     def "can read children of map when used as input"() {
@@ -286,6 +403,43 @@ parent
     :gc1
 """.trim()
         )
+    }
+
+    def "can read children of map when used as subject of validate rule"() {
+        given:
+        buildScript '''
+            @Managed
+            interface Person extends Named {
+              String getValue()
+              void setValue(String string)
+            }
+
+            class RulePlugin extends RuleSource {
+                @Model
+                void people(ModelMap<Person> people) {
+                    people.create("a")
+                }
+
+                @Validate
+                void check(ModelMap<Person> people) {
+                    println "size: " + people.size()
+                    println people.a
+                    println people.keySet()
+                }
+
+                @Mutate
+                void mutate(ModelMap<Task> tasks, ModelMap<Person> people) {
+                }
+            }
+
+            apply type: RulePlugin
+        '''
+
+        when:
+        run()
+
+        then:
+        output.contains("size: 1")
     }
 
     def "name is not populated when entity is not named"() {

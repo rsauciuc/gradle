@@ -19,6 +19,7 @@ package org.gradle.api.internal.tasks.compile.incremental.deps;
 import java.util.Set;
 
 public class DependencyToAll implements DependentsSet {
+    public static final DependencyToAll INSTANCE = new DependencyToAll();
 
     private final String reason;
 
@@ -30,14 +31,17 @@ public class DependencyToAll implements DependentsSet {
         this(null);
     }
 
+    @Override
     public Set<String> getDependentClasses() {
         throw new UnsupportedOperationException("This instance of dependents set does not have dependent classes information.");
     }
 
+    @Override
     public boolean isDependencyToAll() {
         return true;
     }
 
+    @Override
     public String getDescription() {
         return reason;
     }

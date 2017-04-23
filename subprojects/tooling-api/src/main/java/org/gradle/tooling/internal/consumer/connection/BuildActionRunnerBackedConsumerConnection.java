@@ -16,23 +16,13 @@
 
 package org.gradle.tooling.internal.consumer.connection;
 
-import org.gradle.api.Action;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
-import org.gradle.tooling.internal.adapter.SourceObjectMapping;
-import org.gradle.tooling.internal.consumer.converters.TaskPropertyHandlerFactory;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping;
 import org.gradle.tooling.internal.consumer.versioning.VersionDetails;
 import org.gradle.tooling.internal.protocol.BuildActionRunner;
 import org.gradle.tooling.internal.protocol.ConnectionVersion4;
-import org.gradle.tooling.model.GradleProject;
-import org.gradle.tooling.model.build.BuildEnvironment;
-import org.gradle.tooling.model.eclipse.EclipseProject;
-import org.gradle.tooling.model.eclipse.HierarchicalEclipseProject;
-import org.gradle.tooling.model.idea.BasicIdeaProject;
-import org.gradle.tooling.model.idea.IdeaProject;
 import org.gradle.tooling.model.internal.Exceptions;
-import org.gradle.tooling.model.internal.outcomes.ProjectOutcomes;
 
 /**
  * An adapter for a {@link BuildActionRunner} based provider.
@@ -44,9 +34,9 @@ public class BuildActionRunnerBackedConsumerConnection extends AbstractPost12Con
     private final UnsupportedActionRunner actionRunner;
 
     public BuildActionRunnerBackedConsumerConnection(ConnectionVersion4 delegate, ModelMapping modelMapping, ProtocolToModelAdapter adapter) {
-        super(delegate, new R12VersionDetails(delegate.getMetaData().getVersion()));
-        ModelProducer consumerConnectionBackedModelProducer = new BuildActionRunnerBackedModelProducer(adapter, getVersionDetails(), modelMapping,  (BuildActionRunner) delegate);
-        ModelProducer producerWithGradleBuild = new GradleBuildAdapterProducer(adapter, consumerConnectionBackedModelProducer);
+        super(delegate, VersionDetails.from(delegate.getMetaData().getVersion()));
+        ModelProducer consumerConnectionBackedModelProducer = new BuildActionRunnerBackedModelProducer(adapter, getVersionDetails(), modelMapping,  (BuildActionRunner) delegate, this);
+        ModelProducer producerWithGradleBuild = new GradleBuildAdapterProducer(adapter, consumerConnectionBackedModelProducer, this);
         modelProducer = new BuildInvocationsAdapterProducer(adapter, getVersionDetails(), producerWithGradleBuild);
         actionRunner = new UnsupportedActionRunner(getVersionDetails().getVersion());
     }
@@ -61,37 +51,19 @@ public class BuildActionRunnerBackedConsumerConnection extends AbstractPost12Con
         return modelProducer;
     }
 
-    private static class R12VersionDetails extends VersionDetails {
-        public R12VersionDetails(String version) {
-            super(version);
-        }
-
-        @Override
-        public boolean maySupportModel(Class<?> modelType) {
-            return modelType.equals(ProjectOutcomes.class)
-                    || modelType.equals(HierarchicalEclipseProject.class)
-                    || modelType.equals(EclipseProject.class)
-                    || modelType.equals(IdeaProject.class)
-                    || modelType.equals(BasicIdeaProject.class)
-                    || modelType.equals(BuildEnvironment.class)
-                    || modelType.equals(GradleProject.class)
-                    || modelType.equals(Void.class);
-        }
-    }
-
     private static class BuildActionRunnerBackedModelProducer implements ModelProducer {
         private final ProtocolToModelAdapter adapter;
         private final VersionDetails versionDetails;
         private final ModelMapping modelMapping;
         private final BuildActionRunner buildActionRunner;
-        private final Action<SourceObjectMapping> mapper;
+        private final HasCompatibilityMapping mapperProvider;
 
-        public BuildActionRunnerBackedModelProducer(ProtocolToModelAdapter adapter, VersionDetails versionDetails, ModelMapping modelMapping, BuildActionRunner buildActionRunner) {
+        public BuildActionRunnerBackedModelProducer(ProtocolToModelAdapter adapter, VersionDetails versionDetails, ModelMapping modelMapping, BuildActionRunner buildActionRunner, HasCompatibilityMapping mapperProvider) {
             this.adapter = adapter;
             this.versionDetails = versionDetails;
             this.modelMapping = modelMapping;
             this.buildActionRunner = buildActionRunner;
-            mapper = new TaskPropertyHandlerFactory().forVersion(versionDetails);
+            this.mapperProvider = mapperProvider;
         }
 
         public <T> T produceModel(Class<T> type, ConsumerOperationParameters operationParameters) {
@@ -102,7 +74,8 @@ public class BuildActionRunnerBackedConsumerConnection extends AbstractPost12Con
             }
             Class<?> protocolType = modelMapping.getProtocolType(type);
             Object model = buildActionRunner.run(protocolType, operationParameters).getModel();
-            return adapter.adapt(type, model, mapper);
+
+            return mapperProvider.applyCompatibilityMapping(adapter.builder(type), operationParameters).build(model);
         }
     }
 }

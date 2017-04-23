@@ -15,15 +15,22 @@
  */
 package org.gradle.internal.classloader
 
+import org.gradle.util.Requires
 import org.junit.Before
 import org.junit.Test
 import org.junit.runners.BlockJUnit4ClassRunner
+import spock.lang.Issue
 import spock.lang.Specification
 
+import static org.gradle.util.TestPrecondition.FIX_TO_WORK_ON_JAVA9
 import static org.junit.Assert.fail
 
 class FilteringClassLoaderTest extends Specification {
-    private final FilteringClassLoader classLoader = new FilteringClassLoader(FilteringClassLoaderTest.class.getClassLoader())
+    private FilteringClassLoader classLoader
+
+    def setup() {
+        withSpec {}
+    }
 
     void passesThroughSystemClasses() {
         expect:
@@ -35,6 +42,8 @@ class FilteringClassLoaderTest extends Specification {
         canSeePackage('java.lang')
     }
 
+    @Issue("gradle/core-issues#115")
+    @Requires(FIX_TO_WORK_ON_JAVA9)
     void passesThroughSystemResources() {
         expect:
         canSeeResource('com/sun/jndi/ldap/jndiprovider.properties')
@@ -81,7 +90,9 @@ class FilteringClassLoaderTest extends Specification {
         cannotLoadClass(BlockJUnit4ClassRunner)
 
         and:
-        classLoader.allowPackage('org.junit')
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowPackage('org.junit')
+        }
 
         expect:
         canLoadClass(Test)
@@ -94,7 +105,9 @@ class FilteringClassLoaderTest extends Specification {
         cannotLoadClass(Test)
 
         and:
-        classLoader.allowClass(Test.class)
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowClass(Test.class)
+        }
 
         expect:
         canLoadClass(Test)
@@ -107,8 +120,10 @@ class FilteringClassLoaderTest extends Specification {
         cannotLoadClass(Before)
 
         and:
-        classLoader.allowPackage("org.junit")
-        classLoader.disallowClass("org.junit.Test")
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowPackage("org.junit")
+            spec.disallowClass("org.junit.Test")
+        }
 
         expect:
         canLoadClass(Before)
@@ -117,8 +132,10 @@ class FilteringClassLoaderTest extends Specification {
 
     void disallowClassWinsOverAllowClass() {
         given:
-        classLoader.allowClass(Test)
-        classLoader.disallowClass(Test.name)
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowClass(Test)
+            spec.disallowClass(Test.name)
+        }
 
         expect:
         cannotLoadClass(Test)
@@ -130,7 +147,9 @@ class FilteringClassLoaderTest extends Specification {
         cannotSeePackage('org.junit.runner')
 
         and:
-        classLoader.allowPackage('org.junit')
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowPackage('org.junit')
+        }
 
         expect:
         canSeePackage('org.junit')
@@ -141,7 +160,9 @@ class FilteringClassLoaderTest extends Specification {
         given:
         cannotSeeResource('org/gradle/util/ClassLoaderTest.txt')
 
-        classLoader.allowPackage('org.gradle')
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowPackage('org.gradle')
+        }
 
         expect:
         canSeeResource('org/gradle/util/ClassLoaderTest.txt')
@@ -152,7 +173,9 @@ class FilteringClassLoaderTest extends Specification {
         cannotSeeResource('org/gradle/util/ClassLoaderTest.txt')
 
         and:
-        classLoader.allowResources('org/gradle')
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowResources('org/gradle')
+        }
 
         expect:
         canSeeResource('org/gradle/util/ClassLoaderTest.txt')
@@ -163,7 +186,9 @@ class FilteringClassLoaderTest extends Specification {
         cannotSeeResource('org/gradle/util/ClassLoaderTest.txt')
 
         and:
-        classLoader.allowResource('org/gradle/util/ClassLoaderTest.txt')
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowResource('org/gradle/util/ClassLoaderTest.txt')
+        }
 
         expect:
         canSeeResource('org/gradle/util/ClassLoaderTest.txt')
@@ -171,7 +196,9 @@ class FilteringClassLoaderTest extends Specification {
 
     void "can disallow packages"() {
         given:
-        classLoader.disallowPackage("org.junit")
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.disallowPackage("org.junit")
+        }
 
         expect:
         cannotLoadClass(Test)
@@ -181,8 +208,10 @@ class FilteringClassLoaderTest extends Specification {
 
     void "disallow wins over allow packages"() {
         given:
-        classLoader.disallowPackage("org.junit")
-        classLoader.allowPackage("org.junit")
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.disallowPackage("org.junit")
+            spec.allowPackage("org.junit")
+        }
 
         expect:
         cannotLoadClass(Test)
@@ -191,10 +220,12 @@ class FilteringClassLoaderTest extends Specification {
     void "visits self and parent"() {
         def visitor = Mock(ClassLoaderVisitor)
         given:
-        classLoader.allowClass(Test)
-        classLoader.allowPackage("org.junit")
-        classLoader.allowResource("a/b/c")
-        classLoader.disallowClass(Before.name)
+        withSpec { FilteringClassLoader.Spec spec ->
+            spec.allowClass(Test)
+            spec.allowPackage("org.junit")
+            spec.allowResource("a/b/c")
+            spec.disallowClass(Before.name)
+        }
 
         when:
         classLoader.visit(visitor)
@@ -255,13 +286,12 @@ class FilteringClassLoaderTest extends Specification {
     def "does not attempt to load not allowed class"() {
         given:
         def parent = Mock(ClassLoader, useObjenesis: false)
-        def loader = new FilteringClassLoader(parent)
-
-        and:
-        loader.allowPackage("good")
+        withSpec(parent) { FilteringClassLoader.Spec spec ->
+            spec.allowPackage("good")
+        }
 
         when:
-        loader.loadClass("good.Clazz")
+        classLoader.loadClass("good.Clazz")
 
         //noinspection GroovyAccessibility
         then:
@@ -269,7 +299,7 @@ class FilteringClassLoaderTest extends Specification {
         0 * parent._
 
         when:
-        loader.loadClass("bad.Clazz")
+        classLoader.loadClass("bad.Clazz")
 
         then:
         thrown(ClassNotFoundException)
@@ -291,5 +321,14 @@ class FilteringClassLoaderTest extends Specification {
         then:
         1 * visitor.visitSpec(spec)
         1 * visitor.visitParent(parent)
+    }
+
+    private void withSpec(ClassLoader parent = null, Closure cl) {
+        if (parent == null) {
+            parent = getClass().getClassLoader()
+        }
+        def spec = new FilteringClassLoader.Spec()
+        cl(spec)
+        this.classLoader = new FilteringClassLoader(parent, spec)
     }
 }

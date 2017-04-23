@@ -18,13 +18,16 @@ package org.gradle.integtests.tooling
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.executer.GradleDistribution
 import org.gradle.integtests.fixtures.executer.GradleHandle
-import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
 import org.gradle.integtests.tooling.fixture.TextUtil
 import org.gradle.integtests.tooling.fixture.ToolingApi
-import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.internal.time.CountdownTimer
+import org.gradle.internal.time.TimeProvider
+import org.gradle.internal.time.Timers
+import org.gradle.internal.time.TrueTimeProvider
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.tooling.GradleConnector
+import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.model.GradleProject
 import org.gradle.util.GradleVersion
 import spock.lang.Issue
@@ -33,6 +36,7 @@ class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
 
     final ToolingApi toolingApi = new ToolingApi(distribution, temporaryFolder)
     final GradleDistribution otherVersion = new ReleasedVersionDistributions().mostRecentFinalRelease
+    final TimeProvider timeProvider = new TrueTimeProvider()
 
     TestFile projectDir
 
@@ -50,10 +54,24 @@ class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
         model != null
     }
 
+    def "tooling api output reports 'CONFIGURE SUCCESSFUL' for model requests"() {
+        projectDir.file('build.gradle') << "assert gradle.gradleVersion == '${GradleVersion.current().version}'"
+
+        when:
+        def stdOut = new ByteArrayOutputStream()
+        toolingApi.withConnection { ProjectConnection connection ->
+            connection.model(GradleProject.class).setStandardOutput(stdOut).get()
+        }
+
+        then:
+        stdOut.toString().contains("CONFIGURE SUCCESSFUL")
+        !stdOut.toString().contains("BUILD SUCCESSFUL")
+    }
+
     def "tooling api uses the wrapper properties to determine which version to use"() {
         projectDir.file('build.gradle').text = """
 task wrapper(type: Wrapper) { distributionUrl = '${otherVersion.binDistribution.toURI()}' }
-task check << { assert gradle.gradleVersion == '${otherVersion.version.version}' }
+task check { doLast { assert gradle.gradleVersion == '${otherVersion.version.version}' } }
 """
         executer.withTasks('wrapper').run()
 
@@ -72,7 +90,7 @@ task check << { assert gradle.gradleVersion == '${otherVersion.version.version}'
         projectDir.file('build.gradle') << """
 task wrapper(type: Wrapper) { distributionUrl = '${otherVersion.binDistribution.toURI()}' }
 allprojects {
-    task check << { assert gradle.gradleVersion == '${otherVersion.version.version}' }
+    task check { doLast { assert gradle.gradleVersion == '${otherVersion.version.version}' } }
 }
 """
         projectDir.file('child').createDir()
@@ -91,6 +109,7 @@ allprojects {
     }
 
     def "can specify a gradle installation to use"() {
+        toolingApi.requireDaemons()
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -104,6 +123,7 @@ allprojects {
     }
 
     def "can specify a gradle distribution to use"() {
+        toolingApi.requireDaemons()
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -117,6 +137,7 @@ allprojects {
     }
 
     def "can specify a gradle version to use"() {
+        toolingApi.requireDaemons()
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -130,7 +151,6 @@ allprojects {
     }
 
     @Issue("GRADLE-2419")
-    @LeaksFileHandles
     def "tooling API does not hold JVM open"() {
         given:
         def buildFile = projectDir.file("build.gradle")
@@ -147,7 +167,7 @@ allprojects {
             apply plugin: 'application'
 
             repositories {
-                maven { url "${new IntegrationTestBuildContext().libsRepo.toURI()}" }
+                maven { url "${buildContext.libsRepo.toURI()}" }
                 maven { url "https://repo.gradle.org/gradle/repo" }
             }
 
@@ -164,19 +184,21 @@ allprojects {
                 systemProperty 'org.gradle.daemon.registry.base', "${TextUtil.escapeString(projectDir.file("daemon").absolutePath)}"
             }
 
-            task thing << {
-                def startMarkerFile = file("start.marker")
-                startMarkerFile << new Date().toString()
-                println "start marker written (\$startMarkerFile)"
+            task thing {
+                doLast {
+                    def startMarkerFile = file("start.marker")
+                    startMarkerFile << new Date().toString()
+                    println "start marker written (\$startMarkerFile)"
 
-                def stopMarkerFile = file("stop.marker")
-                def startedAt = System.currentTimeMillis()
-                println "waiting for stop marker (\$stopMarkerFile)"
-                while(!stopMarkerFile.exists()) {
-                    if (System.currentTimeMillis() - startedAt > $stateChangeTimeoutMs) {
-                        throw new Exception("Timeout ($stateChangeTimeoutMs ms) waiting for stop marker")
+                    def stopMarkerFile = file("stop.marker")
+                    def startedAt = System.currentTimeMillis()
+                    println "waiting for stop marker (\$stopMarkerFile)"
+                    while(!stopMarkerFile.exists()) {
+                        if (System.currentTimeMillis() - startedAt > $stateChangeTimeoutMs) {
+                            throw new Exception("Timeout ($stateChangeTimeoutMs ms) waiting for stop marker")
+                        }
+                        sleep $retryIntervalMs
                     }
-                    sleep $retryIntervalMs
                 }
             }
         """
@@ -211,10 +233,12 @@ allprojects {
                     try {
                         // Configure the build
                         BuildLauncher launcher = connection.newBuild();
-                        launcher.forTasks("thing").withArguments("-u");
+                        launcher.forTasks("thing");
+                        launcher.withArguments("-u");
                         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
                         launcher.setStandardOutput(outputStream);
                         launcher.setStandardError(outputStream);
+                        launcher.setColorOutput(true);
 
                         // Run the build
                         launcher.run();
@@ -228,16 +252,18 @@ allprojects {
 
         when:
         GradleHandle handle = executer.inDirectory(projectDir)
-                .withTasks('run')
-                .start()
+            .expectDeprecationWarning() // tapi on java 6
+            .withTasks('run')
+            .start()
 
         then:
         // Wait for the tooling API to start the build
         def startMarkerFile = projectDir.file("start.marker")
         def foundStartMarker = startMarkerFile.exists()
-        def startAt = System.currentTimeMillis()
+
+        CountdownTimer startTimer = Timers.startTimer(startTimeoutMs)
         while (handle.running && !foundStartMarker) {
-            if (System.currentTimeMillis() - startAt > startTimeoutMs) {
+            if (startTimer.hasExpired()) {
                 throw new Exception("timeout waiting for start marker")
             } else {
                 sleep retryIntervalMs
@@ -251,13 +277,13 @@ allprojects {
 
         // Signal the build to finish
         def stopMarkerFile = projectDir.file("stop.marker")
-        def stopMarkerAt = System.currentTimeMillis()
+        def stopTimer = Timers.startTimer(stopTimeoutMs)
         stopMarkerFile << new Date().toString()
 
         // Does the tooling API hold the JVM open (which will also hold the build open)?
         while (handle.running) {
-            if (System.currentTimeMillis() - stopMarkerAt > stopTimeoutMs) {
-                throw new Exception("timeout after placing stop marker (JVM might have been held open")
+            if (stopTimer.hasExpired()) {
+                throw new Exception("timeout after placing stop marker (JVM might have been held open)")
             }
             sleep retryIntervalMs
         }

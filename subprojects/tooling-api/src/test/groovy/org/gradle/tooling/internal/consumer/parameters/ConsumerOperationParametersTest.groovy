@@ -19,6 +19,9 @@ package org.gradle.tooling.internal.consumer.parameters
 import com.google.common.collect.Sets
 import org.gradle.internal.classpath.DefaultClassPath
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter
+import org.gradle.tooling.internal.gradle.DefaultBuildIdentifier
+import org.gradle.tooling.internal.gradle.DefaultProjectIdentifier
+import org.gradle.tooling.internal.consumer.converters.FixedBuildIdentifierProvider
 import org.gradle.tooling.internal.gradle.TaskListingLaunchable
 import org.gradle.tooling.internal.protocol.InternalLaunchable
 import org.gradle.tooling.model.TaskSelector
@@ -72,10 +75,14 @@ class ConsumerOperationParametersTest extends Specification {
 
         then:
         params.tasks == [':a', ':b', ':lib:b']
-        params.launchables == []
+        params.launchables == null
     }
 
     def adapt(def object) {
-        return new ProtocolToModelAdapter().adapt(TaskSelector, object)
+        return new FixedBuildIdentifierProvider(id()).applyTo(new ProtocolToModelAdapter().builder(TaskSelector)).build(object)
+    }
+
+    def id() {
+        return new DefaultProjectIdentifier(new DefaultBuildIdentifier(new File("foo")), ":")
     }
 }

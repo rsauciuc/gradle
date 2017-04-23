@@ -14,7 +14,7 @@ Specific sub streams have been broken out into other concurrent specs.
 Potential stories and ideas.
 Unordered and not all appropriately story sized.
 
-## Ordering
+## Rule ordering
 
 - Node ancestry should be self closed before node is used as an input, to pick up rules and configuration performed by a rule with ancestor as subject.
 
@@ -40,16 +40,27 @@ Unordered and not all appropriately story sized.
     - Should include some information about the identity of the input, or its display name, and probably how it was referenced in the code
     - Should provide some information about what the mutation was.
 
+## Software model
+
+- Validate (or otherwise encode) the names of components, binaries, LSS, etc so that the result makes sense for file names and task names. 
+
+## Documentation
+
+- How to write a rule based plugin is not documented
+- Migration guide and/or build migration assistance
+
 ## Reporting
 
 - Model report shows too much detail by default, should probably not include tasks and just show 'data'
+- Model report should be robust in the face of failures, as it will likely be used to diagnose such failures.
 - Values for properties with primitive and other scalar types do not show up in model report unless they have been set
 - Value for property with type collection of scalars is not shown in model report unless value has been set.
 - `null` value for mutable property with type collection of scalars is not shown in model report (but empty list is).
+- Creator for tasks defined by a `@BinaryTask` rule are wrong
+- Creator for binaries defined by a `@ComponentBinaries` rule contain a bunch of confusing and irrelevant detail
 
 ## RuleSource
 
-- How to write a rule based plugin is not documented (need to tidy up docs on `PluginAware` and `ObjectConfigurationAction`)
 - Methods of rule source classes must be private, or be declared as rules, but cannot be both.
     - Remove constraints on private methods (eg allow parameterized private methods).
 - Allow helper (i.e. non rule) methods to be parameterized for types in rule source plugins (currently we do not allow any parameterized methods)
@@ -62,6 +73,14 @@ Unordered and not all appropriately story sized.
 - Documentation does not mention copy-on-write semantics for mutable properties of type scalar collection.
 - Support `Collection` of scalar as property type, at least for mutable property.
 
+### Inspection
+
+- Collect all validation problems
+- Detect zero-args constructors (or allow)
+- Detect overrides of Groovy MOP methods (or allow)
+
+Same for `RuleSource` inspection
+
 ## Cleanup
 
 We've introduced different mechanisms for deferring configuration.
@@ -69,12 +88,14 @@ These should be rationalised and ideally replaced with model rules.
 
 - DeferredConfigurable
 - TaskContainer.addPlaceholderAction
-- SonarRunnerExtension.sonarProperties
 - Move native plugin suite to new mechanism
 - Move publishing plugin suite to new mechanism
 
 ## Tasks
 
+- Support build items as input, infer dependencies
+- Support `copy.from $.some.buildItem`
+- Support `dependsOn $.tasks.withType(t)`
 - Remove `TaskContainer` view from model space
 - Prevent illegal mutation of `Task` in model space
 - Task command line arguments are applied _after_ all configuration rules
@@ -115,6 +136,7 @@ These should be rationalised and ideally replaced with model rules.
 - Sugar for common types of external (volatile) inputs
 - Short circuit invalidation propagation downstream by stopping transitive invalidation when rebuilt element matches “previous” state
 - Model is reused when changing between different logical projects
+- `BasePlugin.configureAssemble()` implicitly retaining the project instance which is a problem for reuse
 
 ## Migration/Bridging
 

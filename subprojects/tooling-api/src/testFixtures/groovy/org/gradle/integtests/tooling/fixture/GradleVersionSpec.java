@@ -49,7 +49,7 @@ public class GradleVersionSpec {
             };
         }
 
-        List<Spec> specs = new ArrayList<Spec>();
+        List<Spec<GradleVersion>> specs = new ArrayList<Spec<GradleVersion>>();
         String[] patterns = trimmed.split("\\s+");
         for (String value : patterns) {
             if (value.startsWith(">=")) {
@@ -80,11 +80,21 @@ public class GradleVersionSpec {
                         return element.getBaseVersion().compareTo(maxVersion) < 0;
                     }
                 });
+            } else if (value.startsWith("!")) {
+                final GradleVersion excludedVersion = GradleVersion.version(value.substring(1));
+                specs.add(new Spec<GradleVersion>() {
+                    public boolean isSatisfiedBy(GradleVersion element) {
+                        return !element.getBaseVersion().equals(excludedVersion);
+                    }
+                });
             } else {
-                throw new RuntimeException(String.format("Unsupported version range '%s' specified in constraint '%s'. Supported formats: '>=nnn' or '<=nnn' or space-separate patterns", value, constraint));
+                throw new RuntimeException(String.format("Unsupported version range '%s' specified in constraint '%s'. Supported formats: '>=nnn', '>nnn', '<=nnn', '<nnn', '!nnn' or space-separate patterns", value, constraint));
             }
         }
-        return Specs.and(specs.toArray(new Spec[specs.size()]));
+        if (specs.size() == 1) {
+            return specs.get(0);
+        }
+        return Specs.intersect(specs);
     }
 
 }

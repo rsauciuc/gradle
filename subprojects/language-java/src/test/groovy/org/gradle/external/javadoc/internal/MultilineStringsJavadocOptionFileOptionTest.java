@@ -16,6 +16,7 @@
 
 package org.gradle.external.javadoc.internal;
 
+import com.google.common.collect.Lists;
 import org.jmock.Expectations;
 import org.jmock.integration.junit4.JUnit4Mockery;
 import org.jmock.lib.legacy.ClassImposteriser;
@@ -37,7 +38,7 @@ public class MultilineStringsJavadocOptionFileOptionTest {
     public void setUp() {
         context.setImposteriser(ClassImposteriser.INSTANCE);
         writerContextMock = context.mock(JavadocOptionFileWriterContext.class);
-        linksOption = new MultilineStringsJavadocOptionFileOption(optionName);
+        linksOption = new MultilineStringsJavadocOptionFileOption(optionName, Lists.<String>newArrayList());
     }
 
     @Test
@@ -53,7 +54,7 @@ public class MultilineStringsJavadocOptionFileOptionTest {
         context.checking(new Expectations() {{
             final List<String> tempList = new ArrayList<String>();
             tempList.add(extDocUrl);
-            one(writerContextMock).writeMultilineValuesOption(optionName, tempList);
+            oneOf(writerContextMock).writeMultilineValuesOption(optionName, tempList);
         }});
 
         linksOption.writeCollectionValue(writerContextMock);
@@ -70,9 +71,9 @@ public class MultilineStringsJavadocOptionFileOptionTest {
         context.checking(new Expectations() {{
             tempList.add(docUrl1);
             tempList.add(docUrl2);
-            one(writerContextMock).writeMultilineValuesOption(optionName, tempList);
+            oneOf(writerContextMock).writeMultilineValuesOption(optionName, tempList);
         }});
-       
+
         linksOption.writeCollectionValue(writerContextMock);
     }
 }

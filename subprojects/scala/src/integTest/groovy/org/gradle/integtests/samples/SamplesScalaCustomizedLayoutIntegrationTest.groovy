@@ -18,7 +18,7 @@ package org.gradle.integtests.samples
 
 import org.gradle.integtests.fixtures.AbstractIntegrationTest
 import org.gradle.integtests.fixtures.DefaultTestExecutionResult
-import org.gradle.integtests.fixtures.ForkScalaCompileInDaemonModeFixture
+import org.gradle.integtests.fixtures.ZincScalaCompileFixture
 import org.gradle.integtests.fixtures.Sample
 import org.gradle.test.fixtures.file.TestFile
 import org.junit.Rule
@@ -27,7 +27,7 @@ import org.junit.Test
 class SamplesScalaCustomizedLayoutIntegrationTest extends AbstractIntegrationTest {
 
     @Rule public final Sample sample = new Sample(testDirectoryProvider, 'scala/customizedLayout')
-    @Rule public final ForkScalaCompileInDaemonModeFixture forkScalaCompileInDaemonModeFixture = new ForkScalaCompileInDaemonModeFixture(executer, testDirectoryProvider)
+    @Rule public final ZincScalaCompileFixture zincScalaCompileFixture = new ZincScalaCompileFixture(executer, testDirectoryProvider)
 
     @Test
     public void canBuildJar() {
@@ -38,15 +38,15 @@ class SamplesScalaCustomizedLayoutIntegrationTest extends AbstractIntegrationTes
 
         // Check tests have run
         def result = new DefaultTestExecutionResult(projectDir)
-        result.assertTestClassesExecuted('org.gradle.sample.impl.PersonImplTest')
+        result.assertTestClassesExecuted('org.gradle.sample.PersonSpec')
 
         // Check contents of Jar
         TestFile jarContents = file('jar')
-        projectDir.file("build/libs/customizedLayout.jar").unzipTo(jarContents)
+        projectDir.file("build/libs/customizedLayout-1.0.jar").unzipTo(jarContents)
         jarContents.assertHasDescendants(
                 'META-INF/MANIFEST.MF',
-                'org/gradle/sample/api/Person.class',
-                'org/gradle/sample/impl/PersonImpl.class'
+                'org/gradle/sample/Named.class',
+                'org/gradle/sample/Person.class'
         )
     }
 }

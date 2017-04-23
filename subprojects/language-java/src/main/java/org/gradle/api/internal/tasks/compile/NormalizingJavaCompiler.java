@@ -16,7 +16,6 @@
 package org.gradle.api.internal.tasks.compile;
 
 import com.google.common.base.Joiner;
-import com.google.common.collect.Lists;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.file.collections.SimpleFileCollection;
 import org.gradle.api.internal.tasks.SimpleWorkResult;
@@ -30,6 +29,8 @@ import org.gradle.util.CollectionUtils;
 import java.io.File;
 import java.util.List;
 
+import static org.gradle.internal.FileUtils.hasExtension;
+
 /**
  * A Java {@link Compiler} which does some normalization of the compile configuration and behaviour before delegating to some other compiler.
  */
@@ -41,9 +42,10 @@ public class NormalizingJavaCompiler implements Compiler<JavaCompileSpec> {
         this.delegate = delegate;
     }
 
+    @Override
     public WorkResult execute(JavaCompileSpec spec) {
         resolveAndFilterSourceFiles(spec);
-        resolveClasspath(spec);
+        spec.getCompileOptions().setAnnotationProcessorPath(null); // This is not used (the processor path is on the spec)
         resolveNonStringsInCompilerArgs(spec);
         logSourceFiles(spec);
         logCompilerArguments(spec);
@@ -55,15 +57,11 @@ public class NormalizingJavaCompiler implements Compiler<JavaCompileSpec> {
         // which silently excludes files not ending in .java
         FileCollection javaOnly = spec.getSource().filter(new Spec<File>() {
             public boolean isSatisfiedBy(File element) {
-                return element.getName().endsWith(".java");
+                return hasExtension(element, ".java");
             }
         });
 
         spec.setSource(new SimpleFileCollection(javaOnly.getFiles()));
-    }
-
-    private void resolveClasspath(JavaCompileSpec spec) {
-        spec.setClasspath(new SimpleFileCollection(Lists.newArrayList(spec.getClasspath())));
     }
 
     private void resolveNonStringsInCompilerArgs(JavaCompileSpec spec) {

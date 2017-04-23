@@ -6,306 +6,131 @@ Here are the new features introduced in this Gradle release.
 IMPORTANT: if this is a patch release, ensure that a prominent link is included in the foreword to all releases of the same minor stream.
 Add-->
 
-### Performance improvements
+### Public type for representing lazily evaluated properties
 
-Should mention Java compile avoidance
+Because Gradle's build lifecycle clearly distinguishes between configuration phase and execution phase the evaluation of property
+ values has to be deferred under certain conditions to properly capture end user input. A typical use case is the mapping of
+ extension properties to custom task properties as part of a plugin implementation. In the past, many plugin developers were forced to solve evaluation order problems by using the concept of convention mapping, an internal API in Gradle subject to change.
 
-### Software model changes
+This release of Gradle introduces a mutable type to the public API representing a property with state. The relevant interface is called [`PropertyState`](javadoc/org/gradle/api/provider/PropertyState.html). An instance of this type can be created through the method [`Project.property(Class)`](javadoc/org/gradle/api/Project.html#property-java.lang.Class-).
 
-TBD - Binary names are now scoped to the component they belong to. This means multiple components can have binaries with a given name. For example, several library components
-might have a `jar` binary. This allows binaries to have names that reflect their relationship to the component, rather than their absolute location in the software model.
+The following example demonstrates how to use the property state API to map an extension property to a custom task property without
+running into evaluation ordering issues:
 
-#### Component level dependencies for Java libraries
+    apply plugin: GreetingPlugin
 
-In most cases it is more natural and convenient to define dependencies per component rather than individually on a source set and it is now possible to do so when defining a Java library.
-
-Example:
-
-    apply plugin: "jvm-component"
-
-    model {
-      components {
-        main(JvmLibrarySpec) {
-          dependencies {
-            library "core"
-          }
-        }
-
-        core(JvmLibrarySpec) {
-        }
-      }
+    greeting {
+        message = 'Hi from Gradle'
+        outputFiles = files('a.txt', 'b.txt')
     }
 
-Dependencies declared this way will apply to all source sets for the component.
-
-#### Managed internal views for binaries and components
-
-Now it is possible to attach a `@Managed` internal view to any `BinarySpec` or `ComponentSpec` type. This allows pluign authors to attach extra properties to already registered binary and component types like `JarBinarySpec`.
-
-Example:
-
-    @Managed
-    interface MyJarBinarySpecInternal extends JarBinarySpec {
-        String getInternal()
-        void setInternal(String internal)
-    }
-
-    class CustomPlugin extends RuleSource {
-        @BinaryType
-        public void register(BinaryTypeBuilder<JarBinarySpec> builder) {
-            builder.internalView(MyJarBinarySpecInternal)
-        }
-
-        @Mutate
-        void mutateInternal(ModelMap<MyJarBinarySpecInternal> binaries) {
-            // ...
-        }
-    }
-
-    apply plugin: "jvm-component"
-
-    model {
-        components {
-            myComponent(JvmLibrarySpec) {
-                binaries.withType(MyJarBinarySpecInternal) { binary ->
-                    binary.internal = "..."
-                }
+    class GreetingPlugin implements Plugin<Project> {
+        void apply(Project project) {
+            // Add the 'greeting' extension object
+            def extension = project.extensions.create('greeting', GreetingPluginExtension, project)
+            // Add a task that uses the configuration
+            project.tasks.create('hello', Greeting) {
+                message = extension.messageProvider
+                outputFiles = extension.outputFiles
             }
         }
     }
 
-Note: `@Managed` internal views registered on unmanaged types (like `JarBinarySpec`) are not yet visible in the top-level `binaries` container, and thus it's impossible to do things like:
+    class GreetingPluginExtension {
+        final PropertyState<String> message
+        final ConfigurableFileCollection outputFiles
 
-    // This won't work:
-    model {
-        binaries.withType(MyJarBinarySpecInternal) {
-            // ...
+        GreetingPluginExtension(Project project) {
+            message = project.property(String)
+            setMessage('Hello from GreetingPlugin')
+            outputFiles = project.files()
+        }
+
+        String getMessage() {
+            message.get()
+        }
+
+        Provider<String> getMessageProvider() {
+            message
+        }
+
+        void setMessage(String message) {
+            this.message.set(message)
+        }
+
+        FileCollection getOutputFiles() {
+            outputFiles
+        }
+
+        void setOutputFiles(FileCollection outputFiles) {
+            this.outputFiles.setFrom(outputFiles)
         }
     }
 
-This feature is available for subtypes of `BinarySpec` and `ComponentSpec`.
+    class Greeting extends DefaultTask {
+        final PropertyState<String> message = project.property(String)
+        final ConfigurableFileCollection outputFiles = project.files()
 
-#### Managed binary and component types
-
-The `BinarySpec` and `ComponentSpec` types can now be extended via `@Managed` subtypes, allowing for declaration of `@Managed` components and binaries without having to provide a default implementation. `LibrarySpec` and `ApplicationSpec` can also be extended in this manner.
-
-Example:
-
-    @Managed
-    interface SampleLibrarySpec extends LibrarySpec {
-        String getPublicData()
-        void setPublicData(String publicData)
-    }
-
-    class RegisterComponentRules extends RuleSource {
-        @ComponentType
-        void register(ComponentTypeBuilder<SampleLibrarySpec> builder) {
+        @Input
+        String getMessage() {
+            message.get()
         }
-    }
-    apply plugin: RegisterComponentRules
 
-    model {
-        components {
-            sampleLib(SampleLibrarySpec) {
-                publicData = "public"
+        void setMessage(String message) {
+            this.message.set(message)
+        }
+
+        void setMessage(Provider<String> message) {
+            this.message.set(message)
+        }
+
+        FileCollection getOutputFiles() {
+            outputFiles
+        }
+
+        void setOutputFiles(FileCollection outputFiles) {
+            this.outputFiles.setFrom(outputFiles)
+        }
+
+        @TaskAction
+        void printMessage() {
+            getOutputFiles().each {
+                it.text = getMessage()
             }
         }
     }
 
+### Build Cache Improvements
 
-#### Default implementation for unmanaged base binary and component types
+#### Remote build cache honors `--offline` 
 
-It is now possible to declare a default implementation for a base component or a binary type, and extend it via further managed subtypes.
+When running with `--offline`, Gradle will disable the remote build cache.
 
-    interface MyBaseBinarySpec extends BinarySpec {}
+#### Detecting overlapping task outputs
 
-    class MyBaseBinarySpecImpl extends BaseBinarySpec implements MyBaseBinarySpec {}
+When two tasks write into the same directory, Gradle will now disable task output caching for the second task to execute. This prevents issues where task outputs for a different task are captured for the wrong build cache key. On subsequent builds, if overlapping outputs are detected, Gradle will also prevent you from loading task outputs from the cache if it would remove existing outputs from another task.
 
-    class BasePlugin extends RuleSource {
-        @ComponentType
-        public void registerMyBaseBinarySpec(ComponentTypeBuilder<MyBaseBinarySpec> builder) {
-            builder.defaultImplementation(MyBaseBinarySpecImpl.class);
-        }
-    }
+You can diagnose overlapping task output issues by running Gradle at the `--info` log level. If you are using [Gradle Build Scans](https://gradle.com/scans/get-started), the same detailed reason for disabling task output caching will be included in the build timeline. 
 
-    @Managed
-    interface MyCustomBinarySpec extends BaseBinarySpec {
-        // Add some further managed properties
-    }
+#### Stricter validation of task properties
 
-    class CustomPlugin extends RuleSource {
-        @ComponentType
-        public void registerMyCustomBinarySpec(ComponentTypeBuilder<MyCustomBinarySpec> builder) {
-            // No default implementation required
-        }
-    }
+When a plugin is built with the [Java Gradle Plugin Development Plugin](userguide/javaGradle_plugin.html), custom task types declared in the plugin will go through validation. In Gradle 4.0, additional problems are now detected. 
 
-This functionality is available for unmanaged types extending `ComponentSpec` and `BinarySpec`.
+A warning is shown when:
+* a task has a property without an input or output annotation (this might indicate a forgotten input or output),
+* a task has `@Input` on a `File` property (instead of using `@InputFile` of `@InputDirectory`),
+* a task declares conflicting types for a property (say, both `@InputFile` and `@InputDirectory`),
+* a cacheable task declares a property without specifying `@PathSensitive`. In such a case, we default to `ABSOLUTE` path sensitivity, which will prevent the task's outputs from being shared across different users via a shared cache.
 
-#### Internal views for unmanaged binary and component types
+For more info on using task property annotations, see the [user guide chapter](userguide/more_about_tasks.html#sec:task_input_output_annotations).
 
-The goal of the new internal views feature is for plugin authors to be able to draw a clear line between public and internal APIs of their plugins regarding model elements.
-By declaring some functionality in internal views (as opposed to exposing it on a public type), the plugin author can let users know that the given functionality is intended
-for the plugin's internal bookkeeping, and should not be considered part of the public API of the plugin.
+### Default Zinc compiler upgraded from 0.3.7 to 0.3.13
 
-Internal views must be interfaces, but they don't need to extend the public type they are registered for.
+This will take advantage of performance optimizations in the latest [Zinc](https://github.com/typesafehub/zinc) releases.
 
-**Example:** A plugin could introduce a new binary type like this:
-
-    /**
-     * Documented public type exposed by the plugin
-     */
-    interface MyBinarySpec extends BinarySpec {
-        // Functionality exposed to the public
-    }
-
-    // Undocumented internal type used by the plugin itself only
-    interface MyBinarySpecInternal extends MyBinarySpec {
-        String getInternalData();
-        void setInternalData(String internalData);
-    }
-
-    class MyBinarySpecImpl implements MyBinarySpecInternal {
-        private String internalData;
-        String getInternalData() { return internalData; }
-        void setInternalData(String internalData) { this.internalData = internalData; }
-    }
-
-    class MyBinarySpecPlugin extends RuleSource {
-        @BinaryType
-        public void registerMyBinarySpec(BinaryTypeBuilder<MyBinarySpec> builder) {
-            builder.defaultImplementation(MyBinarySpecImpl.class);
-            builder.internalView(MyBinarySpecInternal.class);
-        }
-    }
-
-With this setup the plugin can expose `MyBinarySpec` to the user as the public API, while it can attach some additional information to each of those binaries internally.
-
-Internal views registered for an unmanaged public type must be unmanaged themselves, and the default implementation of the public type must implement the internal view
-(as `MyBinarySpecImpl` implements `MyBinarySpecInternal` in the example above).
-
-It is also possible to attach internal views to `@Managed` types as well:
-
-    @Managed
-    interface MyManagedBinarySpec extends MyBinarySpec {}
-
-    @Managed
-    interface MyManagedBinarySpecInternal extends MyManagedBinarySpec {}
-
-    class MyManagedBinarySpecPlugin extends RuleSource {
-        @BinaryType
-        public void registerMyManagedBinarySpec(BinaryTypeBuilder<MyManagedBinarySpec> builder) {
-            builder.internalView(MyManagedBinarySpecInternal.class);
-        }
-    }
-
-Internal views registered for a `@Managed` public type must themselves be `@Managed`.
-
-This functionality is available for types extending `ComponentSpec` and `BinarySpec`.
-
-### TestKit dependency decoupled from Gradle core dependencies
-
-The method `DependencyHandler.gradleTestKit()` creates a dependency on the classes of the Gradle TestKit runtime classpath. In previous versions
-of Gradle the TestKit dependency also declared transitive dependencies on other Gradle core classes and external libraries that ship with the Gradle distribution. This might lead to
-version conflicts between the runtime classpath of the TestKit and user-defined libraries required for functional testing. A typical example for this scenario would be Google Guava.
-With this version of Gradle, the Gradle TestKit dependency is represented by a fat and shaded JAR file containing Gradle core classes and classes of all required external dependencies
-to avoid polluting the functional test runtime classpath.
-
-### Visualising a project's build script dependencies
-
-The new `buildEnvironment` task can be used to visualise the project's `buildscript` dependencies.
-This task is implicitly available for all projects, much like the existing `dependencies` task.
-
-The `buildEnvironment` task can be used to understand how the declared dependencies of project's build script actually resolve,
-including transitive dependencies.
-
-The feature was kindly contributed by [Ethan Hall](https://github.com/ethankhall).
-
-### Checkstyle HTML report
-
-The [`Checkstyle` task](dsl/org.gradle.api.plugins.quality.Checkstyle.html) now produces a HTML report on failure in addition to the existing XML report.
-The, more human friendly, HTML report is now advertised instead of the XML report when it is available.
-
-This feature was kindly contributed by [Sebastian Schuberth](https://github.com/sschuberth).
-
-### Model rules improvements
-
-#### Support for `LanguageSourceSet` model elements
-
-This release facilitates adding source sets (subtypes of `LanguageSourceSet`) to arbitrary locations in the model space. A `LanguageSourceSet` can be attached to any @Managed type as a property, or used for
-the elements of a ModelSet or ModelMap, or as a top level model element in it's own right.
-
-### Support for external dependencies in the 'jvm-components' plugin
-
-It is now possible to reference external dependencies when building a `JvmLibrary` using the `jvm-component` plugin.
-
-TODO: Expand this and provide a DSL example.
-
-### Model DSL improvements
-
-TODO: `ModelMap` creation and configuration DSL syntax is now treated as nested rule. For example, an element can be configured using the configuration of a sibling as input:
-
-    model {
-        components {
-            mylib { ... }
-            test {
-                targetPlatform = $.components.mylib.targetPlatform
-            }
-        }
-    }
-
-This means that a task can be configured using another task as input:
-
-    model {
-        tasks {
-            jar { ... }
-            dist(Zip) {
-                def jar = $.tasks.jar // The `jar` task has been fully configured and will not change any further
-                from jar.output
-                into someDir
-            }
-        }
-    }
-
-This is also available for the various methods of `ModelMap`, such as `all` or `withType`:
-
-    model {
-        components {
-            all {
-                // Adds a rule for each component
-                ...
-            }
-            withType(JvmLibrarySpec) {
-                // Adds a rule for each JvmLibrarySpec component
-                ...
-            }
-        }
-    }
-
-TODO: The properties of a `@Managed` type can be configured using nested configure methods:
-
-    model {
-        components {
-            mylib {
-                sources {
-                    // Adds a rule to configure `mylib.sources`
-                    ..
-                }
-                binaries {
-                    // Adds a rule to configure `mylib.sources`
-                    ...
-                }
-            }
-        }
-    }
-
-This is automatically added for any property whose type is `@Managed`, or a `ModelMap<T>` or `ModelSet<T>`.
-
-### Tooling API exposes source language level on EclipseProject model
-
-The `EclipseProject` model now exposes the Java source language level via the
-<a href="javadoc/org/gradle/tooling/model/eclipse/EclipseProject.html#getJavaSourceSettings">`getJavaSourceSettings()`</a> method.
-IDE providers use this method to automatically determine the source language level. In turn users won't have to configure that anymore via the Gradle Eclipse plugin.
+<!--
+### Example new and noteworthy
+-->
 
 ## Promoted features
 
@@ -323,9 +148,9 @@ The following are the features that have been promoted in this Gradle release.
 ## Deprecations
 
 Features that have become superseded or irrelevant due to the natural evolution of Gradle become *deprecated*, and scheduled to be removed
-in the next major Gradle version (Gradle 3.0). See the User guide section on the “[Feature Lifecycle](userguide/feature_lifecycle.html)” for more information.
+in the next major Gradle version (Gradle 4.0). See the User guide section on the “[Feature Lifecycle](userguide/feature_lifecycle.html)” for more information.
 
-The following are the newly deprecated items in this Gradle release. If you have concerns about a deprecation, please raise it via the [Gradle Forums](http://discuss.gradle.org).
+The following are the newly deprecated items in this Gradle release. If you have concerns about a deprecation, please raise it via the [Gradle Forums](https://discuss.gradle.org).
 
 <!--
 ### Example deprecation
@@ -333,46 +158,94 @@ The following are the newly deprecated items in this Gradle release. If you have
 
 ## Potential breaking changes
 
-### Changes to TestKit's runtime classpath
+### maven-publish and ivy-publish mirror multi-project behavior
 
-- External dependencies e.g. Google Guava brought in by Gradle core libraries when using the TestKit runtime classpath are no longer usable in functional test code. Any external dependency
-required by the test code needs to be declared for the test classpath.
+When using the `java` plugin, all `compile` and `runtime` dependencies will now be mapped to the `compile` scope, i.e. "leaked" into the consumer's compile classpath. This is in line with how
+ these legacy configurations work in multi-project builds. We strongly encourage you to use the `api`(java-library plugin only), `implementation` and `runtimeOnly` configurations instead. These
+ are mapped as expected, with `api` being exposed to the consumer's compile classpath and `implementation` and `runtimeOnly` only available on the consumer's runtime classpath.
+<!--
+### Example breaking change
+-->
 
-### Changes to model rules DSL
+### Changes to previously deprecated APIs
 
-- Properties and methods from owner closures are no longer visible.
+- The `JacocoPluginExtension` methods `getLogger()`, `setLogger(Logger)` are removed.
+- The `JacocoTaskExtension` methods `getClassDumpFile()`, `setClassDumpFile(File)`, `getAgent()` and `setAgent(JacocoAgentJar)` are removed.
+- Removed constructor `AccessRule(Object, Object)`.
+- Removed constructor `ProjectDependency(String, String)` and the methods `getGradlePath()`, `setGradlePath(String)`.
+- Removed constructor `WbDependentModule(Object)`.
+- Removed constructor `WbProperty(Object)`.
+- Removed constructor `WbResource(Object)`.
+- Removed constructor `JarDirectory(Object, Object)`.
+- Removed constructor `Jdk(Object, Object, Object, Object)`.
+- Removed constructor `ModuleDependency(Object, Object)`.
+- Moved classes `RhinoWorkerHandleFactory` and `RhinoWorkerUtils` into internal package.
+- Removed `RhinoWorker`.
+- Removed constructor `EarPluginConvention(Instantiator)`.
+- Removed the method `registerWatchPoints(FileSystemSubset.Builder)` from `FileCollectionDependency`.
+- Removed the method `getConfiguration()` from `ModuleDependency`.
+- Removed the method `getProjectConfiguration()` from `ProjectDependency`.
+- Removed class `BuildCache`.
+- Removed class `MapBasedBuildCache`.
+- Removed class `ActionBroadcast`.
+- Removed the [Gradle GUI](https://docs.gradle.org/3.5/userguide/tutorial_gradle_gui.html). All classes for this feature have been removed as well as all leftovers supporting class from the Open API partly removed due to deprecation in Gradle 2.0.
+- Removed the annotation `@OrderSensitive` and the method `TaskInputFilePropertyBuilder.orderSensitive`.
+- Removed `dependencyCacheDir` getter and setters in java plugin, `JavaCompileSpec`, and `CompileOptions`
+- Removed Ant <depend> related classes `AntDepend`, `AntDependsStaleClassCleaner`, and `DependOptions`
+- Removed `Javadoc#setOptions`
+- Removed `Manifest.writeTo(Writer)`. Please use `Manifest.writeTo(Object)`
+- Removed `TaskInputs.source()` and `sourceDir()`. Please use `TaskInputs.file().skipWhenEmpty()`, `files().skipWhenEmpty()` and `dir().skipWhenEmpty()`.
+- Chaining calls to `TaskInputs.file()`, `files()`, `dir()` and `TaskOutputs.file()`, `files()` and `dir()` are not supported anymore.
+- Removed `TaskOutputs.doNotCacheIf(Spec)`, use `doNotCacheIf(String, Spec)` instead.
 
-### Changes to incubating software model
+The deprecated `jetty` plugin has been removed. We recommend using the [Gretty plugin](https://github.com/akhikhl/gretty) for developing Java web applications.
+The deprecated `pluginRepositories` block for declaring custom plugin repositories has been removed in favor of `pluginManagement.repositories`.
 
-- `BinarySpec.name` should no longer be considered a unique identifier for the binary within a project.
-- The name for the 'build' task for a binary is now qualified with the name of its component. For example, `jar` in `mylib` will have a build task called 'mylibJar'
-- The name for the compile tasks for a binary is now qualified with the name of its component.
-- JVM libraries have a binary called `jar` rather than one qualified with the library name.
-- When building a JVM library with multiple variants, the task and output directory names have changed. The library name is now first.
-- The top-level `binaries` container is now a `ModelMap` instead of a `DomainObjectContainer`. It is still accessible as `BinaryContainer`.
-- `ComponentSpec.sources` and `BinarySpec.sources` now have true `ModelMap` semantics. Elements are created and configured on demand, and appear in the model report.
-- It is no longer possible to configure `BinarySpec.sources` from the top-level `binaries` container: this functionality will be re-added in a subsequent release.
-- `FunctionalSourceSet` is now a subtype of `ModelMap`, and no longer extends `Named`
-- The implementation object of a `ComponentSpec`, `BinarySpec` or `LanguageSourceSet`, if defined, is no longer visible. These elements can only be accessed using their
-public types or internal view types.
+### Adding copy specs is not allowed during task execution of a `AbstractCopyTask` task
 
-### Changes to incubating native software model
+You can no longer add copy specs to a copy (like `Copy` and `Sync`) or archive task (like `Zip` and `Tar`) when the task is executing. Tasks that used this behavior could produce incorrect results and not honor task dependencies. 
 
-- Task names have changed for components with multiple variants. The library or executable name is now first.
-- `org.gradle.language.PreprocessingTool` has moved to `org.gradle.nativeplatform.PreprocessingTool`
-- TODO: Changes to discovered inputs/include paths
+Starting with Gradle 4.0, builds that rely on this behavior will fail.  Previously, Gradle only failed if the task was cacheable and emitted a warning otherwise. 
+
+```groovy
+// This task adds a copy spec during the execution phase.
+task copy(type: Copy) {
+    from ("some-dir")
+    into ("build/output")
+
+    doFirst {
+        // Adding copy specs during runtime is not allowed anymore
+        // The build will fail with 4.0
+        from ("some-other-dir") {
+            exclude "non-existent-file"
+        }
+    }
+}
+```
 
 ## External contributions
 
 We would like to thank the following community members for making contributions to this release of Gradle.
 
-* [Ethan Hall](https://github.com/ethankhall) - Addition of new `buildEnvironment` task.
-* [Sebastian Schuberth](https://github.com/sschuberth) - Checkstyle HTML report.
-* [Jeffry Gaston](https://github.com/mathjeff) - Debug message improvement.
-* [Chun Yang](https://github.com/chunyang) - Play resources now properly maintain directory hierarchy.
-* [Alexander Shoykhet](https://github.com/ashoykh) - Performance improvement for executing finalizer tasks with many dependencies.
+- [Ion Alberdi](https://github.com/yetanotherion) - Fix lazy evaluation of parent/grand-parent pom's properties ([gradle/gradle#1192](https://github.com/gradle/gradle/pull/1192))
+- [Guillaume Delente](https://github.com/GuillaumeDelente) - Fix typo in user guide ([gradle/gradle#1562](https://github.com/gradle/gradle/pull/1562))
+- [Guillaume Le Floch](https://github.com/glefloch) - Support of compileOnly scope in buildInit plugin ([gradle/gradle#1536](https://github.com/gradle/gradle/pull/1536))
+- [Eitan Adler](https://github.com/grimreaper) - Remove some some duplicated words from documentation ([gradle/gradle#1513](https://github.com/gradle/gradle/pull/1513))
+- [Eitan Adler](https://github.com/grimreaper) - Remove extraneous letter in documentation ([gradle/gradle#1459](https://github.com/gradle/gradle/pull/1459))
+- [Pierre Noel](https://github.com/petersg83) - Add missing comma in `FileReferenceFactory.toString()` ([gradle/gradle#1440](https://github.com/gradle/gradle/pull/1440))
+- [Hugo Bijmans](https://github.com/HugooB) - Fixed some typos and spelling in the JavaPlugin user guide ([gradle/gradle#1514](https://github.com/gradle/gradle/pull/1514))
+- [Andy Wilkinson](https://github.com/wilkinsona) - Copy resolution listeners when a configuration is copied ([gradle/gradle#1603](https://github.com/gradle/gradle/pull/1603))
+- [Tim Hunt](https://github.com/mitnuh) - Allow the use of single quote characters in Javadoc task options header and footer ([gradle/gradle#1288](https://github.com/gradle/gradle/pull/1288))
+- [Jenn Strater](https://github.com/jlstrater) - Add groovy-application project init type ([gradle/gradle#1480](https://github.com/gradle/gradle/pull/1480))
+- [Jacob Ilsoe](https://github.com/jacobilsoe) - Update Zinc to 0.3.13 ([gradle/gradle#1463](https://github.com/gradle/gradle/issues/1463))
+- [Shintaro Katafuchi](https://github.com/hotchemi) - Issue: #952 Make project.sync() a public API ([gradle/gradle#1137](https://github.com/gradle/gradle/pull/1137))
+- [Lari Hotari](https://github.com/lhtorai) - Issue: #1730 Memory leak in Gradle daemon
+ ([gradle/gradle#1736](https://github.com/gradle/gradle/pull/1736))
+- [Andy Bell](https://github.com/andyrbell) - Prevent NullPointerException for JUnit Categories for test description with null test class([gradle/gradle#1511](https://github.com/gradle/gradle/pull/1511))
+- [Piotr Kubowicz](https://github.com/pkubowicz) - Default to compileClasspath configuration in DependencyInsightReportTask ([gradle/gradle#1376](https://github.com/gradle/gradle/pull/1395))
+- [Chris Gavin](https://github.com/chrisgavin) - Clean up Sign task API ([gradle/gradle#1679](https://github.com/gradle/gradle/pull/1679))
 
-We love getting contributions from the Gradle community. For information on contributing, please see [gradle.org/contribute](http://gradle.org/contribute).
+We love getting contributions from the Gradle community. For information on contributing, please see [gradle.org/contribute](https://gradle.org/contribute).
 
 ## Known issues
 

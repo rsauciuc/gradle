@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-
 package org.gradle.nativeplatform.sourceset
+
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 
 @Requires(TestPrecondition.CAN_INSTALL_EXECUTABLE)
-@LeaksFileHandles
 class SourceSetLinkDependenciesIntegrationTest extends AbstractInstalledToolChainIntegrationSpec {
     def "setup"() {
         settingsFile << "rootProject.name = 'test'"
@@ -100,7 +98,7 @@ model {
         succeeds "installMainExecutable"
 
         then:
-        installation("build/install/mainExecutable").exec().out == "12\n"
+        installation("build/install/main").exec().out == "12\n"
     }
 
     def "library dependency of 1 language source set is available to another when linking"() {
@@ -124,7 +122,7 @@ model {
         succeeds "installMainExecutable"
 
         then:
-        installation("build/install/mainExecutable").exec().out == "12\n"
+        installation("build/install/main").exec().out == "12\n"
     }
 
     def "dependencies of language source set added to binary are available when linking"() {
@@ -150,6 +148,6 @@ model {
         succeeds "installMainExecutable"
 
         then:
-        installation("build/install/mainExecutable").exec().out == "12\n"
+        installation("build/install/main").exec().out == "12\n"
     }
 }

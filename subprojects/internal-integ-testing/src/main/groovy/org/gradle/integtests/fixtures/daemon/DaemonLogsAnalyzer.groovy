@@ -16,12 +16,12 @@
 
 package org.gradle.integtests.fixtures.daemon
 
+import org.gradle.internal.logging.services.LoggingServiceRegistry
 import org.gradle.internal.service.ServiceRegistryBuilder
 import org.gradle.internal.service.scopes.GlobalScopeServices
 import org.gradle.launcher.daemon.client.DaemonClientGlobalServices
 import org.gradle.launcher.daemon.registry.DaemonRegistry
 import org.gradle.launcher.daemon.registry.DaemonRegistryServices
-import org.gradle.logging.LoggingServiceRegistry
 import org.gradle.testfixtures.internal.NativeServicesTestFixture
 import org.gradle.util.GradleVersion
 
@@ -36,12 +36,12 @@ class DaemonLogsAnalyzer implements DaemonsFixture {
         this.daemonBaseDir = daemonBaseDir
         daemonLogsDir = new File(daemonBaseDir, version)
         def services = ServiceRegistryBuilder.builder()
-                .parent(LoggingServiceRegistry.newEmbeddableLogging())
-                .parent(NativeServicesTestFixture.getInstance())
-                .provider(new GlobalScopeServices(false))
-                .provider(new DaemonClientGlobalServices())
-                .provider(new DaemonRegistryServices(daemonBaseDir))
-                .build()
+            .parent(LoggingServiceRegistry.newEmbeddableLogging())
+            .parent(NativeServicesTestFixture.getInstance())
+            .provider(new GlobalScopeServices(false))
+            .provider(new DaemonClientGlobalServices())
+            .provider(new DaemonRegistryServices(daemonBaseDir))
+            .build()
         registry = services.get(DaemonRegistry)
     }
 
@@ -58,7 +58,9 @@ class DaemonLogsAnalyzer implements DaemonsFixture {
     }
 
     List<DaemonFixture> getDaemons() {
-        assert daemonLogsDir.isDirectory()
+        if (!daemonLogsDir.exists() || !daemonLogsDir.isDirectory()) {
+            return []
+        }
         return daemonLogsDir.listFiles().findAll { it.name.endsWith('.log') }.collect { daemonForLogFile(it) }
     }
 
@@ -77,5 +79,13 @@ class DaemonLogsAnalyzer implements DaemonsFixture {
         def daemons = getDaemons()
         assert daemons.size() == 1
         daemons[0]
+    }
+
+    File getDaemonBaseDir() {
+        return daemonBaseDir
+    }
+
+    String getVersion() {
+        return version
     }
 }

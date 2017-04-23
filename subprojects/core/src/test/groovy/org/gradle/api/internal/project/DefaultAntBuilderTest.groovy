@@ -18,61 +18,80 @@ package org.gradle.api.internal.project
 import groovy.xml.MarkupBuilder
 import org.apache.tools.ant.Target
 import org.apache.tools.ant.Task
-import org.gradle.api.Project
+import org.gradle.api.AntBuilder.AntMessagePriority
+import org.gradle.api.file.FileCollection
+import org.gradle.api.file.FileCollection.AntType
+import org.gradle.api.internal.project.ant.AntLoggingAdapter
 import org.gradle.api.tasks.ant.AntTarget
-import org.gradle.util.TestUtil
-import org.junit.Test
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
+import spock.lang.Issue
+import spock.lang.Unroll
 
 import java.lang.reflect.Field
 
-import static org.gradle.util.Matchers.isEmpty
-import static org.hamcrest.Matchers.*
+import static org.hamcrest.Matchers.not
+import static org.hamcrest.Matchers.sameInstance
 import static org.junit.Assert.assertThat
-import static org.junit.Assert.fail
 
-class DefaultAntBuilderTest {
-    private final Project project = TestUtil.createRootProject()
-    private final def ant = new DefaultAntBuilder(project)
+class DefaultAntBuilderTest extends AbstractProjectBuilderSpec {
+    private final AntLoggingAdapter loggingAdapter = Mock(AntLoggingAdapter)
+    def ant
 
-    @Test
-    public void antPropertiesAreAvailableAsPropertiesOfBuilder() {
+    def setup() {
+        ant = new DefaultAntBuilder(project, loggingAdapter)
+    }
+
+    def "ant properties are available as properties of builder"() {
+        when:
         ant.property(name: 'prop1', value: 'value1')
-        assertThat(ant.prop1, equalTo('value1'))
 
+        then:
+        ant.prop1 == 'value1'
+
+        when:
         ant.prop2 = 'value2'
-        assertThat(ant.antProject.properties.prop2, equalTo('value2'))
+
+        then:
+        ant.antProject.properties.prop2 == 'value2'
     }
 
-    @Test
-    public void throwsMissingPropertyExceptionForUnknownProperty() {
-        try {
-            ant.unknown
-            fail()
-        } catch (MissingPropertyException e) {
-            // expected
-        }
+    def "throws MissingPropertyException for unknown property"() {
+        when:
+        ant.unknown
+
+        then:
+        thrown(MissingPropertyException)
     }
 
-    @Test
-    public void antPropertiesAreAvailableAsMap() {
+    def "ant properties are available as map"() {
+        when:
         ant.property(name: 'prop1', value: 'value1')
-        assertThat(ant.properties.prop1, equalTo('value1'))
 
+        then:
+        ant.properties.prop1 == 'value1'
+
+        when:
         ant.properties.prop2 = 'value2'
-        assertThat(ant.antProject.properties.prop2, equalTo('value2'))
+
+        then:
+        ant.antProject.properties.prop2 == 'value2'
     }
 
-    @Test
-    public void antReferencesAreAvailableAsMap() {
+    def "ant references are available as map"() {
+        when:
         def path = ant.path(id: 'ref1', location: 'path')
-        assertThat(ant.references.ref1, sameInstance(path))
 
+        then:
+        ant.references.ref1 == path
+
+        when:
         ant.references.prop2 = 'value2'
-        assertThat(ant.antProject.references.prop2, equalTo('value2'))
+
+        then:
+        ant.antProject.references.prop2 == 'value2'
     }
 
-    @Test
-    public void importAddsTaskForEachAntTarget() {
+    def "import adds task for each ant target"() {
         File buildFile = new File(project.projectDir, 'build.xml')
         buildFile.withWriter { Writer writer ->
             def xml = new MarkupBuilder(writer)
@@ -83,23 +102,27 @@ class DefaultAntBuilderTest {
             }
         }
 
+        when:
         ant.importBuild(buildFile)
 
+        then:
         def task = project.tasks.target1
-        assertThat(task, instanceOf(AntTarget))
-        assertThat(task.target.name, equalTo('target1'))
+        task instanceof AntTarget
+        task.target.name == 'target1'
 
-        task = project.tasks.target2
-        assertThat(task, instanceOf(AntTarget))
-        assertThat(task.target.name, equalTo('target2'))
+        and:
+        def task2 = project.tasks.target2
+        task2 instanceof AntTarget
+        task2.target.name == 'target2'
 
-        task = project.tasks.target3
-        assertThat(task, instanceOf(AntTarget))
-        assertThat(task.target.name, equalTo('target3'))
+        and:
+        def task3 = project.tasks.target3
+        task3 instanceof AntTarget
+        task3.target.name == 'target3'
     }
 
-    @Test
-    public void canNestElements() {
+    def "can nest elements"() {
+        when:
         ant.otherProp = 'true'
         ant.condition(property: 'prop', value: 'someValue') {
             or {
@@ -109,38 +132,50 @@ class DefaultAntBuilderTest {
                 }
             }
         }
-        assertThat(ant.prop, equalTo('someValue'))
+
+        then:
+        ant.prop == 'someValue'
     }
 
-    @Test
-    public void setsContextClassLoaderDuringExecution() {
+    def "sets context classloader during execution"() {
+        setup:
         ClassLoader original = Thread.currentThread().getContextClassLoader()
         ClassLoader cl = new URLClassLoader([] as URL[])
         Thread.currentThread().setContextClassLoader(cl)
+
+        when:
         ant.taskdef(name: 'test', classname: TestTask.class.getName())
         ant.test()
+
+        then:
+        noExceptionThrown()
+
+        cleanup:
         Thread.currentThread().setContextClassLoader(original)
     }
 
-    @Test
-    public void discardsTasksAfterExecution() {
+    def "discards tasks after execution"() {
+        when:
         ant.echo(message: 'message')
         ant.echo(message: 'message')
         ant.echo(message: 'message')
 
-        assertThat(ant.antProject.targets.size(), equalTo(0))
+        then:
+        ant.antProject.targets.size() == 0
 
-        Field field = AntBuilder.class.getDeclaredField('collectorTarget')
+        when:
+        Field field = groovy.util.AntBuilder.class.getDeclaredField('collectorTarget')
         field.accessible = true
         Target target = field.get(ant)
         field = target.class.getDeclaredField('children')
         field.accessible = true
         List children = field.get(target)
-        assertThat(children, isEmpty())
+
+        then:
+        children.isEmpty()
     }
 
-    @Test
-    public void testTaskRename() {
+    def "can rename imported tasks"() {
         File buildFile = new File(project.projectDir, 'build.xml')
         buildFile.withWriter { Writer writer ->
             def xml = new MarkupBuilder(writer)
@@ -151,14 +186,84 @@ class DefaultAntBuilderTest {
             }
         }
 
+        when:
         ant.importBuild(buildFile) { taskName ->
             'a-' + taskName
         }
 
+        then:
         def task = project.tasks.'a-target1'
-        assertThat(task, instanceOf(AntTarget))
-        assertThat(task.target.name, equalTo('target1'))
-        assert task.taskDependencies.getDependencies(task).name.sort() == ["a-target2", "a-target3"]
+        task instanceof AntTarget
+        task.target.name == 'target1'
+        task.taskDependencies.getDependencies(task).name.sort() == ["a-target2", "a-target3"]
+    }
+
+    def "setting lifecycle log level on builder sets it on logging adapter" () {
+        when:
+        ant.lifecycleLogLevel = AntMessagePriority.INFO
+
+        then:
+        1 * loggingAdapter.setLifecycleLogLevel(AntMessagePriority.INFO)
+    }
+
+    def "can set lifecycle log level using string representation" () {
+        when:
+        ant.lifecycleLogLevel = stringLevel
+
+        then:
+        1 * loggingAdapter.setLifecycleLogLevel(enumLevel)
+
+        where:
+        stringLevel | enumLevel
+        "DEBUG"     | AntMessagePriority.DEBUG
+        "VERBOSE"   | AntMessagePriority.VERBOSE
+        "INFO"      | AntMessagePriority.INFO
+        "WARN"      | AntMessagePriority.WARN
+        "ERROR"     | AntMessagePriority.ERROR
+    }
+
+    def "getting lifecycle log level on builder gets it from logging adapter" () {
+        when:
+        def level = ant.getLifecycleLogLevel()
+
+        then:
+        1 * loggingAdapter.getLifecycleLogLevel() >> AntMessagePriority.DEBUG
+
+        and:
+        level == AntMessagePriority.DEBUG
+    }
+
+    @Unroll
+    @Issue('GRADLE-3511')
+    def 'Filename #filename is properly masked when adding it as #antType to an ant task'(String filename, antType) {
+        given:
+        def dirname = 'somedir$$with'
+        def dirAndFile = "${dirname}/${filename}"
+        project.file(dirname).mkdir()
+        File fileWithDollars = project.file(dirAndFile)
+        fileWithDollars << "Some Text"
+        FileCollection files = project.files(dirAndFile)
+
+        when:
+        ant.property(name: "my.property", value: "doesNotExist")
+        ant.delete {
+            files.addToAntBuilder(delegate, null, antType)
+        }
+
+        then:
+        !fileWithDollars.exists()
+
+        where:
+
+        [filename, antType] << [[
+            'f1$$SomeOtherText',
+            'f1$$$$$$Some$OtherText',
+            'f1$${Some}OtherText',
+            'f1$${SomeOther$$$Text',
+            'f1$$${my.property}Text',
+            '${my.property}'],
+            [AntType.FileSet, AntType.ResourceCollection]
+        ].combinations()
     }
 
 
@@ -169,5 +274,6 @@ public class TestTask extends Task {
     void execute() {
         assertThat(Thread.currentThread().getContextClassLoader(), sameInstance(org.apache.tools.ant.Project.class.getClassLoader()))
     }
-
 }
+
+

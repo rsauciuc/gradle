@@ -49,8 +49,8 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
 
         expect:
         succeeds "assemble"
-        new JarTestFixture(file("build/jars/sampleLibJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
-        new JarTestFixture(file("build/jars/sampleLibCustomJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
+        new JarTestFixture(file("build/jars/sampleLib/jar/sampleLib.jar")).isManifestPresentAndFirstEntry()
+        new JarTestFixture(file("build/jars/sampleLib/customJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
     }
 
     def "managed JarBinarySpec subtypes can have further subtypes"() {
@@ -73,22 +73,25 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
             ${registerBinaryType("CustomChildJarBinarySpec")}
 
             class Results {
-                static def jarBinaries = []
-                static def customBinaries = []
+                def jarBinaries = []
+                def customBinaries = []
             }
 
             class BinaryNameCollectorRules extends RuleSource {
-                @Finalize
-                void printJarBinaries(ModelMap<JarBinarySpec> jarBinaries) {
+                @Model
+                Results results() { new Results() }
+
+                @Mutate
+                void printJarBinaries(Results results, @Path("binaries") ModelMap<JarBinarySpec> jarBinaries) {
                     for (JarBinarySpec jarBinary : jarBinaries) {
-                        Results.jarBinaries.add jarBinary.name
+                        results.jarBinaries.add jarBinary.name
                     }
                 }
 
-                @Finalize
-                void printCustomBinaries(ModelMap<CustomChildJarBinarySpec> customBinaries) {
+                @Mutate
+                void printCustomBinaries(Results results, @Path("binaries") ModelMap<CustomChildJarBinarySpec> customBinaries) {
                     for (CustomChildJarBinarySpec customBinary : customBinaries) {
-                        Results.customBinaries.add customBinary.name
+                        results.customBinaries.add customBinary.name
                     }
                 }
             }
@@ -115,8 +118,9 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
                 tasks {
                     create("validate") {
                         dependsOn "assemble"
-                        assert Results.jarBinaries == ["customJar", "jar"]
-                        assert Results.customBinaries == ["customJar"]
+                        def results = \$.results
+                        assert results.jarBinaries == ["customJar", "jar"]
+                        assert results.customBinaries == ["customJar"]
                     }
                 }
             }
@@ -124,8 +128,8 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
 
         expect:
         succeeds "assemble", "validate"
-        new JarTestFixture(file("build/jars/sampleLibJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
-        new JarTestFixture(file("build/jars/sampleLibCustomJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
+        new JarTestFixture(file("build/jars/sampleLib/jar/sampleLib.jar")).isManifestPresentAndFirstEntry()
+        new JarTestFixture(file("build/jars/sampleLib/customJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
     }
 
     def "managed JarBinarySpec subtypes can have @Unmanaged properties"() {
@@ -157,7 +161,7 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
 
         expect:
         succeeds "sampleLibCustomJar"
-        new JarTestFixture(file("build/jars/sampleLibCustomJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
+        new JarTestFixture(file("build/jars/sampleLib/customJar/sampleLib.jar")).isManifestPresentAndFirstEntry()
     }
 
     // TODO:LPTR There is a deeper breakage here, as creating Jar binaries in the top-level binaries container would result in an NPE anyway,
@@ -202,8 +206,9 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
         """
 
         expect:
-        def ex = fails "components"
-        ex.assertHasCause "Invalid managed model type IllegalJarBinarySpec: only paired getter/setter methods are supported (invalid methods: void IllegalJarBinarySpec#sayHello(java.lang.String))."
+        fails "components"
+        failure.assertHasCause """Type IllegalJarBinarySpec is not a valid managed type:
+- Method sayHello(java.lang.String) is not a valid managed type method: it must have an implementation"""
     }
 
     def registerCustomJarBinaryType() {
@@ -223,12 +228,12 @@ class CustomJarBinarySpecSubtypeIntegrationTest extends AbstractIntegrationSpec 
             import org.gradle.jvm.platform.internal.DefaultJavaPlatform
 
             class ${binaryType}Rules extends RuleSource {
-                @BinaryType
-                void customJarBinary(BinaryTypeBuilder<${binaryType}> builder) {
+                @ComponentType
+                void customJarBinary(TypeBuilder<${binaryType}> builder) {
                 }
 
                 @Finalize
-                void setPlatformForBinaries(ModelMap<BinarySpec> binaries) {
+                void setPlatformForBinaries(BinaryContainer binaries) {
                     def platform = DefaultJavaPlatform.current()
                     binaries.withType(${binaryType}).beforeEach { binary ->
                         binary.targetPlatform = platform

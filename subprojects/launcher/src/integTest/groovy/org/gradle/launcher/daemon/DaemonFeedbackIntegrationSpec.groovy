@@ -18,8 +18,8 @@ package org.gradle.launcher.daemon
 
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.launcher.daemon.logging.DaemonMessages
-import org.gradle.util.GradleVersion
 import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.util.GradleVersion
 import spock.lang.Timeout
 
 import static org.gradle.test.fixtures.ConcurrentTestUtil.poll
@@ -29,10 +29,12 @@ class DaemonFeedbackIntegrationSpec extends DaemonIntegrationSpec {
     def "daemon keeps logging to the file even if the build is stopped"() {
         given:
         file("build.gradle") << """
-task sleep << {
-    println 'taking a nap...'
-    Thread.sleep(10000)
-    println 'finished the nap...'
+task sleep {
+    doLast {
+        println 'taking a nap...'
+        Thread.sleep(10000)
+        println 'finished the nap...'
+    }
 }
 """
 
@@ -50,9 +52,11 @@ task sleep << {
         then:
         sleeper.waitForFailure()
 
-        def log = readLog(executer.daemonBaseDir)
-        assert log.contains(DaemonMessages.REMOVING_PRESENCE_DUE_TO_STOP)
-        assert log.contains(DaemonMessages.DAEMON_VM_SHUTTING_DOWN)
+        poll(5, 1) {
+            def log = readLog(executer.daemonBaseDir)
+            assert log.contains(DaemonMessages.REMOVING_PRESENCE_DUE_TO_STOP)
+            assert log.contains(DaemonMessages.DAEMON_VM_SHUTTING_DOWN)
+        }
     }
 
     @Timeout(25)
@@ -96,9 +100,9 @@ task sleep << {
 
     def "background daemon infrastructure logs with DEBUG"() {
         given:
-        file("build.gradle") << "task foo << { println 'hey!' }"
+        file("build.gradle") << "task foo { doLast { println 'hey!' } }"
 
-        when: "runing build with --info"
+        when: "running build with --info"
         executer.withArguments("-i").withTasks('foo').run()
 
         then:
@@ -185,6 +189,9 @@ task sleep << {
         daemon.standardOutput.count("debug me!") == 1
 
         debugBuild.output.count("debug me!") == 1
+
+        cleanup:
+        daemon.abort()
     }
 
     List<File> getLogs(File baseDir) {

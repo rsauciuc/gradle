@@ -19,11 +19,24 @@ package org.gradle.api
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.executer.UnexpectedBuildFailure
 import org.gradle.testfixtures.ProjectBuilder
+import org.gradle.util.GradleVersion
+import org.gradle.util.TextUtil
+import org.gradle.util.UsesNativeServices
 import spock.lang.FailsWith
+import spock.lang.Ignore
 import spock.lang.Issue
 
 // TODO: This needs a better home - Possibly in the test kit package in the future
+
+@UsesNativeServices
 class ApplyPluginIntegSpec extends AbstractIntegrationSpec {
+    def testProjectPath
+    def gradleUserHome
+
+    def setup() {
+        testProjectPath = TextUtil.normaliseFileSeparators(file("test-project-dir").absolutePath)
+        gradleUserHome = TextUtil.normaliseFileSeparators(buildContext.gradleUserHomeDir.absolutePath)
+    }
 
     @Issue("GRADLE-2358")
     @FailsWith(UnexpectedBuildFailure) // Test is currently failing
@@ -52,7 +65,8 @@ class ApplyPluginIntegSpec extends AbstractIntegrationSpec {
             class TestPluginSpec extends Specification {
                 def "can apply plugin by id"() {
                     when:
-                    Project project = ProjectBuilder.builder().build()
+                    def projectDir = new File('${testProjectPath}')
+                    Project project = ProjectBuilder.builder().withProjectDir(projectDir).build()
                     project.apply(plugin: "testplugin")
 
                     then:
@@ -62,21 +76,7 @@ class ApplyPluginIntegSpec extends AbstractIntegrationSpec {
         """
 
         and:
-        buildFile << '''
-            apply plugin: 'groovy'
-
-            repositories {
-                mavenCentral()
-            }
-
-            dependencies {
-                compile gradleApi()
-                compile localGroovy()
-                compile "org.spockframework:spock-core:1.0-groovy-2.4", {
-                    exclude module: "groovy-all"
-                }
-            }
-        '''
+        buildFile << spockBasedBuildScript()
 
         expect:
         succeeds("test")
@@ -84,25 +84,114 @@ class ApplyPluginIntegSpec extends AbstractIntegrationSpec {
 
     @Issue("GRADLE-3068")
     def "can use gradleApi in test"() {
-        given:
-        file("src/test/groovy/org/acme/BreakingTest.groovy") << """
-            package com.acme
-import org.gradle.api.Project
-import org.gradle.testfixtures.ProjectBuilder
-import org.junit.Test
+        requireGradleDistribution()
 
-class BreakingTest {
-  @Test
-  void "can evaluate ProjectBuilder"() {
-    def project = ProjectBuilder.builder().build()
-    project.apply(plugin: 'groovy')
-    project.evaluate()
-  }
-}
+        given:
+        file("src/test/groovy/org/acme/ProjectBuilderTest.groovy") << """
+            package org.acme
+            import org.gradle.api.Project
+            import org.gradle.testfixtures.ProjectBuilder
+            import org.junit.Test
+
+            class ProjectBuilderTest {
+                @Test
+                void "can evaluate ProjectBuilder"() {
+                    def projectDir = new File('${testProjectPath}')
+                    def userHome = new File('${gradleUserHome}')
+                    def project = ProjectBuilder.builder()
+                                    .withProjectDir(projectDir)
+                                    .withGradleUserHomeDir(userHome)
+                                    .build()
+                    project.apply(plugin: 'groovy')
+                    project.evaluate()
+                }
+            }
         """
 
         and:
-        buildFile << '''
+        buildFile << junitBasedBuildScript()
+        buildFile << nativeDirBuildScriptConfiguration()
+
+        expect:
+        executer.withArgument("--info")
+        succeeds("test")
+    }
+
+    @Ignore("Must fix for 4.0")
+    def "generated Gradle API JAR in custom Gradle user home is reused across multiple invocations"() {
+        requireGradleDistribution()
+
+        given:
+        file("src/test/groovy/org/acme/ProjectBuilderTest.groovy") << """
+            package org.acme
+            import org.gradle.api.Project
+            import org.gradle.testfixtures.ProjectBuilder
+            import spock.lang.Specification
+
+            class ProjectBuilderTest extends Specification {
+                def "generates Gradle API JAR and reuses it"() {
+                    given:
+                    def gradleVersion = '${GradleVersion.current().getVersion()}'
+                    def gradleUserHome = new File('${gradleUserHome}')
+                    def generatedGradleJarCacheDir = new File(gradleUserHome, "caches/\$gradleVersion/generated-gradle-jars")
+                    def gradleApiJar = new File(generatedGradleJarCacheDir, "gradle-api-\${gradleVersion}.jar")
+
+                    when:
+                    def project = createProject(gradleUserHome)
+
+                    then:
+                    gradleApiJar.exists()
+                    long lastModified = gradleApiJar.lastModified()
+
+                    when:
+                    project = createProject(gradleUserHome)
+
+                    then:
+                    gradleApiJar.exists()
+                    lastModified == gradleApiJar.lastModified()
+                }
+
+                static Project createProject(File gradleUserHome) {
+                    def project = ProjectBuilder.builder().withGradleUserHomeDir(gradleUserHome).build()
+                    project.plugins.apply('java')
+                    project.dependencies.add('compile', project.dependencies.gradleApi())
+                    project
+                }
+            }
+        """
+
+        and:
+        buildFile << spockBasedBuildScript()
+        buildFile << nativeDirBuildScriptConfiguration()
+
+        expect:
+        succeeds('test')
+    }
+
+    static String junitBasedBuildScript() {
+        """
+            ${basicBuildScript()}
+
+            dependencies {
+                testCompile 'junit:junit:4.12'
+            }
+        """
+    }
+
+    static String spockBasedBuildScript() {
+        """
+            ${basicBuildScript()}
+
+            dependencies {
+                testCompile('org.spockframework:spock-core:1.0-groovy-2.4') {
+                    exclude module: 'groovy-all'
+                }
+            }
+        """
+    }
+
+    static String basicBuildScript() {
+        """
             apply plugin: 'groovy'
 
             repositories {
@@ -113,9 +202,18 @@ class BreakingTest {
                 compile gradleApi()
                 compile localGroovy()
             }
-        '''
+        """
+    }
 
-        expect:
-        succeeds("test")
+    static String nativeDirBuildScriptConfiguration() {
+        """
+            compileTestGroovy {
+                options.forkOptions.jvmArgs << '-Dorg.gradle.native.dir=' + System.getProperty('org.gradle.native.dir')
+            }
+
+            test {
+                systemProperties = ['org.gradle.native.dir' : System.getProperty('org.gradle.native.dir')]
+            }
+        """
     }
 }

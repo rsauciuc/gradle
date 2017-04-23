@@ -29,7 +29,9 @@ class PlayMultiProjectReloadIntegrationTest extends AbstractMultiVersionPlayRelo
 
     def cleanup() {
         stopGradle()
-        appIsStopped()
+        if (runningApp.isInitialized()) {
+            appIsStopped()
+        }
     }
 
     def "can modify play app while app is running in continuous build"() {
@@ -153,7 +155,7 @@ var message = "Hello JS";
         appIsRunningAndDeployed()
 
         when:
-        addBadJava("submodule/app")
+        addBadScala("submodule/app")
 
         then:
         fails()
@@ -161,22 +163,22 @@ var message = "Hello JS";
         errorPageHasTaskFailure(":submodule:compilePlayBinaryScala")
 
         when:
-        fixBadJava("submodule/app")
+        fixBadScala("submodule/app")
         then:
         succeeds()
         appIsRunningAndDeployed()
     }
 
-    def addBadJava(path) {
-        file("$path/models/NewType.java") << """
-package models;
+    def addBadScala(path) {
+        file("$path/models/NewType.scala") << """
+package models
 
-public class NewType {
+object NewType {
 """
     }
 
-    def fixBadJava(path) {
-        file("$path/models/NewType.java") << """
+    def fixBadScala(path) {
+        file("$path/models/NewType.scala") << """
 }
 """
     }

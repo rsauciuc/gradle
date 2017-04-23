@@ -15,7 +15,6 @@
  */
 package org.gradle.language.java.internal;
 
-import org.gradle.api.Action;
 import org.gradle.jvm.Classpath;
 import org.gradle.language.base.sources.BaseLanguageSourceSet;
 import org.gradle.language.java.JavaSourceSet;
@@ -28,10 +27,6 @@ public class DefaultJavaLanguageSourceSet extends BaseLanguageSourceSet implemen
     private final DefaultDependencySpecContainer dependencies = new DefaultDependencySpecContainer();
 
     @Override
-    protected String getTypeName() {
-        return "Java source";
-    }
-
     public Classpath getCompileClasspath() {
         return emptyClasspath;
     }
@@ -39,11 +34,5 @@ public class DefaultJavaLanguageSourceSet extends BaseLanguageSourceSet implemen
     @Override
     public DependencySpecContainer getDependencies() {
         return dependencies;
-    }
-
-    @Override
-    public DependencySpecContainer dependencies(Action<? super DependencySpecContainer> configureAction) {
-        configureAction.execute(getDependencies());
-        return getDependencies();
     }
 }

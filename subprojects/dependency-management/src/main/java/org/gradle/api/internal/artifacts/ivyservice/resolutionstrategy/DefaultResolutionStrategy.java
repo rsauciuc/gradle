@@ -17,15 +17,26 @@
 package org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy;
 
 import org.gradle.api.Action;
-import org.gradle.api.artifacts.*;
+import org.gradle.api.artifacts.ComponentSelection;
+import org.gradle.api.artifacts.ComponentSelectionRules;
+import org.gradle.api.artifacts.DependencyResolveDetails;
+import org.gradle.api.artifacts.DependencySubstitution;
+import org.gradle.api.artifacts.DependencySubstitutions;
+import org.gradle.api.artifacts.ModuleVersionSelector;
+import org.gradle.api.artifacts.ResolutionStrategy;
 import org.gradle.api.artifacts.cache.ResolutionRules;
 import org.gradle.api.internal.artifacts.ComponentSelectionRulesInternal;
+import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
+import org.gradle.api.internal.artifacts.component.ComponentIdentifierFactory;
+import org.gradle.api.internal.artifacts.configurations.ConflictResolution;
 import org.gradle.api.internal.artifacts.configurations.MutationValidator;
 import org.gradle.api.internal.artifacts.configurations.ResolutionStrategyInternal;
 import org.gradle.api.internal.artifacts.dsl.ModuleVersionSelectorParsers;
 import org.gradle.api.internal.artifacts.ivyservice.dependencysubstitution.DefaultDependencySubstitutions;
+import org.gradle.api.internal.artifacts.ivyservice.dependencysubstitution.DependencySubstitutionRules;
 import org.gradle.api.internal.artifacts.ivyservice.dependencysubstitution.DependencySubstitutionsInternal;
 import org.gradle.internal.Actions;
+import org.gradle.internal.rules.SpecRuleAction;
 import org.gradle.internal.typeconversion.NormalizedTimeUnit;
 import org.gradle.internal.typeconversion.TimeUnitsParser;
 
@@ -41,24 +52,30 @@ import static org.gradle.util.GUtil.flattenElements;
 public class DefaultResolutionStrategy implements ResolutionStrategyInternal {
     private final Set<ModuleVersionSelector> forcedModules = new LinkedHashSet<ModuleVersionSelector>();
     private ConflictResolution conflictResolution = new LatestConflictResolution();
-    private final DefaultComponentSelectionRules componentSelectionRules = new DefaultComponentSelectionRules();
+    private final DefaultComponentSelectionRules componentSelectionRules;
 
     private final DefaultCachePolicy cachePolicy;
     private final DependencySubstitutionsInternal dependencySubstitutions;
+    private final DependencySubstitutionRules globalDependencySubstitutionRules;
+    private final ImmutableModuleIdentifierFactory moduleIdentifierFactory;
     private MutationValidator mutationValidator = MutationValidator.IGNORE;
 
     private boolean assumeFluidDependencies;
+    private SortOrder sortOrder = SortOrder.DEFAULT;
     private static final String ASSUME_FLUID_DEPENDENCIES = "org.gradle.resolution.assumeFluidDependencies";
 
-    public DefaultResolutionStrategy() {
-        this(new DefaultCachePolicy(), new DefaultDependencySubstitutions());
+    public DefaultResolutionStrategy(DependencySubstitutionRules globalDependencySubstitutionRules, ComponentIdentifierFactory componentIdentifierFactory, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
+        this(new DefaultCachePolicy(moduleIdentifierFactory), DefaultDependencySubstitutions.forResolutionStrategy(componentIdentifierFactory, moduleIdentifierFactory), globalDependencySubstitutionRules, moduleIdentifierFactory);
     }
 
-    DefaultResolutionStrategy(DefaultCachePolicy cachePolicy, DependencySubstitutionsInternal dependencySubstitutions) {
+    DefaultResolutionStrategy(DefaultCachePolicy cachePolicy, DependencySubstitutionsInternal dependencySubstitutions, DependencySubstitutionRules globalDependencySubstitutionRules, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
         this.cachePolicy = cachePolicy;
         this.dependencySubstitutions = dependencySubstitutions;
+        this.globalDependencySubstitutionRules = globalDependencySubstitutionRules;
+        this.moduleIdentifierFactory = moduleIdentifierFactory;
+        this.componentSelectionRules = new DefaultComponentSelectionRules(moduleIdentifierFactory);
 
-        // This is only used for testing purposes so we can test handling of fluid dependencies without adding dependency substituion rule
+        // This is only used for testing purposes so we can test handling of fluid dependencies without adding dependency substitution rule
         assumeFluidDependencies = Boolean.getBoolean(ASSUME_FLUID_DEPENDENCIES);
     }
 
@@ -78,6 +95,22 @@ public class DefaultResolutionStrategy implements ResolutionStrategyInternal {
         mutationValidator.validateMutation(STRATEGY);
         this.conflictResolution = new StrictConflictResolution();
         return this;
+    }
+
+    public void preferProjectModules() {
+        if (this.conflictResolution instanceof LatestConflictResolution) {
+            this.conflictResolution = new PreferProjectModulesConflictResolution();
+        }
+    }
+
+    @Override
+    public void sortArtifacts(SortOrder sortOrder) {
+        this.sortOrder = sortOrder;
+    }
+
+    @Override
+    public SortOrder getSortOrder() {
+        return sortOrder;
     }
 
     public ConflictResolution getConflictResolution() {
@@ -102,7 +135,10 @@ public class DefaultResolutionStrategy implements ResolutionStrategyInternal {
     }
 
     public Action<DependencySubstitution> getDependencySubstitutionRule() {
-        Collection<Action<DependencySubstitution>> allRules = flattenElements(new ModuleForcingResolveRule(forcedModules), dependencySubstitutions.getDependencySubstitutionRule());
+        Collection<Action<DependencySubstitution>> allRules = flattenElements(
+                new ModuleForcingResolveRule(forcedModules, moduleIdentifierFactory),
+                dependencySubstitutions.getRuleAction(),
+                globalDependencySubstitutionRules.getRuleAction());
         return Actions.composite(allRules);
     }
 
@@ -111,7 +147,7 @@ public class DefaultResolutionStrategy implements ResolutionStrategyInternal {
     }
 
     public boolean resolveGraphToDetermineTaskDependencies() {
-        return assumeFluidDependencies || dependencySubstitutions.hasDependencySubstitutionRules();
+        return assumeFluidDependencies || dependencySubstitutions.hasRules() || globalDependencySubstitutionRules.hasRules();
     }
 
 
@@ -164,13 +200,17 @@ public class DefaultResolutionStrategy implements ResolutionStrategyInternal {
     }
 
     public DefaultResolutionStrategy copy() {
-        DefaultResolutionStrategy out = new DefaultResolutionStrategy(cachePolicy.copy(), dependencySubstitutions.copy());
+        DefaultResolutionStrategy out = new DefaultResolutionStrategy(cachePolicy.copy(), dependencySubstitutions.copy(), globalDependencySubstitutionRules, moduleIdentifierFactory);
 
         if (conflictResolution instanceof StrictConflictResolution) {
             out.failOnVersionConflict();
+        } else if (conflictResolution instanceof PreferProjectModulesConflictResolution) {
+            out.preferProjectModules();
         }
         out.setForcedModules(getForcedModules());
-        out.getComponentSelection().getRules().addAll(componentSelectionRules.getRules());
+        for (SpecRuleAction<? super ComponentSelection> ruleAction : componentSelectionRules.getRules()) {
+            out.getComponentSelection().addRule(ruleAction);
+        }
         return out;
     }
 }

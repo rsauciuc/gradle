@@ -33,7 +33,7 @@ import org.gradle.api.internal.component.ComponentTypeRegistry
 import org.gradle.internal.Factory
 import org.gradle.internal.component.external.model.DefaultModuleComponentIdentifier
 import org.gradle.internal.component.model.ComponentOverrideMetadata
-import org.gradle.internal.component.model.ComponentResolveMetaData
+import org.gradle.internal.component.model.ComponentResolveMetadata
 import org.gradle.internal.resolve.resolver.ArtifactResolver
 import org.gradle.internal.resolve.resolver.ComponentMetaDataResolver
 import org.gradle.internal.resolve.result.BuildableComponentResolveResult
@@ -51,7 +51,7 @@ class DefaultArtifactResolutionQueryTest extends Specification {
     def artifactResolver = Mock(ArtifactResolver)
     def repositoryChain = Mock(ComponentResolvers)
     def componentMetaDataResolver = Mock(ComponentMetaDataResolver)
-    def componentResolveMetaData = Mock(ComponentResolveMetaData)
+    def componentResolveMetaData = Mock(ComponentResolveMetadata)
 
     @Shared ComponentTypeRegistry testComponentTypeRegistry = createTestComponentTypeRegistry()
 
@@ -89,7 +89,7 @@ class DefaultArtifactResolutionQueryTest extends Specification {
         ArtifactResolutionResult result = query.forComponents(componentIdentifier).withArtifacts(selectedComponentType, selectedArtifactType).execute()
 
         then:
-        1 * cacheLockingManager.useCache(_, _) >> { String operationDisplayName, Factory action ->
+        1 * cacheLockingManager.useCache(_) >> { Factory action ->
             action.create()
         }
         1 * resolveIvyFactory.create(_, _, _) >> repositoryChain
@@ -140,12 +140,12 @@ class DefaultArtifactResolutionQueryTest extends Specification {
     private static class TestComponent implements Component {
     }
 
-    private static class TestArtifact implements Artifact {
+    private static interface TestArtifact extends Artifact {
     }
 
     private static class UnknownComponent implements Component {
     }
 
-    private static class UnknownArtifact implements Artifact {
+    private static interface UnknownArtifact extends Artifact {
     }
 }

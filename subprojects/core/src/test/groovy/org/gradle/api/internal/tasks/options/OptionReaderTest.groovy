@@ -36,32 +36,37 @@ class OptionReaderTest extends Specification {
         options[0].description == "simple flag"
         options[0].argumentType == Void.TYPE
         options[0].optionElement.elementName == "setActive"
-        options[0].availableValues == []
+        options[0].availableValues == [] as Set
 
         options[1].name == "booleanValue"
         options[1].description == "boolean value"
         options[1].argumentType == Void.TYPE
         options[1].optionElement.elementName == "setBooleanValue"
-        options[1].availableValues == []
+        options[1].availableValues == [] as Set
 
         options[2].name == "enumValue"
         options[2].description == "enum value"
         options[2].argumentType == TestEnum
         options[2].optionElement.elementName == "setEnumValue"
-        options[2].availableValues == ["ABC", "DEF"]
+        options[2].availableValues == ["ABC", "DEF"] as Set
 
-        options[3].name == "objectValue"
-        options[3].description == "object value"
-        options[3].argumentType == Object
-        options[3].optionElement.elementName == "setObjectValue"
-        options[3].availableValues == []
+        options[3].name == "multiString"
+        options[3].description == "a list of strings"
+        options[3].argumentType == List
+        options[3].optionElement.elementName == "setStringListValue"
+        options[3].availableValues == [] as Set
 
-        options[4].name == "stringValue"
-        options[4].description == "string value"
-        options[4].argumentType == String
-        options[4].optionElement.elementName == "setStringValue"
-        options[4].availableValues == ["dynValue1", "dynValue2"]
+        options[4].name == "objectValue"
+        options[4].description == "object value"
+        options[4].argumentType == Object
+        options[4].optionElement.elementName == "setObjectValue"
+        options[4].availableValues == [] as Set
 
+        options[5].name == "stringValue"
+        options[5].description == "string value"
+        options[5].argumentType == String
+        options[5].optionElement.elementName == "setStringValue"
+        options[5].availableValues == ["dynValue1", "dynValue2"] as Set
     }
 
     def "fail when multiple methods define same option"() {
@@ -115,7 +120,7 @@ class OptionReaderTest extends Specification {
         options[1].name == "field2"
         options[1].description == "Descr Field2"
         options[1].argumentType == String
-        options[1].availableValues == ["dynValue1", "dynValue2"]
+        options[1].availableValues == ["dynValue1", "dynValue2"] as Set
 
         options[2].name == "field3"
         options[2].description == "Descr Field3"
@@ -173,6 +178,15 @@ class OptionReaderTest extends Specification {
         e.message == "No description set on option 'field' at for class 'org.gradle.api.internal.tasks.options.OptionReaderTest\$TestClass8'."
     }
 
+    def "reads custom order"() {
+        when:
+        List<InstanceOptionDescriptor> options = reader.getOptions(new WithCustomOrder())
+
+        then:
+        options[0].order == 0
+        options[1].order == 1
+    }
+
     public static class TestClass1{
         @Option(option = "stringValue", description = "string value")
         public void setStringValue(String value) {
@@ -192,6 +206,10 @@ class OptionReaderTest extends Specification {
 
         @Option(option = "aFlag", description = "simple flag")
         public void setActive() {
+        }
+
+        @Option(option = "multiString", description = "a list of strings")
+        public void setStringListValue(List<String> values) {
         }
 
         @OptionValues("stringValue")
@@ -301,10 +319,20 @@ class OptionReaderTest extends Specification {
         static List<String> getValues(String someParam) { return Arrays.asList("something")}
     }
 
-
-    public class SomeOptionValues{
+    public class SomeOptionValues {
         @OptionValues("someOption")
         List<String> getValues() { return Arrays.asList("something")}
+    }
+
+    public static class WithCustomOrder {
+
+        @Option(option = "option0", description = "desc", order = 0)
+        public void setOption0(String value) {
+        }
+
+        @Option(option = "option1", description = "desc", order = 1)
+        public void setOption1(String value) {
+        }
     }
 
     enum TestEnum {

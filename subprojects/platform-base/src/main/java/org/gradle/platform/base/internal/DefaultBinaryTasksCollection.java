@@ -47,8 +47,14 @@ public class DefaultBinaryTasksCollection extends DefaultDomainObjectSet<Task> i
         return verb + StringUtils.capitalize(binary.getProjectScopedName()) + StringUtils.capitalize(object);
     }
 
+    @Override
     public Task getBuild() {
         return binary.getBuildTask();
+    }
+
+    @Override
+    public Task getCheck() {
+        return binary.getCheckTask();
     }
 
     public <T extends Task> T findSingleTaskWithType(Class<T> type) {

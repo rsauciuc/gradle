@@ -32,8 +32,8 @@ import static org.junit.Assert.assertThat;
 
 public class ParallelForkingGradleHandle extends ForkingGradleHandle {
 
-    public ParallelForkingGradleHandle(PipedOutputStream stdinPipe, boolean isDaemon, Action<ExecutionResult> resultAssertion, String outputEncoding, Factory<? extends AbstractExecHandleBuilder> execHandleFactory) {
-        super(stdinPipe, isDaemon, resultAssertion, outputEncoding, execHandleFactory);
+    public ParallelForkingGradleHandle(PipedOutputStream stdinPipe, boolean isDaemon, Action<ExecutionResult> resultAssertion, String outputEncoding, Factory<? extends AbstractExecHandleBuilder> execHandleFactory, DurationMeasurement durationMeasurement) {
+        super(stdinPipe, isDaemon, resultAssertion, outputEncoding, execHandleFactory, durationMeasurement);
     }
 
     @Override
@@ -62,8 +62,8 @@ public class ParallelForkingGradleHandle extends ForkingGradleHandle {
         }
 
         @Override
-        public String getOutput() {
-            String output = super.getOutput();
+        public String getNormalizedOutput() {
+            String output = super.getNormalizedOutput();
             String parallelWarningPrefix = String.format(SingleMessageLogger.INCUBATION_MESSAGE, ".*");
             return output.replaceFirst(format("(?m)%s.*$\n", parallelWarningPrefix), "");
         }
@@ -71,7 +71,7 @@ public class ParallelForkingGradleHandle extends ForkingGradleHandle {
         @Override
         public ExecutionResult assertOutputEquals(String expectedOutput, boolean ignoreExtraLines, boolean ignoreLineOrder) {
             // We always ignore line order for matching out of parallel builds
-            new AnyOrderOutputMatcher().assertOutputMatches(expectedOutput, getOutput(), ignoreExtraLines);
+            super.assertOutputEquals(expectedOutput, ignoreExtraLines, true);
             return this;
         }
     }

@@ -37,11 +37,21 @@ class MavenScope {
         }
     }
 
+    boolean hasDependencyExclusion(String dependency, MavenDependencyExclusion exclusion) {
+        def dep = expectDependency(dependency)
+        dep.exclusions.contains(exclusion)
+    }
+
     MavenDependency expectDependency(String key) {
         final dependency = dependencies[key]
         if (dependency == null) {
             throw new AssertionError("Could not find expected dependency $key. Actual: ${dependencies.values()}")
         }
         return dependency
+    }
+
+    @Override
+    String toString() {
+        "$dependencies"
     }
 }

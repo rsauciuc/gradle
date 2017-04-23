@@ -23,11 +23,9 @@ import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationS
 import org.gradle.nativeplatform.fixtures.AvailableToolChains
 import org.gradle.nativeplatform.fixtures.app.HelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.MixedLanguageHelloWorldApp
-import org.gradle.test.fixtures.file.LeaksFileHandles
 
 import static org.gradle.util.Matchers.containsText
 
-@LeaksFileHandles
 class AssemblyLanguageIntegrationTest extends AbstractNativeLanguageIntegrationTest {
 
     HelloWorldApp helloWorldApp = new AssemblerWithCHelloWorldApp(AbstractInstalledToolChainIntegrationSpec.toolChain)
@@ -86,11 +84,10 @@ model {
         run "mainExecutable"
 
         then:
-        def mainExecutable = executable("build/binaries/mainExecutable/main")
+        def mainExecutable = executable("build/exe/main/main")
         mainExecutable.assertExists()
         mainExecutable.exec().out == helloWorldApp.englishOutput
     }
-
 
     static class AssemblerWithCHelloWorldApp extends MixedLanguageHelloWorldApp {
         AssemblerWithCHelloWorldApp(AvailableToolChains.InstalledToolChain toolChain) {

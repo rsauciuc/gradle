@@ -18,6 +18,7 @@ package org.gradle.api.plugins.quality;
 
 import org.gradle.api.reporting.ReportContainer;
 import org.gradle.api.reporting.SingleFileReport;
+import org.gradle.api.tasks.Internal;
 
 /**
  * The reporting configuration for the {@link JDepend} task.
@@ -32,6 +33,7 @@ public interface JDependReports extends ReportContainer<SingleFileReport> {
      *
      * @return The jdepend XML report
      */
+    @Internal
     SingleFileReport getXml();
 
     /**
@@ -39,5 +41,6 @@ public interface JDependReports extends ReportContainer<SingleFileReport> {
      *
      * @return The jdepend text report
      */
+    @Internal
     SingleFileReport getText();
 }

@@ -23,6 +23,9 @@ import org.gradle.api.file.FileVisitDetails;
 import org.gradle.api.file.FileVisitor;
 import org.gradle.api.internal.file.RelativeFile;
 import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
+import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.SourceTask;
 import org.gradle.api.tasks.TaskAction;
@@ -30,6 +33,7 @@ import org.gradle.api.tasks.compile.BaseForkOptions;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 import org.gradle.api.tasks.incremental.InputFileDetails;
 import org.gradle.language.base.internal.compile.Compiler;
+import org.gradle.language.twirl.TwirlImports;
 import org.gradle.platform.base.internal.toolchain.ToolProvider;
 import org.gradle.play.internal.CleaningPlayToolCompiler;
 import org.gradle.play.internal.toolchain.PlayToolChainInternal;
@@ -56,6 +60,11 @@ public class TwirlCompile extends SourceTask {
      */
     private File outputDirectory;
 
+    /**
+     * The default imports to use when compiling templates
+     */
+    private TwirlImports defaultImports;
+
     private BaseForkOptions forkOptions;
     private TwirlStaleOutputCleaner cleaner;
     private PlayPlatform platform;
@@ -63,6 +72,7 @@ public class TwirlCompile extends SourceTask {
     /**
      * fork options for the twirl compiler.
      */
+    @Nested
     public BaseForkOptions getForkOptions() {
         if (forkOptions == null) {
             forkOptions = new BaseForkOptions();
@@ -94,11 +104,28 @@ public class TwirlCompile extends SourceTask {
         this.outputDirectory = outputDirectory;
     }
 
+    /**
+     * Returns the default imports that will be used when compiling templates.
+     * @return The imports that will be used.
+     */
+    @Optional @Input
+    public TwirlImports getDefaultImports() {
+        return defaultImports;
+    }
+
+    /**
+     * Sets the default imports to be used when compiling templates.
+     * @param defaultImports The imports to be used.
+     */
+    public void setDefaultImports(TwirlImports defaultImports) {
+        this.defaultImports = defaultImports;
+    }
+
     @TaskAction
     void compile(IncrementalTaskInputs inputs) {
         RelativeFileCollector relativeFileCollector = new RelativeFileCollector();
         getSource().visit(relativeFileCollector);
-        TwirlCompileSpec spec = new DefaultTwirlCompileSpec(relativeFileCollector.relativeFiles, getOutputDirectory(), getForkOptions(), useJavaDefaults());
+        TwirlCompileSpec spec = new DefaultTwirlCompileSpec(relativeFileCollector.relativeFiles, getOutputDirectory(), getForkOptions(), getDefaultImports());
         if (!inputs.isIncremental()) {
             new CleaningPlayToolCompiler<TwirlCompileSpec>(getCompiler(), getOutputs()).execute(spec);
         } else {
@@ -123,13 +150,10 @@ public class TwirlCompile extends SourceTask {
         }
     }
 
+    @Internal
     private Compiler<TwirlCompileSpec> getCompiler() {
         ToolProvider toolProvider = ((PlayToolChainInternal) getToolChain()).select(platform);
         return toolProvider.newCompiler(TwirlCompileSpec.class);
-    }
-
-    private boolean useJavaDefaults() {
-        return false; //TODO: add this as a configurable parameter
     }
 
     void setCleaner(TwirlStaleOutputCleaner cleaner) {
@@ -145,7 +169,6 @@ public class TwirlCompile extends SourceTask {
      *
      * @return The tool chain.
      */
-    @Incubating
     @Inject
     public PlayToolChain getToolChain() {
         // Implementation is generated
@@ -157,7 +180,6 @@ public class TwirlCompile extends SourceTask {
      *
      * @param toolChain The tool chain.
      */
-    @Incubating
     public void setToolChain(PlayToolChain toolChain) {
         // Implementation is generated
         throw new UnsupportedOperationException();
@@ -180,7 +202,7 @@ public class TwirlCompile extends SourceTask {
         File calculateOutputFile(File inputFile) {
             String inputFileName = inputFile.getName();
             String[] splits = inputFileName.split("\\.");
-            String relativeOutputFilePath = String.format("views/%s/%s.template.scala", splits[2], splits[0]); //TODO: use Twirl library instead?
+            String relativeOutputFilePath = "views/" + splits[2]+ "/" + splits[0] + ".template.scala"; //TODO: use Twirl library instead?
             return new File(destinationDir, relativeOutputFilePath);
         }
     }

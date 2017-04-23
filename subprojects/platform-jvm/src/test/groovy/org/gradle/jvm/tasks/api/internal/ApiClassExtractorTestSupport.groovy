@@ -18,27 +18,29 @@ package org.gradle.jvm.tasks.api.internal
 
 import groovy.transform.CompileStatic
 import groovy.transform.TupleConstructor
+import org.gradle.api.internal.tasks.compile.ApiClassExtractor
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
 import org.junit.Rule
 import org.objectweb.asm.ClassReader
 import spock.lang.Shared
 import spock.lang.Specification
 
-import javax.tools.*
+import javax.tools.DiagnosticCollector
+import javax.tools.JavaCompiler
+import javax.tools.JavaFileObject
+import javax.tools.SimpleJavaFileObject
+import javax.tools.ToolProvider
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 
-@Requires(TestPrecondition.JDK6_OR_LATER)
 class ApiClassExtractorTestSupport extends Specification {
+
     private static class JavaSourceFromString extends SimpleJavaFileObject {
 
         private final String code
 
         JavaSourceFromString(String name, String code) {
-            super(URI.create("string:///${ApiClassExtractorTestSupport.toFileName(name)}"),
-                JavaFileObject.Kind.SOURCE)
+            super(URI.create("string:///${ApiClassExtractorTestSupport.toFileName(name)}"), JavaFileObject.Kind.SOURCE)
             this.code = code
         }
 
@@ -119,8 +121,8 @@ class ApiClassExtractorTestSupport extends Specification {
         def dir = temporaryFolder.createDir('out')
         def fileManager = compiler.getStandardFileManager(null, null, null)
         def diagnostics = new DiagnosticCollector<JavaFileObject>()
-        def task = compiler.getTask(new OutputStreamWriter(
-            new ByteArrayOutputStream()),
+        def task = compiler.getTask(
+            new OutputStreamWriter(new ByteArrayOutputStream()),
             fileManager,
             diagnostics,
             ['-d', dir.absolutePath, '-source', targetVersion, '-target', targetVersion],
@@ -144,7 +146,6 @@ class ApiClassExtractorTestSupport extends Specification {
         diagnostics.diagnostics.each {
             sb.append("In $it\n")
         }
-
 
         throw new RuntimeException(sb.toString())
     }

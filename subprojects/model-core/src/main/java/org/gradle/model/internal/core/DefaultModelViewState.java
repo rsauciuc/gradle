@@ -19,6 +19,7 @@ package org.gradle.model.internal.core;
 import net.jcip.annotations.NotThreadSafe;
 import org.gradle.api.Action;
 import org.gradle.model.ModelViewClosedException;
+import org.gradle.model.ReadOnlyModelViewException;
 import org.gradle.model.WriteOnlyModelViewException;
 import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
 import org.gradle.model.internal.type.ModelType;
@@ -26,13 +27,15 @@ import org.gradle.model.internal.type.ModelType;
 @NotThreadSafe
 public class DefaultModelViewState implements ModelViewState {
 
+    private final ModelPath path;
     private final ModelType<?> type;
     private final ModelRuleDescriptor ruleDescriptor;
     private boolean closed;
     private final boolean mutable;
     private final boolean canReadChildren;
 
-    public DefaultModelViewState(ModelType<?> type, ModelRuleDescriptor ruleDescriptor, boolean mutable, boolean canReadChildren) {
+    public DefaultModelViewState(ModelPath path, ModelType<?> type, ModelRuleDescriptor ruleDescriptor, boolean mutable, boolean canReadChildren) {
+        this.path = path;
         this.type = type;
         this.ruleDescriptor = ruleDescriptor;
         this.mutable = mutable;
@@ -54,15 +57,25 @@ public class DefaultModelViewState implements ModelViewState {
 
     @Override
     public void assertCanMutate() {
-        if (!mutable || closed) {
-            throw new ModelViewClosedException(type, ruleDescriptor);
+        if (closed) {
+            throw new ModelViewClosedException(path, type, ruleDescriptor);
+        }
+        if (!mutable) {
+            throw new ReadOnlyModelViewException(path, type, ruleDescriptor);
         }
     }
 
     @Override
     public void assertCanReadChildren() {
         if (!canReadChildren) {
-            throw new WriteOnlyModelViewException(type, ruleDescriptor);
+            throw new WriteOnlyModelViewException(null, path, type, ruleDescriptor);
+        }
+    }
+
+    @Override
+    public void assertCanReadChild(String name) {
+        if (!canReadChildren) {
+            throw new WriteOnlyModelViewException(name, path, type, ruleDescriptor);
         }
     }
 
@@ -71,8 +84,7 @@ public class DefaultModelViewState implements ModelViewState {
         return mutable && !closed;
     }
 
-    @Override
-    public boolean isCanReadChildren() {
-        return canReadChildren;
+    public boolean isClosed() {
+        return closed;
     }
 }

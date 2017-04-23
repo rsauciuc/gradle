@@ -16,38 +16,32 @@
 
 package org.gradle.testkit.runner.internal;
 
+import org.apache.commons.io.output.WriterOutputStream;
 import org.gradle.api.Action;
 import org.gradle.internal.SystemProperties;
 import org.gradle.internal.classloader.ClasspathUtil;
 import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.classpath.DefaultClassPath;
+import org.gradle.internal.installation.CurrentGradleInstallation;
+import org.gradle.internal.installation.GradleInstallation;
 import org.gradle.testkit.runner.*;
-import org.gradle.testkit.runner.internal.dist.GradleDistribution;
-import org.gradle.testkit.runner.internal.dist.InstalledGradleDistribution;
-import org.gradle.testkit.runner.internal.dist.URILocatedGradleDistribution;
-import org.gradle.testkit.runner.internal.dist.VersionBasedGradleDistribution;
 import org.gradle.testkit.runner.internal.io.SynchronizedOutputStream;
-import org.gradle.testkit.runner.internal.io.WriterOutputStream;
-import org.gradle.tooling.internal.classpath.DefaultGradleDistributionLocator;
-import org.gradle.tooling.internal.classpath.GradleDistributionLocator;
 
 import java.io.File;
 import java.io.OutputStream;
 import java.io.Writer;
 import java.net.URI;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class DefaultGradleRunner extends GradleRunner {
 
+    public static final String TEST_KIT_DIR_SYS_PROP = "org.gradle.testkit.dir";
     public static final String DEBUG_SYS_PROP = "org.gradle.testkit.debug";
 
     private final GradleExecutor gradleExecutor;
 
-    private GradleDistribution distribution;
+    private GradleProvider gradleProvider;
     private TestKitDirProvider testKitDirProvider;
     private File projectDirectory;
     private List<String> arguments = Collections.emptyList();
@@ -59,7 +53,7 @@ public class DefaultGradleRunner extends GradleRunner {
     private boolean forwardingSystemStreams;
 
     public DefaultGradleRunner() {
-        this(new ToolingApiGradleExecutor(), new TempTestKitDirProvider());
+        this(new ToolingApiGradleExecutor(), calculateTestKitDirProvider(SystemProperties.getInstance()));
     }
 
     DefaultGradleRunner(GradleExecutor gradleExecutor, TestKitDirProvider testKitDirProvider) {
@@ -68,30 +62,39 @@ public class DefaultGradleRunner extends GradleRunner {
         this.debug = Boolean.getBoolean(DEBUG_SYS_PROP);
     }
 
+    private static TestKitDirProvider calculateTestKitDirProvider(SystemProperties systemProperties) {
+        Map<String, String> systemPropertiesMap = systemProperties.asMap();
+        if (systemPropertiesMap.containsKey(TEST_KIT_DIR_SYS_PROP)) {
+            return new ConstantTestKitDirProvider(new File(systemPropertiesMap.get(TEST_KIT_DIR_SYS_PROP)));
+        } else {
+            return new TempTestKitDirProvider(systemProperties);
+        }
+    }
+
     public TestKitDirProvider getTestKitDirProvider() {
         return testKitDirProvider;
     }
 
     @Override
     public GradleRunner withGradleVersion(String versionNumber) {
-        this.distribution = new VersionBasedGradleDistribution(versionNumber);
+        this.gradleProvider = GradleProvider.version(versionNumber);
         return this;
     }
 
     @Override
     public GradleRunner withGradleInstallation(File installation) {
-        this.distribution = new InstalledGradleDistribution(installation);
+        this.gradleProvider = GradleProvider.installation(installation);
         return this;
     }
 
     @Override
     public GradleRunner withGradleDistribution(URI distribution) {
-        this.distribution = new URILocatedGradleDistribution(distribution);
+        this.gradleProvider = GradleProvider.uri(distribution);
         return this;
     }
 
     @Override
-    public DefaultGradleRunner withTestKitDir(final File testKitDir) {
+    public DefaultGradleRunner withTestKitDir(File testKitDir) {
         validateArgumentNotNull(testKitDir, "testKitDir");
         this.testKitDirProvider = new ConstantTestKitDirProvider(testKitDir);
         return this;
@@ -136,6 +139,12 @@ public class DefaultGradleRunner extends GradleRunner {
     @Override
     public List<? extends File> getPluginClasspath() {
         return classpath.getAsFiles();
+    }
+
+    @Override
+    public GradleRunner withPluginClasspath() {
+        this.classpath = DefaultClassPath.of(PluginUnderTestMetadataReading.readImplementationClasspath());
+        return this;
     }
 
     @Override
@@ -256,7 +265,7 @@ public class DefaultGradleRunner extends GradleRunner {
 
         File testKitDir = createTestKitDir(testKitDirProvider);
 
-        GradleDistribution effectiveDistribution = distribution == null ? findGradleInstallFromGradleRunner() : distribution;
+        GradleProvider effectiveDistribution = gradleProvider == null ? findGradleInstallFromGradleRunner() : gradleProvider;
 
         GradleExecutionResult execResult = gradleExecutor.run(new GradleExecutionParameters(
             effectiveDistribution,
@@ -275,7 +284,8 @@ public class DefaultGradleRunner extends GradleRunner {
     }
 
     private BuildResult createBuildResult(GradleExecutionResult execResult) {
-        return new DefaultBuildResult(
+        return new FeatureCheckBuildResult(
+            execResult.getBuildOperationParameters(),
             execResult.getOutput(),
             execResult.getTasks()
         );
@@ -288,7 +298,7 @@ public class DefaultGradleRunner extends GradleRunner {
                 throw new InvalidRunnerConfigurationException("Unable to write to test kit directory: " + dir.getAbsolutePath());
             }
             return dir;
-        } else if (dir.exists()) {
+        } else if (dir.exists() && !dir.isDirectory()) {
             throw new InvalidRunnerConfigurationException("Unable to use non-directory as test kit directory: " + dir.getAbsolutePath());
         } else if (dir.mkdirs() || dir.isDirectory()) {
             return dir;
@@ -297,11 +307,10 @@ public class DefaultGradleRunner extends GradleRunner {
         }
     }
 
-    private static GradleDistribution findGradleInstallFromGradleRunner() {
-        GradleDistributionLocator gradleDistributionLocator = new DefaultGradleDistributionLocator(GradleRunner.class);
-        File gradleHome = gradleDistributionLocator.getGradleHome();
-        if (gradleHome == null) {
-            String messagePrefix = "Could not find a Gradle runtime to use based on the location of the GradleRunner class";
+    private static GradleProvider findGradleInstallFromGradleRunner() {
+        GradleInstallation gradleInstallation = CurrentGradleInstallation.get();
+        if (gradleInstallation == null) {
+            String messagePrefix = "Could not find a Gradle installation to use based on the location of the GradleRunner class";
             try {
                 File classpathForClass = ClasspathUtil.getClasspathForClass(GradleRunner.class);
                 messagePrefix += ": " + classpathForClass.getAbsolutePath();
@@ -310,7 +319,8 @@ public class DefaultGradleRunner extends GradleRunner {
             }
             throw new InvalidRunnerConfigurationException(messagePrefix + ". Please specify a Gradle runtime to use via GradleRunner.withGradleVersion() or similar.");
         }
-        return new InstalledGradleDistribution(gradleHome);
+        return GradleProvider.installation(gradleInstallation.getGradleHome());
     }
+
 
 }

@@ -26,17 +26,19 @@ import org.gradle.tooling.model.gradle.GradleBuild;
 public class GradleBuildAdapterProducer implements ModelProducer {
     private final ProtocolToModelAdapter adapter;
     private final ModelProducer delegate;
+    private final HasCompatibilityMapping mappingProvider;
 
-    public GradleBuildAdapterProducer(ProtocolToModelAdapter adapter, ModelProducer delegate) {
+    public GradleBuildAdapterProducer(ProtocolToModelAdapter adapter, ModelProducer delegate, HasCompatibilityMapping mappingProvider) {
         this.adapter = adapter;
         this.delegate = delegate;
+        this.mappingProvider = mappingProvider;
     }
 
     public <T> T produceModel(Class<T> type, ConsumerOperationParameters operationParameters) {
         if (type.equals(GradleBuild.class)) {
             GradleProject gradleProject = delegate.produceModel(GradleProject.class, operationParameters);
             final DefaultGradleBuild convert = new GradleBuildConverter().convert(gradleProject);
-            return adapter.adapt(type, convert);
+            return mappingProvider.applyCompatibilityMapping(adapter.builder(type), operationParameters).build(convert);
         }
         return delegate.produceModel(type, operationParameters);
     }

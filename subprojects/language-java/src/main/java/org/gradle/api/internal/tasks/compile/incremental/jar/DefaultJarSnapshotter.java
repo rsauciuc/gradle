@@ -15,44 +15,61 @@
  */
 package org.gradle.api.internal.tasks.compile.incremental.jar;
 
-import org.gradle.api.file.FileTree;
+import com.google.common.collect.Maps;
+import com.google.common.hash.HashCode;
+import org.gradle.api.UncheckedIOException;
 import org.gradle.api.file.FileVisitDetails;
 import org.gradle.api.file.FileVisitor;
-import org.gradle.api.internal.hash.Hasher;
+import org.gradle.api.internal.hash.FileHasher;
 import org.gradle.api.internal.tasks.compile.incremental.analyzer.ClassDependenciesAnalyzer;
-import org.gradle.api.internal.tasks.compile.incremental.analyzer.ClassFilesAnalyzer;
+import org.gradle.api.internal.tasks.compile.incremental.deps.ClassAnalysis;
+import org.gradle.api.internal.tasks.compile.incremental.deps.ClassDependentsAccumulator;
 
-import java.util.HashMap;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Map;
 
 class DefaultJarSnapshotter {
-
-    private final Hasher hasher;
+    private final FileHasher hasher;
     private final ClassDependenciesAnalyzer analyzer;
 
-    public DefaultJarSnapshotter(Hasher hasher, ClassDependenciesAnalyzer analyzer) {
+    public DefaultJarSnapshotter(FileHasher hasher, ClassDependenciesAnalyzer analyzer) {
         this.hasher = hasher;
         this.analyzer = analyzer;
     }
 
-    public JarSnapshot createSnapshot(byte[] hash, JarArchive jarArchive) {
-        return createSnapshot(hash, jarArchive.contents, new ClassFilesAnalyzer(analyzer));
-    }
+    public JarSnapshot createSnapshot(HashCode hash, JarArchive jarArchive) {
+        final Map<String, HashCode> hashes = Maps.newHashMap();
+        final ClassDependentsAccumulator accumulator = new ClassDependentsAccumulator();
 
-    JarSnapshot createSnapshot(byte[] hash, FileTree classes, final ClassFilesAnalyzer analyzer) {
-        final Map<String, byte[]> hashes = new HashMap<String, byte[]>();
-        classes.visit(new FileVisitor() {
+        jarArchive.contents.visit(new FileVisitor() {
             public void visitDir(FileVisitDetails dirDetails) {
             }
 
             public void visitFile(FileVisitDetails fileDetails) {
-                analyzer.visitFile(fileDetails);
-                String className = fileDetails.getPath().replaceAll("/", ".").replaceAll("\\.class$", "");
-                byte[] classHash = hasher.hash(fileDetails.getFile());
-                hashes.put(className, classHash);
+                if (!fileDetails.getName().endsWith(".class")) {
+                    return;
+                }
+
+                HashCode classFileHash;
+                InputStream inputStream = fileDetails.open();
+                try {
+                    classFileHash = hasher.hash(inputStream);
+                } finally {
+                    try {
+                        inputStream.close();
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                }
+
+                ClassAnalysis analysis = analyzer.getClassAnalysis(classFileHash, fileDetails);
+                accumulator.addClass(analysis);
+
+                hashes.put(analysis.getClassName(), classFileHash);
             }
         });
 
-        return new JarSnapshot(new JarSnapshotData(hash, hashes, analyzer.getAnalysis()));
+        return new JarSnapshot(new JarSnapshotData(hash, hashes, accumulator.getAnalysis()));
     }
 }

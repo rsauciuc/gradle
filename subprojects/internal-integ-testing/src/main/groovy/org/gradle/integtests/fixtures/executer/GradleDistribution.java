@@ -42,7 +42,7 @@ public interface GradleDistribution {
     /**
      * Creates an executer which will use this distribution.
      */
-    GradleExecuter executer(TestDirectoryProvider testDirectoryProvider);
+    GradleExecuter executer(TestDirectoryProvider testDirectoryProvider, IntegrationTestBuildContext buildContext);
 
     /**
      * Returns true if this distribution supports the given JVM.
@@ -88,6 +88,11 @@ public interface GradleDistribution {
      * Returns true if the tooling API of this distribution correctly implements progress events when in embedded mode.
      */
     boolean isToolingApiEventsInEmbeddedModeSupported();
+
+    /**
+     * Returns true if the tooling API of this distribution incorrectly locks build action implementation classes.
+     */
+    boolean isToolingApiLocksBuildActionClasses();
 
     /**
      * Returns the version of the artifact cache layout

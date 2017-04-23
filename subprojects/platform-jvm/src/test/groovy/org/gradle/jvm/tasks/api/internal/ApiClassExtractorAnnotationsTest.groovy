@@ -16,10 +16,6 @@
 
 package org.gradle.jvm.tasks.api.internal
 
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
-
-@Requires(TestPrecondition.JDK6_OR_LATER)
 class ApiClassExtractorAnnotationsTest extends ApiClassExtractorTestSupport {
 
     void "annotations on class are retained"() {
@@ -229,7 +225,6 @@ class ApiClassExtractorAnnotationsTest extends ApiClassExtractorTestSupport {
         def subAnnotation = annotation.value()
         subAnnotation.annotationType().name == 'SubAnn'
         subAnnotation.value() == 'foo'
-
     }
 
     void "annotation arrays on class are retained"() {
@@ -287,5 +282,48 @@ class ApiClassExtractorAnnotationsTest extends ApiClassExtractorTestSupport {
         def subAnnotations = annotation.value()
         subAnnotations.length == 2
         subAnnotations.collect { it.value() } == ['foo', 'bar']
+    }
+
+    void "annotation arrays of String on class are retained"() {
+        given:
+        def api = toApi([
+            A     : '''
+                @Ann(names={"foo", "bar"})
+                public class A {}
+            ''',
+            Ann   : '''
+                import java.lang.annotation.ElementType;
+                import java.lang.annotation.Retention;
+                import java.lang.annotation.RetentionPolicy;
+                import java.lang.annotation.Target;
+
+                @Retention(RetentionPolicy.RUNTIME)
+                @Target({ElementType.TYPE})
+                public @interface Ann {
+                    String[] names();
+                }
+            '''
+        ])
+
+        when:
+        def clazz = api.classes.A
+        def annotations = clazz.clazz.annotations
+        def annClazz = api.classes.Ann
+
+        def extractedAnn = api.extractAndLoadApiClassFrom(annClazz)
+        def extractedClass = api.extractAndLoadApiClassFrom(clazz)
+        def extractedAnnotations = extractedClass.annotations
+
+        then:
+        api.shouldExtractApiClassFrom(clazz)
+        api.shouldExtractApiClassFrom(annClazz)
+        annotations.size() == 1
+        annotations[0].annotationType().name == 'Ann'
+        extractedAnnotations.size() == 1
+        def annotation = extractedAnnotations[0]
+        annotation.annotationType() == extractedAnn
+        def stringValues = annotation.names()
+        stringValues == ['foo', 'bar']
+
     }
 }

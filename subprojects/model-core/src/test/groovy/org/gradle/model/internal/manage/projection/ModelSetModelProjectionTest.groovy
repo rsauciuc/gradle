@@ -19,7 +19,7 @@ package org.gradle.model.internal.manage.projection
 import org.gradle.api.internal.ClosureBackedAction
 import org.gradle.model.Managed
 import org.gradle.model.ModelSet
-import org.gradle.model.ModelViewClosedException
+import org.gradle.model.ReadOnlyModelViewException
 import org.gradle.model.internal.core.ModelPath
 import org.gradle.model.internal.core.ModelReference
 import org.gradle.model.internal.core.ModelRegistrations
@@ -27,6 +27,8 @@ import org.gradle.model.internal.core.ModelRuleExecutionException
 import org.gradle.model.internal.fixture.ProjectRegistrySpec
 import org.gradle.model.internal.type.ModelType
 import spock.lang.Unroll
+
+import static org.gradle.model.internal.core.NodeInitializerContext.forType
 
 class ModelSetModelProjectionTest extends ProjectRegistrySpec {
     @Managed
@@ -46,7 +48,7 @@ class ModelSetModelProjectionTest extends ProjectRegistrySpec {
 
     def setup() {
         registry.register(
-            ModelRegistrations.of(collectionPath, nodeInitializerRegistry.getNodeInitializer(collectionType))
+            ModelRegistrations.of(collectionPath, nodeInitializerRegistry.getNodeInitializer(forType(collectionType)))
                 .descriptor("define collection")
                 .build()
         )
@@ -151,7 +153,7 @@ class ModelSetModelProjectionTest extends ProjectRegistrySpec {
 
         then:
         def e = thrown ModelRuleExecutionException
-        e.cause instanceof ModelViewClosedException
+        e.cause instanceof ReadOnlyModelViewException
 
         where:
         method << ["afterEach", "beforeEach"]

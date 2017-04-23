@@ -16,15 +16,21 @@
 package org.gradle.api.internal.resolve;
 
 import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
+import org.gradle.api.Nullable;
 import org.gradle.api.UnknownProjectException;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.LibraryBinaryIdentifier;
 import org.gradle.api.artifacts.component.LibraryComponentSelector;
 import org.gradle.api.internal.component.ArtifactType;
-import org.gradle.api.internal.tasks.DefaultTaskDependency;
-import org.gradle.internal.component.local.model.LocalComponentMetaData;
-import org.gradle.internal.component.local.model.PublishArtifactLocalArtifactMetaData;
-import org.gradle.internal.component.model.*;
+import org.gradle.internal.component.external.model.MetadataSourcedComponentArtifacts;
+import org.gradle.internal.component.local.model.LocalComponentMetadata;
+import org.gradle.internal.component.local.model.PublishArtifactLocalArtifactMetadata;
+import org.gradle.internal.component.model.ComponentArtifactMetadata;
+import org.gradle.internal.component.model.ComponentOverrideMetadata;
+import org.gradle.internal.component.model.ComponentResolveMetadata;
+import org.gradle.internal.component.model.DependencyMetadata;
+import org.gradle.internal.component.model.ModuleSource;
 import org.gradle.internal.resolve.ArtifactResolveException;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.internal.resolve.resolver.ArtifactResolver;
@@ -32,101 +38,112 @@ import org.gradle.internal.resolve.resolver.ComponentMetaDataResolver;
 import org.gradle.internal.resolve.resolver.DependencyToComponentIdResolver;
 import org.gradle.internal.resolve.result.BuildableArtifactResolveResult;
 import org.gradle.internal.resolve.result.BuildableArtifactSetResolveResult;
+import org.gradle.internal.resolve.result.BuildableComponentArtifactsResolveResult;
 import org.gradle.internal.resolve.result.BuildableComponentIdResolveResult;
 import org.gradle.internal.resolve.result.BuildableComponentResolveResult;
-import org.gradle.language.base.internal.model.VariantAxisCompatibilityFactory;
-import org.gradle.language.base.internal.model.VariantsMetaData;
 import org.gradle.language.base.internal.resolve.LibraryResolveException;
-import org.gradle.model.ModelMap;
-import org.gradle.model.internal.manage.schema.ModelSchemaStore;
 import org.gradle.model.internal.registry.ModelRegistry;
-import org.gradle.platform.base.BinarySpec;
-import org.gradle.platform.base.ComponentSpecContainer;
-import org.gradle.platform.base.LibrarySpec;
+import org.gradle.platform.base.Binary;
+import org.gradle.platform.base.VariantComponent;
 
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
-import java.util.Set;
 
-public class LocalLibraryDependencyResolver<T extends BinarySpec> implements DependencyToComponentIdResolver, ComponentMetaDataResolver, ArtifactResolver {
-    private final ProjectModelResolver projectModelResolver;
-    private final VariantsMetaData variantsMetaData;
-    private final VariantsMatcher matcher;
+public class LocalLibraryDependencyResolver implements DependencyToComponentIdResolver, ComponentMetaDataResolver, ArtifactResolver {
+    private final VariantBinarySelector variantSelector;
     private final LibraryResolutionErrorMessageBuilder errorMessageBuilder;
     private final LocalLibraryMetaDataAdapter libraryMetaDataAdapter;
-    private final Class<? extends BinarySpec> binaryType;
-    private final Predicate<LibrarySpec> binarySpecPredicate;
+    private final LocalLibraryResolver libraryResolver;
+    private final Class<? extends Binary> binaryType;
+    private final Predicate<VariantComponent> binaryPredicate;
+    private final ProjectModelResolver projectModelResolver;
 
-    public LocalLibraryDependencyResolver(
-            Class<T> binarySpecType,
-            ProjectModelResolver projectModelResolver,
-            List<VariantAxisCompatibilityFactory> selectorFactories,
-            VariantsMetaData variantsMetaData,
-            ModelSchemaStore schemaStore,
-            LocalLibraryMetaDataAdapter libraryMetaDataAdapter,
-            LibraryResolutionErrorMessageBuilder errorMessageBuilder) {
-        this.projectModelResolver = projectModelResolver;
+    public LocalLibraryDependencyResolver(final Class<? extends Binary> binaryType,
+                                          ProjectModelResolver projectModelResolver,
+                                          LocalLibraryResolver libraryResolver,
+                                          VariantBinarySelector variantSelector,
+                                          LocalLibraryMetaDataAdapter libraryMetaDataAdapter,
+                                          LibraryResolutionErrorMessageBuilder errorMessageBuilder) {
         this.libraryMetaDataAdapter = libraryMetaDataAdapter;
-        this.matcher = new VariantsMatcher(selectorFactories, binarySpecType, schemaStore);
+        this.variantSelector = variantSelector;
         this.errorMessageBuilder = errorMessageBuilder;
-        this.variantsMetaData = variantsMetaData;
-        this.binaryType = binarySpecType;
-        this.binarySpecPredicate = new Predicate<LibrarySpec>() {
+        this.projectModelResolver = projectModelResolver;
+        this.libraryResolver = libraryResolver;
+        this.binaryType = binaryType;
+        this.binaryPredicate = new Predicate<VariantComponent>() {
             @Override
-            public boolean apply(LibrarySpec input) {
-                return !input.getBinaries().withType(binaryType).isEmpty();
+            public boolean apply(VariantComponent input) {
+                return Iterables.any(input.getVariants(), new Predicate<Binary>() {
+                    @Override
+                    public boolean apply(Binary input) {
+                        return binaryType.isAssignableFrom(input.getClass());
+                    }
+                });
             }
         };
     }
 
     @Override
-    public void resolve(DependencyMetaData dependency, final BuildableComponentIdResolveResult result) {
+    public void resolve(DependencyMetadata dependency, final BuildableComponentIdResolveResult result) {
         if (dependency.getSelector() instanceof LibraryComponentSelector) {
             LibraryComponentSelector selector = (LibraryComponentSelector) dependency.getSelector();
-            final String selectorProjectPath = selector.getProjectPath();
-            final String libraryName = selector.getLibraryName();
-            LibraryResolutionErrorMessageBuilder.LibraryResolutionResult resolutionResult = doResolve(selectorProjectPath, libraryName);
-            LibrarySpec selectedLibrary = resolutionResult.getSelectedLibrary();
-            if (selectedLibrary != null) {
-                Collection<BinarySpec> allBinaries = selectedLibrary.getBinaries().values();
-                Collection<? extends BinarySpec> compatibleBinaries = matcher.filterBinaries(variantsMetaData, allBinaries);
-                if (!allBinaries.isEmpty() && compatibleBinaries.isEmpty()) {
-                    // no compatible variant found
-                    result.failed(new ModuleVersionResolveException(selector, errorMessageBuilder.noCompatibleVariantErrorMessage(libraryName, allBinaries)));
-                } else if (compatibleBinaries.size() > 1) {
-                    result.failed(new ModuleVersionResolveException(selector, errorMessageBuilder.multipleCompatibleVariantsErrorMessage(libraryName, compatibleBinaries)));
-                } else {
-                    BinarySpec selectedBinary = compatibleBinaries.iterator().next();
-                    DefaultTaskDependency buildDependencies = new DefaultTaskDependency();
-                    buildDependencies.add(selectedBinary);
-                    LocalComponentMetaData metaData = libraryMetaDataAdapter.createLocalComponentMetaData(selectedBinary, buildDependencies, selectorProjectPath);
-                    result.resolved(metaData);
-                }
-            }
-            if (!result.hasResult()) {
-                String message = resolutionResult.toResolutionErrorMessage(binaryType, selector);
-                ModuleVersionResolveException failure = new ModuleVersionResolveException(selector, new LibraryResolveException(message));
-                result.failed(failure);
-            }
+            resolveLibraryAndChooseBinary(result, selector);
         }
     }
 
-    private LibraryResolutionErrorMessageBuilder.LibraryResolutionResult doResolve(String projectPath,
-                                                                                   String libraryName) {
-        try {
-            ModelRegistry projectModel = projectModelResolver.resolveProjectModel(projectPath);
-            ComponentSpecContainer components = projectModel.find("components", ComponentSpecContainer.class);
-            if (components != null) {
-                ModelMap<? extends LibrarySpec> libraries = components.withType(LibrarySpec.class);
-                return LibraryResolutionErrorMessageBuilder.LibraryResolutionResult.of(libraries.values(), libraryName, binarySpecPredicate);
+    private void resolveLibraryAndChooseBinary(BuildableComponentIdResolveResult result, LibraryComponentSelector selector) {
+        final String selectorProjectPath = selector.getProjectPath();
+        final String libraryName = selector.getLibraryName();
+        final String variant = selector.getVariant();
+        LibraryResolutionResult resolutionResult = doResolve(selectorProjectPath, libraryName);
+
+        VariantComponent selectedLibrary = resolutionResult.getSelectedLibrary();
+        if (selectedLibrary == null) {
+            String message = resolutionResult.toResolutionErrorMessage(selector);
+            ModuleVersionResolveException failure = new ModuleVersionResolveException(selector, new LibraryResolveException(message));
+            result.failed(failure);
+            return;
+        }
+
+        Collection<? extends Binary> matchingVariants = chooseMatchingVariants(selectedLibrary, variant);
+        if (matchingVariants.isEmpty()) {
+            // no compatible variant found
+            Iterable<? extends Binary> values = selectedLibrary.getVariants();
+            result.failed(new ModuleVersionResolveException(selector, errorMessageBuilder.noCompatibleVariantErrorMessage(libraryName, values)));
+        } else if (matchingVariants.size() > 1) {
+            result.failed(new ModuleVersionResolveException(selector, errorMessageBuilder.multipleCompatibleVariantsErrorMessage(libraryName, matchingVariants)));
+        } else {
+            Binary selectedBinary = matchingVariants.iterator().next();
+            // TODO:Cedric This is not quite right. We assume that if we are asking for a specific binary, then we resolve to the assembly instead
+            // of the jar, but it should be somehow parametrized
+            LocalComponentMetadata metaData;
+            if (variant == null) {
+                metaData = libraryMetaDataAdapter.createLocalComponentMetaData(selectedBinary, selectorProjectPath, false);
             } else {
-                return LibraryResolutionErrorMessageBuilder.LibraryResolutionResult.emptyResolutionResult();
+                metaData = libraryMetaDataAdapter.createLocalComponentMetaData(selectedBinary, selectorProjectPath, true);
             }
-        } catch (UnknownProjectException e) {
-            return LibraryResolutionErrorMessageBuilder.LibraryResolutionResult.projectNotFound();
+            result.resolved(metaData);
         }
     }
+
+    @Nullable
+    private LibraryResolutionResult doResolve(String selectorProjectPath, String libraryName) {
+        try {
+            ModelRegistry projectModel = projectModelResolver.resolveProjectModel(selectorProjectPath);
+            Collection<VariantComponent> candidates = libraryResolver.resolveCandidates(projectModel, libraryName);
+            if (candidates.isEmpty()) {
+                return LibraryResolutionResult.emptyResolutionResult(binaryType);
+            }
+            return LibraryResolutionResult.of(binaryType, candidates, libraryName, binaryPredicate);
+        } catch (UnknownProjectException e) {
+            return LibraryResolutionResult.projectNotFound(binaryType);
+        }
+    }
+
+    private Collection<? extends Binary> chooseMatchingVariants(VariantComponent selectedLibrary, String variant) {
+            return variantSelector.selectVariants(selectedLibrary, variant);
+    }
+
 
     @Override
     public void resolve(ComponentIdentifier identifier, ComponentOverrideMetadata componentOverrideMetadata, BuildableComponentResolveResult result) {
@@ -140,35 +157,29 @@ public class LocalLibraryDependencyResolver<T extends BinarySpec> implements Dep
     }
 
     @Override
-    public void resolveModuleArtifacts(ComponentResolveMetaData component, ComponentUsage usage, BuildableArtifactSetResolveResult result) {
+    public void resolveArtifacts(ComponentResolveMetadata component, BuildableComponentArtifactsResolveResult result) {
         ComponentIdentifier componentId = component.getComponentId();
         if (isLibrary(componentId)) {
-            ConfigurationMetaData configuration = component.getConfiguration(usage.getConfigurationName());
-            if (configuration != null) {
-                Set<ComponentArtifactMetaData> artifacts = configuration.getArtifacts();
-                result.resolved(artifacts);
-            }
-            if (!result.hasResult()) {
-                result.failed(new ArtifactResolveException(String.format("Unable to resolve artifact for %s", componentId)));
-            }
+            result.resolved(new MetadataSourcedComponentArtifacts());
         }
     }
 
     @Override
-    public void resolveModuleArtifacts(ComponentResolveMetaData component, ArtifactType artifactType, BuildableArtifactSetResolveResult result) {
+    public void resolveArtifactsWithType(ComponentResolveMetadata component, ArtifactType artifactType, BuildableArtifactSetResolveResult result) {
         if (isLibrary(component.getComponentId())) {
-            result.resolved(Collections.<ComponentArtifactMetaData>emptyList());
+            result.resolved(Collections.<ComponentArtifactMetadata>emptySet());
         }
     }
 
     @Override
-    public void resolveArtifact(ComponentArtifactMetaData artifact, ModuleSource moduleSource, BuildableArtifactResolveResult result) {
+    public void resolveArtifact(ComponentArtifactMetadata artifact, ModuleSource moduleSource, BuildableArtifactResolveResult result) {
         if (isLibrary(artifact.getComponentId())) {
-            if (artifact instanceof PublishArtifactLocalArtifactMetaData) {
-                result.resolved(((PublishArtifactLocalArtifactMetaData) artifact).getFile());
+            if (artifact instanceof PublishArtifactLocalArtifactMetadata) {
+                result.resolved(((PublishArtifactLocalArtifactMetadata) artifact).getFile());
             } else {
                 result.failed(new ArtifactResolveException("Unsupported artifact metadata type: " + artifact));
             }
         }
     }
+
 }

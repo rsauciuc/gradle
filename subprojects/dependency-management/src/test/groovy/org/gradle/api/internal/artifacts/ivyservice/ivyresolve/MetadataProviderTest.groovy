@@ -16,20 +16,23 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.ivyresolve
 
-import org.apache.ivy.core.module.descriptor.ModuleDescriptor
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
-import org.gradle.internal.component.external.model.DefaultIvyModuleResolveMetaData
-import org.gradle.internal.component.external.model.MutableModuleComponentResolveMetaData
-import org.gradle.internal.component.model.DependencyMetaData
+import org.gradle.api.artifacts.ComponentMetadataSupplier
+import org.gradle.api.internal.artifacts.ivyservice.NamespaceId
+import org.gradle.internal.component.external.model.IvyModuleResolveMetadata
+import org.gradle.internal.component.external.model.ModuleComponentResolveMetadata
+import org.gradle.internal.component.model.DependencyMetadata
 import org.gradle.internal.resolve.result.DefaultBuildableModuleComponentMetaDataResolveResult
 import spock.lang.Specification
 
 class MetadataProviderTest extends Specification {
-    def dep = Stub(DependencyMetaData)
+    def dep = Stub(DependencyMetadata)
     def id = Stub(ModuleComponentIdentifier) {
+        getGroup() >> 'group'
+        getName() >> 'name'
         getVersion() >> "1.2"
     }
-    def metaData = Stub(MutableModuleComponentResolveMetaData)
+    def metaData = Stub(ModuleComponentResolveMetadata)
     def resolveState = Mock(ModuleComponentResolveState)
     def metadataProvider = new MetadataProvider(resolveState)
 
@@ -91,9 +94,14 @@ class MetadataProviderTest extends Specification {
 
     def "can provide Ivy descriptor" () {
         given:
-        def metaData = new DefaultIvyModuleResolveMetaData(Stub(ModuleDescriptor) {
-            getStatus() >> "test"
-        })
+        def extraInfo = [:]
+        extraInfo.put(new NamespaceId("baz", "foo"), "extraInfoValue")
+
+        def metaData = Stub(IvyModuleResolveMetadata)
+        metaData.status >> "test"
+        metaData.branch >> "branchValue"
+        metaData.extraInfo >> extraInfo
+
         resolveState.resolve() >> {
             def result = new DefaultBuildableModuleComponentMetaDataResolveResult()
             result.resolved(metaData)
@@ -105,6 +113,8 @@ class MetadataProviderTest extends Specification {
 
         then:
         returned.ivyStatus == "test"
+        returned.branch == "branchValue"
+        returned.extraInfo.get("foo") == "extraInfoValue"
     }
 
     def "returns null when not Ivy descriptor" () {
@@ -117,5 +127,25 @@ class MetadataProviderTest extends Specification {
 
         expect:
         metadataProvider.getIvyModuleDescriptor() == null
+    }
+
+    def "can use a metadata rule to provide metadata"() {
+        given:
+        resolveState.id >> id
+        resolveState.componentMetadataSupplier >> Mock(ComponentMetadataSupplier) {
+            execute(_) >> { args ->
+                def builder = args[0].result
+                builder.status = 'foo'
+                builder.statusScheme = ['foo', 'bar']
+            }
+        }
+
+        when:
+        def componentMetadata = metadataProvider.componentMetadata
+
+        then:
+        0 * resolveState.resolve()
+        componentMetadata.status == 'foo'
+        componentMetadata.statusScheme == ['foo', 'bar']
     }
 }

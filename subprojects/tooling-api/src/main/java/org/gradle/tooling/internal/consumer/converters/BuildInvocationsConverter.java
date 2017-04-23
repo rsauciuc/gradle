@@ -30,12 +30,8 @@ import java.util.SortedSet;
 
 public class BuildInvocationsConverter {
     public ConsumerProvidedBuildInvocations convert(GradleProject project) {
-        GradleProject rootProject = project;
-        while (rootProject.getParent() != null) {
-            rootProject = rootProject.getParent();
-        }
-        List<ConsumerProvidedTaskSelector> selectors = buildRecursively(rootProject);
-        return new ConsumerProvidedBuildInvocations(selectors, convertTasks(rootProject.getTasks()));
+        List<ConsumerProvidedTaskSelector> selectors = buildRecursively(project);
+        return new ConsumerProvidedBuildInvocations(project.getProjectIdentifier(), selectors, convertTasks(project.getTasks()));
     }
 
     private List<ConsumerProvidedTaskSelector> buildRecursively(GradleProject project) {

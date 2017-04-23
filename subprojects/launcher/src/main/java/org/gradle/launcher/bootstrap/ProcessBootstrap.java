@@ -19,10 +19,12 @@ import org.gradle.api.internal.ClassPathRegistry;
 import org.gradle.api.internal.DefaultClassPathProvider;
 import org.gradle.api.internal.DefaultClassPathRegistry;
 import org.gradle.api.internal.classpath.DefaultModuleRegistry;
-import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.classloader.ClassLoaderFactory;
+import org.gradle.internal.classloader.ClassLoaderUtils;
 import org.gradle.internal.classloader.DefaultClassLoaderFactory;
-import org.gradle.internal.classloader.MutableURLClassLoader;
+import org.gradle.internal.classloader.VisitableURLClassLoader;
+import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.installation.CurrentGradleInstallation;
 
 import java.lang.reflect.Method;
 
@@ -41,16 +43,26 @@ public class ProcessBootstrap {
     }
 
     private void runNoExit(String mainClassName, String[] args) throws Exception {
-        ClassPathRegistry classPathRegistry = new DefaultClassPathRegistry(new DefaultClassPathProvider(new DefaultModuleRegistry()));
+        ClassPathRegistry classPathRegistry = new DefaultClassPathRegistry(new DefaultClassPathProvider(new DefaultModuleRegistry(CurrentGradleInstallation.get())));
         ClassLoaderFactory classLoaderFactory = new DefaultClassLoaderFactory();
         ClassPath antClasspath = classPathRegistry.getClassPath("ANT");
         ClassPath runtimeClasspath = classPathRegistry.getClassPath("GRADLE_RUNTIME");
         ClassLoader antClassLoader = classLoaderFactory.createIsolatedClassLoader(antClasspath);
-        ClassLoader runtimeClassLoader = new MutableURLClassLoader(antClassLoader, runtimeClasspath);
+        ClassLoader runtimeClassLoader = new VisitableURLClassLoader(antClassLoader, runtimeClasspath);
+
+        ClassLoader oldClassLoader = Thread.currentThread().getContextClassLoader();
         Thread.currentThread().setContextClassLoader(runtimeClassLoader);
-        Class<?> mainClass = runtimeClassLoader.loadClass(mainClassName);
-        Object entryPoint = mainClass.newInstance();
-        Method mainMethod = mainClass.getMethod("run", String[].class);
-        mainMethod.invoke(entryPoint, new Object[]{args});
+
+        try {
+            Class<?> mainClass = runtimeClassLoader.loadClass(mainClassName);
+            Object entryPoint = mainClass.newInstance();
+            Method mainMethod = mainClass.getMethod("run", String[].class);
+            mainMethod.invoke(entryPoint, new Object[]{args});
+        } finally {
+            Thread.currentThread().setContextClassLoader(oldClassLoader);
+
+            ClassLoaderUtils.tryClose(runtimeClassLoader);
+            ClassLoaderUtils.tryClose(antClassLoader);
+        }
     }
 }

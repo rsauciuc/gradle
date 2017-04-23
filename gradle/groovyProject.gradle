@@ -1,11 +1,12 @@
+import org.gradle.build.ClasspathManifest
+
 import java.util.jar.Attributes
 
 apply plugin: 'groovy'
 
 archivesBaseName = "gradle-${name.replaceAll("\\p{Upper}") { "-${it.toLowerCase()}" }}"
 
-sourceCompatibility = 1.5
-targetCompatibility = 1.5
+sourceCompatibility = 1.7
 
 ext {
     compileTasks = tasks.matching { it instanceof JavaCompile || it instanceof GroovyCompile }
@@ -16,7 +17,7 @@ ext {
 }
 
 dependencies {
-    testCompile libraries.junit, libraries.jmock, libraries.spock
+    testCompile libraries.junit, libraries.jmock, libraries.spock, libraries.groovy
 }
 
 // Extracted as it's also used by buildSrc
@@ -28,43 +29,41 @@ sourceSets {
     main.output.dir generatedResourcesDir, builtBy: classpathManifest
 }
 
-if (!javaVersion.java6Compatible) {
-    sourceSets.all {
-        java.exclude '**/jdk6/**'
-        groovy.exclude '**/jdk6/**'
-    }
-}
-if (!javaVersion.java7Compatible) {
-    sourceSets.all {
-        java.exclude '**/jdk7/**'
-        groovy.exclude '**/jdk7/**'
-    }
-}
-
 testTasks.all { task ->
     maxParallelForks = rootProject.maxParallelForks
     if (isCiServer) {
-        systemProperties['org.gradle.test.maxParallelForks'] = maxParallelForks
-        systemProperties['org.gradle.ci.agentCount'] = 2
-        systemProperties['org.gradle.ci.agentNum'] = rootProject.agentNum
-        doFirst {
-            println "maxParallelForks for '$task.path' is $task.maxParallelForks"
+        def ciProperties = [
+            'org.gradle.test.maxParallelForks': maxParallelForks,
+            'org.gradle.ci.agentCount': 2,
+            'org.gradle.ci.agentNum': rootProject.agentNum,
+        ]
+        systemProperties(ciProperties)
+        // Ignore Forking/agentNum properties in order to be able to pull tests
+        inputs.property('systemProperties') {
+            systemProperties - ciProperties
         }
     }
-    if (javaVersion.java6 || javaVersion.java7) {
-        task.jvmArgs '-XX:+CMSClassUnloadingEnabled'
+    if (javaVersion.java7) {
+        // enable class unloading
+        task.jvmArgs '-XX:+UseConcMarkSweepGC', '-XX:+CMSClassUnloadingEnabled'
+    }
+    doFirst {
+        if (isCiServer) {
+            println "maxParallelForks for '$task.path' is $task.maxParallelForks"
+        }
     }
 }
 
 jarTasks.all { jar ->
+    jar.version = baseVersion
     jar.manifest.mainAttributes(
         (Attributes.Name.IMPLEMENTATION_TITLE.toString()): 'Gradle',
-        (Attributes.Name.IMPLEMENTATION_VERSION.toString()): version,
+        (Attributes.Name.IMPLEMENTATION_VERSION.toString()): baseVersion
     )
 }
 
 // Configures the project to use the test fixtures from another project, which by default is core.
-// Note this is not used to provide test fixtures, see gradle/testFixtures.gradle for that
+// Note this is not used to create test fixtures in this project, see gradle/testFixtures.gradle for that
 ext.useTestFixtures = { params = [:] ->
     def projectPath = params.project ?: ":core"
     def sourceSet = params.sourceSet ?: "test"
@@ -84,32 +83,13 @@ if (file("src/testFixtures").exists()) {
 
 apply from: "$rootDir/gradle/integTest.gradle"
 
-class ClasspathManifest extends DefaultTask {
-
-    FileCollection input = project.configurations.runtime
-
-    @OutputFile
-    File getManifestFile() {
-        return new File(project.generatedResourcesDir, "${project.archivesBaseName}-classpath.properties")
-    }
-
-    @Input
-    Properties getProperties() {
-        def properties = new Properties()
-        properties.runtime = input.fileCollection {
-            (it instanceof ExternalDependency) || (it instanceof FileCollectionDependency)
-        }.collect { it.name }.join(',')
-        properties.projects = input.allDependencies.withType(ProjectDependency).collect { it.dependencyProject.archivesBaseName }.join(',')
-        return properties
-    }
-
-    @TaskAction
-    def generate() {
-        manifestFile.withOutputStream { properties.save(it, 'module definition') }
-    }
+if (file("src/performanceTest").exists()) {
+    apply from: "$rootDir/gradle/performanceTest.gradle"
 }
 
-ext.ClasspathManifest = ClasspathManifest
+if (file("src/jmh").exists()) {
+    apply from: "$rootDir/gradle/jmh.gradle"
+}
 
 // This is here mostly for the TravisCI build.
 // It advertises as an ANSI capable terminal but isn't, so we run with -q there to make

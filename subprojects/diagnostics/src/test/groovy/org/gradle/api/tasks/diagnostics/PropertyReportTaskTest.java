@@ -17,6 +17,7 @@ package org.gradle.api.tasks.diagnostics;
 
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.tasks.diagnostics.internal.PropertyReportRenderer;
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider;
 import org.gradle.util.GUtil;
 import org.gradle.util.TestUtil;
 import org.jmock.Expectations;
@@ -25,6 +26,7 @@ import org.jmock.integration.junit4.JMock;
 import org.jmock.integration.junit4.JUnit4Mockery;
 import org.jmock.lib.legacy.ClassImposteriser;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -36,6 +38,9 @@ public class PropertyReportTaskTest {
     private ProjectInternal project;
     private PropertyReportTask task;
     private PropertyReportRenderer renderer;
+
+    @Rule
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
 
     @Before
     public void setup() {
@@ -50,22 +55,22 @@ public class PropertyReportTaskTest {
             will(returnValue(null));
         }});
 
-        task = TestUtil.createTask(PropertyReportTask.class);
+        task = TestUtil.create(temporaryFolder).task(PropertyReportTask.class);
         task.setRenderer(renderer);
     }
 
     @Test
     public void passesEachProjectPropertyToRenderer() throws IOException {
         context.checking(new Expectations() {{
-            one(project).getProperties();
+            oneOf(project).getProperties();
             will(returnValue(GUtil.map("b", "value2", "a", "value1")));
 
             Sequence sequence = context.sequence("seq");
 
-            one(renderer).addProperty("a", "value1");
+            oneOf(renderer).addProperty("a", "value1");
             inSequence(sequence);
 
-            one(renderer).addProperty("b", "value2");
+            oneOf(renderer).addProperty("b", "value2");
             inSequence(sequence);
         }});
 
@@ -75,14 +80,14 @@ public class PropertyReportTaskTest {
     @Test
     public void doesNotShowContentsOfThePropertiesProperty() throws IOException {
         context.checking(new Expectations() {{
-            one(project).getProperties();
+            oneOf(project).getProperties();
             will(returnValue(GUtil.map("prop", "value", "properties", "prop")));
 
             Sequence sequence = context.sequence("seq");
 
-            one(renderer).addProperty("prop", "value");
+            oneOf(renderer).addProperty("prop", "value");
             inSequence(sequence);
-            one(renderer).addProperty("properties", "{...}");
+            oneOf(renderer).addProperty("properties", "{...}");
             inSequence(sequence);
         }});
 

@@ -16,20 +16,22 @@
 package org.gradle.api.tasks
 
 import org.gradle.api.internal.file.copy.CopyAction
+import org.gradle.internal.Actions
+import org.gradle.internal.Transformers
 import org.gradle.test.fixtures.file.WorkspaceTest
 import org.gradle.util.TestUtil
-import org.junit.Test
+import spock.lang.Unroll
 
+@SuppressWarnings("GroovyPointlessBoolean")
 class AbstractCopyTaskTest extends WorkspaceTest {
 
     TestCopyTask task
 
     def setup() {
-        task = TestUtil.createTask(TestCopyTask)
+        task = TestUtil.create(temporaryFolder).task(TestCopyTask)
     }
 
-    @Test
-    public void copySpecMethodsDelegateToMainSpecOfCopyAction() {
+    def "copy spec methods delegate to main spec of copy action"() {
         given:
         file("include") << "bar"
 
@@ -45,6 +47,36 @@ class AbstractCopyTaskTest extends WorkspaceTest {
         task.mainSpec.buildRootResolver().source.files == task.project.fileTree(testDirectory).files
     }
 
+    @Unroll
+    def "task output caching is disabled when #description is used"() {
+        expect:
+        task.outputs.cachingState.enabled == false
+
+        when:
+        task.outputs.cacheIf { true }
+        then:
+        task.outputs.cachingState.enabled == true
+
+        when:
+        method(task)
+        then:
+        task.outputs.cachingState.enabled == false
+
+        where:
+        description                 | method
+        "outputs.cacheIf { false }" | { TestCopyTask task -> task.outputs.cacheIf { false } }
+        "eachFile(Closure)"         | { TestCopyTask task -> task.eachFile {} }
+        "eachFile(Action)"          | { TestCopyTask task -> task.eachFile(Actions.doNothing()) }
+        "expand(Map)"               | { TestCopyTask task -> task.expand([:]) }
+        "filter(Closure)"           | { TestCopyTask task -> task.filter {} }
+        "filter(Class)"             | { TestCopyTask task -> task.filter(FilterReader) }
+        "filter(Map, Class)"        | { TestCopyTask task -> task.filter([:], FilterReader) }
+        "filter(Transformer)"       | { TestCopyTask task -> task.filter(Transformers.noOpTransformer()) }
+        "rename(Closure)"           | { TestCopyTask task -> task.rename {} }
+        "rename(Pattern, String)"   | { TestCopyTask task -> task.rename(/(.*)/, '$1') }
+        "rename(Transformer)"       | { TestCopyTask task -> task.rename(Transformers.noOpTransformer()) }
+    }
+
     static class TestCopyTask extends AbstractCopyTask {
         CopyAction copyAction
 
@@ -52,5 +84,9 @@ class AbstractCopyTaskTest extends WorkspaceTest {
             copyAction
         }
 
+        @OutputDirectory
+        File getDestinationDir() {
+            project.file("dest")
+        }
     }
 }

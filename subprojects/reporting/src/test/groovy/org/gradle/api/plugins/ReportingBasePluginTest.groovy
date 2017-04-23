@@ -15,20 +15,23 @@
  */
 package org.gradle.api.plugins
 
-import org.gradle.api.internal.project.DefaultProject
 import org.gradle.api.reporting.ReportingExtension
-import org.gradle.util.TestUtil
-import spock.lang.Specification
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
-public class ReportingBasePluginTest extends Specification {
+public class ReportingBasePluginTest extends AbstractProjectBuilderSpec {
 
-    DefaultProject project = TestUtil.createRootProject();
+    def "can apply plugin by id"() {
+        given:
+        project.apply plugin: 'reporting-base'
 
-    def setup() {
-        project.pluginManager.apply(ReportingBasePlugin)
+        expect:
+        project.plugins.hasPlugin(ReportingBasePlugin)
     }
 
     def "adds reporting extension"() {
+        given:
+        project.pluginManager.apply(ReportingBasePlugin)
+
         expect:
         project.reporting instanceof ReportingExtension
 

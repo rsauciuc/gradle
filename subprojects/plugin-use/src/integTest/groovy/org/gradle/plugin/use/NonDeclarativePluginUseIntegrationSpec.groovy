@@ -170,7 +170,7 @@ class NonDeclarativePluginUseIntegrationSpec extends AbstractIntegrationSpec {
     def "dependencies of non declarative plugins influence buildscript dependency resolution"() {
         given:
         [1, 2].each { n ->
-            def m = service.m2repo.module("test", "test", n)
+            def m = service.m2repo.module("test", "test", n as String)
             m.publish().allowAll()
 
             file("j$n").with {
@@ -203,12 +203,16 @@ class NonDeclarativePluginUseIntegrationSpec extends AbstractIntegrationSpec {
 
             $USE
 
-            task scriptTask << {
-                println "scriptTask - " + this.getClass().classLoader.getResource('d/v.txt').text
+            task scriptTask {
+                doLast {
+                    println "scriptTask - " + this.getClass().classLoader.getResource('d/v.txt').text
+                }
             }
 
-            task buildscriptDependencies << {
-                println "buildscriptDependencies - " + buildscript.configurations.classpath.resolvedConfiguration.resolvedArtifacts.find { it.name == "test" }.moduleVersion.id.version
+            task buildscriptDependencies {
+                doLast {
+                    println "buildscriptDependencies - " + buildscript.configurations.classpath.resolvedConfiguration.resolvedArtifacts.find { it.name == "test" }.moduleVersion.id.version
+                }
             }
         """
 
@@ -261,6 +265,29 @@ class NonDeclarativePluginUseIntegrationSpec extends AbstractIntegrationSpec {
         and:
         failure.assertHasDescription("An exception occurred applying plugin request [id: 'org.myplugin', version: '1.0']")
         failure.assertHasCause("Could not create plugin of type 'OtherPlugin'.")
+        failure.assertHasLineNumber(2)
+    }
+
+    def "failure due to plugin instantiation throwing"() {
+        when:
+        expectPluginQuery()
+        def module = service.m2repo.module(GROUP, ARTIFACT, VERSION)
+        module.allowAll()
+        pluginBuilder.addNonConstructablePlugin("org.myplugin", "OtherPlugin")
+        pluginBuilder.publishTo(executer, module.artifactFile)
+
+        and:
+        buildScript """
+            $USE
+        """
+
+        then:
+        fails "tasks"
+
+        and:
+        failure.assertHasDescription("An exception occurred applying plugin request [id: 'org.myplugin', version: '1.0']")
+        failure.assertHasCause("Could not create plugin of type 'OtherPlugin'.")
+        failure.assertHasCause("broken plugin")
         failure.assertHasLineNumber(2)
     }
 

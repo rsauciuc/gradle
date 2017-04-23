@@ -23,15 +23,14 @@ import org.gradle.nativeplatform.toolchain.NativeToolChain
 import org.gradle.nativeplatform.toolchain.NativeToolChainRegistry
 import org.gradle.nativeplatform.toolchain.internal.NativeToolChainInternal
 import org.gradle.nativeplatform.toolchain.internal.NativeToolChainRegistryInternal
-import org.gradle.util.TestUtil
-import spock.lang.Specification
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
-abstract class NativeToolChainPluginTest extends Specification {
+abstract class NativeToolChainPluginTest extends AbstractProjectBuilderSpec {
 
-    def project = TestUtil.createRootProject()
-    def registry = project.modelRegistry
+    def registry
 
     def setup() {
+        registry = project.modelRegistry
         project.pluginManager.apply(getPluginClass())
     }
 

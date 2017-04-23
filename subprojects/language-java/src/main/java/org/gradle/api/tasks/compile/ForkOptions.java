@@ -13,30 +13,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 package org.gradle.api.tasks.compile;
 
+import org.gradle.api.Incubating;
 import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
+import org.gradle.util.DeprecationLogger;
+
+import java.io.File;
 
 /**
  * Fork options for Java compilation. Only take effect if {@code CompileOptions.fork} is {@code true}.
  */
 public class ForkOptions extends BaseForkOptions {
     private static final long serialVersionUID = 0;
+    private static final String EXECUTABLE_DEPRECATION_MESSAGE = "The executable property on ForkOptions has been deprecated and is scheduled to be removed in Gradle 5.0. Please use javaHome instead.";
 
     private String executable;
 
     private String tempDir;
 
+    private File javaHome;
+
     /**
      * Returns the compiler executable to be used. If set,
      * a new compiler process will be forked for every compile task.
      * Defaults to {@code null}.
+     *
+     * @deprecated Use {@link #getJavaHome()} instead
      */
     @Input
     @Optional
+    @Deprecated
     public String getExecutable() {
+        DeprecationLogger.nagUserWith(EXECUTABLE_DEPRECATION_MESSAGE);
         return executable;
     }
 
@@ -44,9 +56,38 @@ public class ForkOptions extends BaseForkOptions {
      * Sets the compiler executable to be used. If set,
      * a new compiler process will be forked for every compile task.
      * Defaults to {@code null}.
+     *
+     * @deprecated Use {@link #setJavaHome(File)} instead
      */
+    @Deprecated
     public void setExecutable(String executable) {
+        DeprecationLogger.nagUserWith(EXECUTABLE_DEPRECATION_MESSAGE);
         this.executable = executable;
+    }
+
+    /**
+     * Returns the Java home which contains the compiler to use.
+     * If set, a new compiler process will be forked for every compile task.
+     * Defaults to {@code null}.
+     *
+     * @since 3.5
+     */
+    @Internal
+    @Incubating
+    public File getJavaHome() {
+        return javaHome;
+    }
+
+    /**
+     * Sets the Java home which contains the compiler to use.
+     * If set, a new compiler process will be forked for every compile task.
+     * Defaults to {@code null}.
+     *
+     * @since 3.5
+     */
+    @Incubating
+    public void setJavaHome(File javaHome) {
+        this.javaHome = javaHome;
     }
 
     /**
@@ -54,6 +95,7 @@ public class ForkOptions extends BaseForkOptions {
      * command line arguments to the compiler process. Defaults to {@code null},
      * in which case the directory will be chosen automatically.
      */
+    @Internal
     public String getTempDir() {
         return tempDir;
     }

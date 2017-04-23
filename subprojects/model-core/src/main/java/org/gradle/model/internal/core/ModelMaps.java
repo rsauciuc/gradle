@@ -17,31 +17,30 @@
 package org.gradle.model.internal.core;
 
 import org.gradle.internal.BiAction;
+import org.gradle.internal.Cast;
 import org.gradle.model.ModelMap;
-import org.gradle.model.collection.internal.ChildNodeInitializerStrategyAccessors;
-import org.gradle.model.collection.internal.ModelMapModelProjection;
 import org.gradle.model.internal.registry.RuleContext;
 import org.gradle.model.internal.type.ModelType;
 import org.gradle.model.internal.type.ModelTypes;
 
-import java.util.Collections;
-import java.util.List;
-
 public class ModelMaps {
-    public static <T> MutableModelNode addModelMapNode(MutableModelNode modelNode, Class<T> elementType, String name) {
-        final ModelType<T> elementModelType = ModelType.of(elementType);
+
+    private static final ModelReference<NodeInitializerRegistry> NODE_INITIALIZER_REGISTRY_MODEL_REFERENCE = ModelReference.of(NodeInitializerRegistry.class);
+    private static final ModelType<ChildNodeInitializerStrategy<?>> CHILD_NODE_INITIALIZER_STRATEGY_MODEL_TYPE =
+        Cast.uncheckedCast(ModelType.of(ChildNodeInitializerStrategy.class));
+
+    public static <T> MutableModelNode addModelMapNode(MutableModelNode modelNode, ModelType<T> elementModelType, String name) {
         modelNode.addLink(
-            ModelRegistrations.of(
-                modelNode.getPath().child(name), ModelReference.of(NodeInitializerRegistry.class), new BiAction<MutableModelNode, List<ModelView<?>>>() {
+            ModelRegistrations.of(modelNode.getPath().child(name))
+                .action(ModelActionRole.Create, NODE_INITIALIZER_REGISTRY_MODEL_REFERENCE, new BiAction<MutableModelNode, NodeInitializerRegistry>() {
                     @Override
-                    public void execute(MutableModelNode node, List<ModelView<?>> modelViews) {
-                        NodeInitializerRegistry nodeInitializerRegistry = (NodeInitializerRegistry) modelViews.get(0).getInstance();
+                    public void execute(MutableModelNode node, NodeInitializerRegistry nodeInitializerRegistry) {
                         ChildNodeInitializerStrategy<T> childFactory =
-                            NodeBackedModelMap.createUsingRegistry(elementModelType, nodeInitializerRegistry);
-                        node.setPrivateData(ModelType.of(ChildNodeInitializerStrategy.class), childFactory);
+                            NodeBackedModelMap.createUsingRegistry(nodeInitializerRegistry);
+                        node.setPrivateData(CHILD_NODE_INITIALIZER_STRATEGY_MODEL_TYPE, childFactory);
                     }
                 })
-                .descriptor(modelNode.getDescriptor(), "." + name)
+                .descriptor(modelNode.getDescriptor())
                 .withProjection(
                     ModelMapModelProjection.unmanaged(elementModelType, ChildNodeInitializerStrategyAccessors.fromPrivateData())
                 )
@@ -52,14 +51,11 @@ public class ModelMaps {
         return mapNode;
     }
 
-    public static <T> ModelMap<T> asMutableView(MutableModelNode mapNode, Class<T> elementType, String ruleContext) {
-        final ModelType<T> elementModelType = ModelType.of(elementType);
+    public static <T> ModelMap<T> toView(MutableModelNode mapNode, ModelType<T> elementModelType) {
         mapNode.ensureUsable();
         return mapNode.asMutable(
                 ModelTypes.modelMap(elementModelType),
-                RuleContext.nest(ruleContext),
-                Collections.<ModelView<?>>emptyList()
+                RuleContext.get()
         ).getInstance();
-
     }
 }

@@ -17,26 +17,21 @@
 package org.gradle.launcher.daemon
 
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
-import org.gradle.launcher.daemon.client.DefaultDaemonConnector
+import org.gradle.launcher.daemon.client.DaemonStartupMessage
 
 class DaemonStartupMessageIntegrationTest extends DaemonIntegrationSpec {
-
-    def setup() {
-        executer.withDaemonStartingMessageEnabled()
-    }
-
     def "a message is logged when a new daemon is started"() {
         when:
         succeeds()
 
         then:
-        output.contains(DefaultDaemonConnector.STARTING_DAEMON_MESSAGE)
+        output.contains(DaemonStartupMessage.STARTING_DAEMON_MESSAGE)
 
         when:
         succeeds()
 
         then:
-        !output.contains(DefaultDaemonConnector.STARTING_DAEMON_MESSAGE)
+        !output.contains(DaemonStartupMessage.STARTING_DAEMON_MESSAGE)
     }
 
     def "the message is not shown when quiet log level is requested"() {
@@ -47,6 +42,6 @@ class DaemonStartupMessageIntegrationTest extends DaemonIntegrationSpec {
         succeeds()
 
         then:
-        !output.contains(DefaultDaemonConnector.STARTING_DAEMON_MESSAGE)
+        !output.contains(DaemonStartupMessage.STARTING_DAEMON_MESSAGE)
     }
 }

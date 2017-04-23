@@ -76,7 +76,6 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
             @Model
             void createContainer(Container c) {
-                assert c.items == null
                 c.items = INITIAL
             }
 
@@ -120,7 +119,6 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
             @Model
             void createContainer(Container c) {
-                assert c.items == null
                 c.items = INITIAL
             }
 
@@ -164,7 +162,6 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
             @Model
             void createContainer(Container c) {
-                assert c.items == null
                 c.items = INITIAL
             }
 
@@ -208,7 +205,6 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
             @Model
             void createContainer(Container c) {
-                assert c.items == null
                 c.items = INITIAL
             }
 
@@ -237,7 +233,7 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
     }
 
     @Unroll
-    def "rule cannot mutate a managed type with a #type of scalar property when not the subject of the rule"() {
+    def "rule cannot mutate a managed type with a #type of scalar property when a rule input"() {
         when:
         buildScript """
 
@@ -248,7 +244,7 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
         class Rules extends RuleSource {
             @Model
-            void createContainer(Container c) {}
+            void container(Container c) {}
 
             @Mutate
             void addItems(Container c) {
@@ -257,7 +253,7 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
             @Mutate
             void tryToMutate(ModelMap<Task> map, Container c) {
-                c.items.add 'foo'
+                c.items.add 'bar'
             }
         }
 
@@ -268,14 +264,14 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
         fails 'tasks'
 
         and:
-        failure.assertHasCause "Attempt to mutate closed view of model of type 'java.util.$type<java.lang.String>' given to rule 'Rules#tryToMutate'"
+        failure.assertHasCause "Attempt to modify a read only view of model element 'container.items' of type '$type<String>' given to rule Rules#tryToMutate(ModelMap<Task>, Container)"
 
         where:
         type << MANAGED_SCALAR_COLLECTION_TYPES
     }
 
     @Unroll
-    def "rule cannot mutate closed view even using iteratoron #type"() {
+    def "cannot mutate #type subject of a validation rule"() {
         when:
         buildScript """
 
@@ -286,7 +282,44 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
 
         class Rules extends RuleSource {
             @Model
-            void createContainer(Container c) {}
+            void container(Container c) {}
+
+            @Validate
+            void addItems(Container c) {
+                c.items.add 'foo'
+            }
+
+            @Mutate
+            void tryToMutate(ModelMap<Task> map, Container c) {
+            }
+        }
+
+        apply plugin: Rules
+        """
+
+        then:
+        fails 'tasks'
+
+        and:
+        failure.assertHasCause "Attempt to modify a read only view of model element 'container.items' of type '$type<String>' given to rule Rules#addItems(Container)"
+
+        where:
+        type << MANAGED_SCALAR_COLLECTION_TYPES
+    }
+
+    @Unroll
+    def "rule cannot mutate rule input even using iterator on #type"() {
+        when:
+        buildScript """
+
+        @Managed
+        interface Container {
+            $type<String> getItems()
+        }
+
+        class Rules extends RuleSource {
+            @Model
+            void container(Container c) {}
 
             @Mutate
             void addItems(Container c) {
@@ -308,10 +341,73 @@ class ManagedScalarCollectionsIntegrationTest extends AbstractIntegrationSpec {
         fails 'tasks'
 
         and:
-        failure.assertHasCause "Attempt to mutate closed view of model of type 'java.util.$type<java.lang.String>' given to rule 'Rules#tryToMutate'"
+        failure.assertHasCause "Attempt to modify a read only view of model element 'container.items' of type '$type<String>' given to rule Rules#tryToMutate(ModelMap<Task>, Container)"
 
         where:
         type << MANAGED_SCALAR_COLLECTION_TYPES
 
+    }
+
+    @Unroll
+    def "reports problem when managed type declares a #type of managed type"() {
+        when:
+        buildScript """
+        @Managed
+        interface Thing { }
+
+        @Managed
+        interface Container {
+            $type<Thing> getItems()
+        }
+
+        model {
+            container(Container)
+        }
+        """
+
+        then:
+        fails 'model'
+
+        and:
+        failure.assertHasCause "Exception thrown while executing model rule: container(Container) @ build.gradle line 11, column 13"
+        failure.assertHasCause("""A model element of type: 'Container' can not be constructed.
+Its property 'java.util.$type<Thing> items' is not a valid scalar collection
+A scalar collection can not contain 'Thing's
+A valid scalar collection takes the form of List<T> or Set<T> where 'T' is one of (String, Boolean, Character, Byte, Short, Integer, Float, Long, Double, BigInteger, BigDecimal, File)""")
+
+        where:
+        type << MANAGED_SCALAR_COLLECTION_TYPES
+    }
+
+    @Unroll
+    def "reports problem when managed type declares a #type of subtype of scalar type"() {
+        when:
+        buildScript """
+        class Thing extends File {
+            Thing(String s) { super(s) }
+        }
+
+        @Managed
+        interface Container {
+            $type<Thing> getItems()
+        }
+
+        model {
+            container(Container)
+        }
+        """
+
+        then:
+        fails 'model'
+
+        and:
+        failure.assertHasCause "Exception thrown while executing model rule: container(Container) @ build.gradle line 12, column 13"
+        failure.assertHasCause("""A model element of type: 'Container' can not be constructed.
+Its property 'java.util.$type<Thing> items' is not a valid scalar collection
+A scalar collection can not contain 'Thing's
+A valid scalar collection takes the form of List<T> or Set<T> where 'T' is one of (String, Boolean, Character, Byte, Short, Integer, Float, Long, Double, BigInteger, BigDecimal, File)""")
+
+        where:
+        type << MANAGED_SCALAR_COLLECTION_TYPES
     }
 }

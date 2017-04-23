@@ -14,21 +14,24 @@
  * limitations under the License.
  */
 package org.gradle.integtests.resolve.http
+
 import org.gradle.authentication.http.BasicAuthentication
 import org.gradle.authentication.http.DigestAuthentication
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
+import org.gradle.test.fixtures.server.http.AuthScheme
 import org.hamcrest.Matchers
 import spock.lang.Unroll
 
-import static org.gradle.test.fixtures.server.http.HttpServer.AuthScheme.BASIC
-import static org.gradle.test.fixtures.server.http.HttpServer.AuthScheme.DIGEST
-import static org.gradle.test.fixtures.server.http.HttpServer.AuthScheme.HIDE_UNAUTHORIZED
+import static org.gradle.test.fixtures.server.http.AuthScheme.BASIC
+import static org.gradle.test.fixtures.server.http.AuthScheme.DIGEST
+import static org.gradle.test.fixtures.server.http.AuthScheme.HIDE_UNAUTHORIZED
+import static org.gradle.test.fixtures.server.http.AuthScheme.NTLM
 
 class HttpAuthenticationDependencyResolutionIntegrationTest extends AbstractHttpDependencyResolutionTest {
     static String badCredentials = "credentials{username 'testuser'; password 'bad'}"
 
     @Unroll
-    def "can resolve dependencies using #authSchemeName scheme from #serverAuthScheme authenticated HTTP ivy repository"() {
+    def "can resolve dependencies using #authSchemeName scheme from #authScheme authenticated HTTP ivy repository"() {
         given:
         def moduleA = ivyHttpRepo.module('group', 'projectA', '1.2').publish()
         ivyHttpRepo.module('group', 'projectB', '2.1').publish()
@@ -54,13 +57,15 @@ dependencies {
     compile 'group:projectA:1.2'
     compile 'group:projectB:2.+'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar','projectB-2.3.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar','projectB-2.3.jar']
+    }
 }
 """
 
         when:
-        server.authenticationScheme = serverAuthScheme
+        serverAuthScheme = authScheme
 
         and:
         moduleA.ivy.expectGet('username', 'password')
@@ -75,17 +80,18 @@ task listJars << {
         server.authenticationAttempts.asList() == authenticationAttempts
 
         where:
-        authSchemeName     | configuredAuthentication                                                      | serverAuthScheme  | authenticationAttempts
+        authSchemeName     | configuredAuthentication                                                      | authScheme        | authenticationAttempts
         'basic'            | 'authentication { auth(BasicAuthentication) }'                                | BASIC             | ['Basic']
         'digest'           | 'authentication { auth(DigestAuthentication) }'                               | DIGEST            | ['None', 'Digest']
         'default'          | ''                                                                            | BASIC             | ['None', 'Basic']
         'default'          | ''                                                                            | DIGEST            | ['None', 'Digest']
+        'default'          | ''                                                                            | NTLM              | ['None', 'NTLM']
         'basic'            | 'authentication { auth(BasicAuthentication) }'                                | HIDE_UNAUTHORIZED | ['Basic']
         'basic and digest' | 'authentication { basic(BasicAuthentication)\ndigest(DigestAuthentication) }' | DIGEST            | ['Basic', 'Digest']
     }
 
     @Unroll
-    public void "can resolve dependencies using #authSchemeName scheme from #serverAuthScheme authenticated HTTP maven repository"() {
+    public void "can resolve dependencies using #authSchemeName scheme from #authScheme authenticated HTTP maven repository"() {
         given:
         def moduleA = mavenHttpRepo.module('group', 'projectA', '1.2').publish()
         mavenHttpRepo.module('group', 'projectB', '2.0').publish()
@@ -115,13 +121,15 @@ dependencies {
     compile 'group:projectC:3.1-SNAPSHOT'
     compile 'group:projectD:4-SNAPSHOT'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar', 'projectB-2.3.jar', 'projectC-3.1-SNAPSHOT.jar', 'projectD-4-SNAPSHOT.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar', 'projectB-2.3.jar', 'projectC-3.1-SNAPSHOT.jar', 'projectD-4-SNAPSHOT.jar']
+    }
 }
 """
 
         when:
-        server.authenticationScheme = serverAuthScheme
+        serverAuthScheme = authScheme
 
         and:
         moduleA.pom.expectGet('username', 'password')
@@ -144,11 +152,12 @@ task listJars << {
         server.authenticationAttempts.asList() == authenticationAttempts
 
         where:
-        authSchemeName     | configuredAuthentication                                                      | serverAuthScheme  | authenticationAttempts
+        authSchemeName     | configuredAuthentication                                                      | authScheme  | authenticationAttempts
         'basic'            | 'authentication { auth(BasicAuthentication) }'                                | BASIC             | ['Basic']
         'digest'           | 'authentication { auth(DigestAuthentication) }'                               | DIGEST            | ['None', 'Digest']
         'default'          | ''                                                                            | BASIC             | ['None', 'Basic']
         'default'          | ''                                                                            | DIGEST            | ['None', 'Digest']
+        'default'          | ''                                                                            | NTLM              | ['None', 'NTLM']
         'basic'            | 'authentication { auth(BasicAuthentication) }'                                | HIDE_UNAUTHORIZED | ['Basic']
         'basic and digest' | 'authentication { basic(BasicAuthentication)\ndigest(DigestAuthentication) }' | DIGEST            | ['Basic', 'Digest']
     }
@@ -170,13 +179,15 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
 }
 """
 
         and:
-        server.authenticationScheme = authScheme
+        serverAuthScheme = authScheme
         server.allowGetOrHead('/repo/group/projectA/1.2/ivy-1.2.xml', 'username', 'password', module.ivyFile)
 
         then:
@@ -192,8 +203,10 @@ task listJars << {
         authScheme | credsName | creds
         BASIC      | 'missing' | ''
         DIGEST     | 'missing' | ''
+        NTLM       | 'missing' | ''
         BASIC      | 'bad'     | badCredentials
         DIGEST     | 'bad'     | badCredentials
+        NTLM       | 'bad'     | badCredentials
     }
 
     @Unroll
@@ -214,13 +227,15 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
 }
 """
 
         and:
-        server.authenticationScheme = authScheme
+        serverAuthScheme = authScheme
         module.pom.allowGetOrHead('username', 'password')
 
         then:
@@ -236,8 +251,10 @@ task listJars << {
         authScheme | credsName | creds
         BASIC      | 'missing' | ''
         DIGEST     | 'missing' | ''
+        NTLM       | 'missing' | ''
         BASIC      | 'bad'     | badCredentials
         DIGEST     | 'bad'     | badCredentials
+        NTLM       | 'bad'     | badCredentials
     }
 
     @Unroll
@@ -264,13 +281,15 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
 }
 """
 
         and:
-        server.authenticationScheme = authScheme
+        serverAuthScheme = authScheme
         server.allowGetOrHead('/repo/group/projectA/1.2/ivy-1.2.xml', 'username', 'password', module.ivyFile)
 
         then:
@@ -313,13 +332,15 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
 }
 """
 
         and:
-        server.authenticationScheme = authScheme
+        serverAuthScheme = authScheme
         module.pom.allowGetOrHead('username', 'password')
 
         then:
@@ -356,13 +377,15 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
 }
 """
 
         and:
-        server.authenticationScheme = HIDE_UNAUTHORIZED
+        serverAuthScheme = HIDE_UNAUTHORIZED
         server.allowGetOrHead('/repo/group/projectA/1.2/ivy-1.2.xml', 'username', 'password', module.ivyFile)
         server.allowGetOrHead('/repo/group/projectA/1.2/projectA-1.2.jar', 'username', 'password', module.jarFile)
 
@@ -396,13 +419,15 @@ configurations { compile }
 dependencies {
     compile 'group:projectA:1.2'
 }
-task listJars << {
-    assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+task listJars {
+    doLast {
+        assert configurations.compile.collect { it.name } == ['projectA-1.2.jar']
+    }
 }
 """
 
         and:
-        server.authenticationScheme = HIDE_UNAUTHORIZED
+        serverAuthScheme = HIDE_UNAUTHORIZED
         module.pom.allowGetOrHead('username', 'password')
         module.artifact.allowGetOrHead('username', 'password')
 
@@ -414,5 +439,9 @@ task listJars << {
             .assertHasDescription('Execution failed for task \':listJars\'.')
             .assertResolutionFailure(':compile')
             .assertThatCause(Matchers.containsString('Could not find group:projectA:1.2'))
+    }
+
+    void setServerAuthScheme(AuthScheme authScheme) {
+        server.authenticationScheme = authScheme
     }
 }

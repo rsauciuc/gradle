@@ -18,6 +18,7 @@ package org.gradle.api.internal.artifacts.ivyservice
 import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.DependencySet
 import org.gradle.api.internal.artifacts.ConfigurationResolver
+import org.gradle.api.internal.artifacts.DefaultImmutableModuleIdentifierFactory
 import org.gradle.api.internal.artifacts.DefaultResolverResults
 import org.gradle.api.internal.artifacts.component.ComponentIdentifierFactory
 import org.gradle.api.internal.artifacts.configurations.ConfigurationInternal
@@ -31,7 +32,60 @@ class ShortCircuitEmptyConfigurationResolverSpec extends Specification {
     def dependencies = Stub(DependencySet)
     def componentIdentifierFactory = Mock(ComponentIdentifierFactory)
     def results = new DefaultResolverResults()
-    def dependencyResolver = new ShortCircuitEmptyConfigurationResolver(delegate, componentIdentifierFactory);
+    def moduleIdentifierFactory = new DefaultImmutableModuleIdentifierFactory()
+
+    def dependencyResolver = new ShortCircuitEmptyConfigurationResolver(delegate, componentIdentifierFactory, moduleIdentifierFactory);
+
+    def "returns empty build dependencies when no dependencies"() {
+        given:
+        dependencies.isEmpty() >> true
+        configuration.getAllDependencies() >> dependencies
+
+        when:
+        dependencyResolver.resolveBuildDependencies(configuration, results)
+
+        then:
+        def buildDeps = []
+
+        def localComponentsResult = results.resolvedLocalComponents
+        localComponentsResult.resolvedProjectConfigurations as List == []
+
+        def visitedArtifacts = results.visitedArtifacts
+        visitedArtifacts.select(Specs.satisfyAll(), null, Specs.satisfyAll(), true).collectBuildDependencies(buildDeps) == buildDeps
+
+        buildDeps.empty
+
+        and:
+        0 * delegate._
+    }
+
+    def "returns empty graph when no dependencies"() {
+        given:
+        dependencies.isEmpty() >> true
+        configuration.getAllDependencies() >> dependencies
+
+        when:
+        dependencyResolver.resolveGraph(configuration, results)
+
+        then:
+        def result = results.resolutionResult
+        result.allComponents.size() == 1
+        result.allDependencies.empty
+
+        and:
+        def buildDeps = []
+
+        def localComponentsResult = results.resolvedLocalComponents
+        localComponentsResult.resolvedProjectConfigurations as List == []
+
+        def visitedArtifacts = results.visitedArtifacts
+        visitedArtifacts.select(Specs.satisfyAll(), null, Specs.satisfyAll(), true).collectBuildDependencies(buildDeps) == buildDeps
+
+        buildDeps.empty
+
+        and:
+        0 * delegate._
+    }
 
     def "returns empty result when no dependencies"() {
         given:
@@ -39,7 +93,7 @@ class ShortCircuitEmptyConfigurationResolverSpec extends Specification {
         configuration.getAllDependencies() >> dependencies
 
         when:
-        dependencyResolver.resolve(configuration, results)
+        dependencyResolver.resolveGraph(configuration, results)
         dependencyResolver.resolveArtifacts(configuration, results)
 
         then:
@@ -52,23 +106,42 @@ class ShortCircuitEmptyConfigurationResolverSpec extends Specification {
         resolvedConfig.getResolvedArtifacts().isEmpty()
 
         and:
-        def result = results.resolutionResult
-        result.allComponents.size() == 1
-        result.allDependencies.empty
-
-        and:
         0 * delegate._
     }
 
-    def "delegates to backing service when there are one or more dependencies"() {
+    def "delegates to backing service to resolve build dependencies when there are one or more dependencies"() {
         given:
         dependencies.isEmpty() >> false
         configuration.getAllDependencies() >> dependencies
 
         when:
-        dependencyResolver.resolve(configuration, results)
+        dependencyResolver.resolveBuildDependencies(configuration, results)
 
         then:
-        1 * delegate.resolve(configuration, results)
+        1 * delegate.resolveBuildDependencies(configuration, results)
+    }
+
+    def "delegates to backing service to resolve graph when there are one or more dependencies"() {
+        given:
+        dependencies.isEmpty() >> false
+        configuration.getAllDependencies() >> dependencies
+
+        when:
+        dependencyResolver.resolveGraph(configuration, results)
+
+        then:
+        1 * delegate.resolveGraph(configuration, results)
+    }
+
+    def "delegates to backing service to resolve artifacts when there are one or more dependencies"() {
+        given:
+        dependencies.isEmpty() >> false
+        configuration.getAllDependencies() >> dependencies
+
+        when:
+        dependencyResolver.resolveArtifacts(configuration, results)
+
+        then:
+        1 * delegate.resolveArtifacts(configuration, results)
     }
 }

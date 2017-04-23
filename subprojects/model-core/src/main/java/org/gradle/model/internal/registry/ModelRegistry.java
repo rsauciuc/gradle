@@ -65,43 +65,23 @@ public interface ModelRegistry {
     <T> T find(String path, Class<T> type);
 
     /**
-     * Returns the node at the given path at the desired state, if it exists.
-     * <p>
-     * If there is no known node at that path, {@code null} is returned.
-     * <p>
-     * If the node exists but is at a later state than the requested state an exception will be thrown.
-     * If the node is at an earlier state it will be irrevocably transitioned to the desired state and returned.
-     * If it is at the desired state it is returned.
-     *
-     * @param path the path for the node
-     * @param state the desired node state
-     * @return the node at the desired state, or null if node is unknown
-     */
-    @Nullable
-    ModelNode atState(ModelPath path, ModelNode.State state);
-
-    /**
      * Returns the node at the given path at the desired state or later, if it exists.
      * <p>
-     * If there is no known node at that path, {@code null} is returned.
+     * If there is no known node at that path, an {@link IllegalStateException} is thrown.
      * <p>
      * If the node is at an earlier state than desired it will be irrevocably transitioned to the desired state and returned.
      * If it is at the desired state or later it is returned.
      *
      * @param path the path for the node
      * @param state the desired node state
-     * @return the node at the desired state, or null if node is unknown
+     * @return the node at the desired state
      */
-    @Nullable
     ModelNode atStateOrLater(ModelPath path, ModelNode.State state);
+    <T> T atStateOrLater(ModelPath path, ModelType<T> type, ModelNode.State state);
 
     ModelNode.State state(ModelPath path);
 
     void remove(ModelPath path);
-
-    ModelRegistry replace(ModelRegistration newRegistration);
-
-    ModelRegistry registerOrReplace(ModelRegistration newRegistration);
 
     /**
      * Attempts to bind the references of all model rules known at this point in time.
@@ -123,24 +103,29 @@ public interface ModelRegistry {
 
     ModelRegistry register(ModelRegistration registration);
 
+    /**
+     * Bind the given action directly to its subject node in the given role. Calling {@link #bindAllReferences()} fails
+     * if the subject of the action is not matched by any node.
+     */
     ModelRegistry configure(ModelActionRole role, ModelAction action);
 
-    ModelRegistry configure(ModelActionRole role, ModelAction action, ModelPath scope);
-
-    ModelRegistry apply(Class<? extends RuleSource> rules);
-
-    MutableModelNode getRoot();
-
-    @Nullable
-    MutableModelNode node(ModelPath path);
+    /**
+     * Registers a listener and binds the given action in the given role whenever a node that matches the spec is discovered.
+     * Matching nodes that are already discovered when {@code configureMatching()} is called are bound directly.
+     * Unlike with {@link #configure(ModelActionRole, ModelAction)}, {@link #bindAllReferences()} will <em>not</em> fail
+     * if no nodes match the given spec.
+     *
+     * @throws IllegalArgumentException if the given action has a <code>path</code> set.
+     */
+    ModelRegistry configureMatching(ModelSpec spec, ModelActionRole role, ModelAction action);
 
     /**
-     * Resets the state of the model registry, discarding all ephemeral state.
-     *
-     * This method also allows rules that were already added to be added again.
-     * All nodes that are known at the time this method is called are effectively frozen WRT rules.
+     * Registers a listener and applies the given {@link RuleSource} whenever a node that matches the spec is discovered.
+     * Matching nodes that are already discovered when {@code configureMatching()} is called are bound directly.
+     * Unlike with {@link #configure(ModelActionRole, ModelAction)}, {@link #bindAllReferences()} will <em>not</em> fail
+     * if no nodes match the given spec.
      */
-    // TODO Better name for this method?
-    void prepareForReuse();
+    ModelRegistry configureMatching(ModelSpec spec, Class<? extends RuleSource> rules);
 
+    MutableModelNode getRoot();
 }

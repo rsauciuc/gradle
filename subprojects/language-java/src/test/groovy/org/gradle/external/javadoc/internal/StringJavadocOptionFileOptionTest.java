@@ -36,7 +36,7 @@ public class StringJavadocOptionFileOptionTest {
         context.setImposteriser(ClassImposteriser.INSTANCE);
         writerContextMock = context.mock(JavadocOptionFileWriterContext.class);
 
-        stringOption = new StringJavadocOptionFileOption(optionName);
+        stringOption = new StringJavadocOptionFileOption(optionName, null);
     }
 
     @Test
@@ -51,7 +51,7 @@ public class StringJavadocOptionFileOptionTest {
         stringOption.setValue(testValue);
 
         context.checking(new Expectations() {{
-            one(writerContextMock).writeValueOption(optionName, testValue);
+            oneOf(writerContextMock).writeValueOption(optionName, testValue);
         }});
 
         stringOption.write(writerContextMock);

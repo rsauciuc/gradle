@@ -43,7 +43,6 @@ class GradleVersionTest extends Specification {
     def "current version has non-null parts"() {
         expect:
         version.version
-        version.buildTime
         version.nextMajor
         version.baseVersion
     }
@@ -51,7 +50,8 @@ class GradleVersionTest extends Specification {
     @Issue("https://issues.gradle.org/browse/GRADLE-1892")
     def "build time should always print in UTC"() {
         expect:
-        version.buildTime.endsWith("UTC")
+        // Note: buildTime is null when running a local build
+        version.buildTime == null || version.buildTime.endsWith("UTC")
     }
 
     def equalsAndHashCode() {
@@ -73,6 +73,7 @@ class GradleVersionTest extends Specification {
                 '1.0-milestone-5',
                 '1.0-milestone-5a',
                 '3.2-rc-2',
+                '3.0-snapshot-1'
         ]
     }
 
@@ -86,7 +87,9 @@ class GradleVersionTest extends Specification {
         version << [
                 '0.9-20101220110000+1100',
                 '0.9-20101220110000-0800',
-                '1.2-20120501110000'
+                '1.2-20120501110000',
+                '1.2-SNAPSHOT',
+                '3.0-snapshot-1'
         ]
     }
 
@@ -196,6 +199,8 @@ class GradleVersionTest extends Specification {
         '0.9-20101220110000-0100' | '0.9-20101220110000'
         '0.9'                     | '0.9-20101220100000+1000'
         '0.9'                     | '0.9-20101220100000'
+        '0.9'                     | '0.9-SNAPSHOT'
+        '0.9'                     | '0.9-snapshot-1'
     }
 
     def "can get version base"() {
@@ -212,17 +217,10 @@ class GradleVersionTest extends Specification {
         '0.9-20101220100000+1000'             | "0.9"
         '0.9-20101220100000'                  | "0.9"
         '20.17-20101220100000+1000'           | "20.17"
-    }
-
-    def "milestones are treated as base versions"() {
-        expect:
-        GradleVersion.version(v).baseVersion == GradleVersion.version(base)
-
-        where:
-        v                                     | base
-        '1.0-milestone-3'                     | "1.0-milestone-3"
-        '1.0-milestone-3-20121012100000+1000' | "1.0-milestone-3"
-        '2.0-milestone-3'                     | "2.0-milestone-3"
+        '0.9-SNAPSHOT'                        | "0.9"
+        '3.0-snapshot-1'                      | "3.0"
+        '3.0-milestone-3'                     | "3.0"
+        '3.0-milestone-3-20121012100000+1000' | "3.0"
     }
 
     def "can get next major version"() {
@@ -236,6 +234,8 @@ class GradleVersionTest extends Specification {
         '0.9-20101220100000+1000'             | "1.0"
         '0.9-20101220100000'                  | "1.0"
         '20.17-20101220100000+1000'           | "21.0"
+        '0.9-SNAPSHOT'                        | "1.0"
+        '3.0-snapshot-1'                      | "4.0"
     }
 
     def "milestones are part of previous major version"() {

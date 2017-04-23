@@ -16,18 +16,18 @@
 
 package org.gradle.execution.taskpath
 
-import org.gradle.api.internal.project.DefaultProject
+import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import org.gradle.util.TestUtil
-import spock.lang.Specification
 
-class ProjectFinderByTaskPathTest extends Specification {
+class ProjectFinderByTaskPathTest extends AbstractProjectBuilderSpec {
 
     def finder = new ProjectFinderByTaskPath()
 
     //root->foo->bar
-    DefaultProject root = TestUtil.createRootProject()
-    DefaultProject foo = TestUtil.createChildProject(root, "foo")
-    DefaultProject bar = TestUtil.createChildProject(foo, "bar")
+    ProjectInternal root = TestUtil.create(temporaryFolder).rootProject()
+    ProjectInternal foo = TestUtil.createChildProject(root, "foo")
+    ProjectInternal bar = TestUtil.createChildProject(foo, "bar")
 
     def "finds root"() {
         expect:

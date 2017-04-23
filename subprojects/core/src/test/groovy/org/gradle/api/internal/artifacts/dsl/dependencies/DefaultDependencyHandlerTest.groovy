@@ -15,26 +15,41 @@
  */
 package org.gradle.api.internal.artifacts.dsl.dependencies
 
-import org.gradle.api.artifacts.*
+import org.gradle.api.UnknownDomainObjectException
+import org.gradle.api.artifacts.ClientModule
+import org.gradle.api.artifacts.Configuration
+import org.gradle.api.artifacts.ConfigurationContainer
+import org.gradle.api.artifacts.Dependency
+import org.gradle.api.artifacts.DependencySet
+import org.gradle.api.artifacts.ExternalDependency
+import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.artifacts.dsl.ComponentMetadataHandler
 import org.gradle.api.artifacts.dsl.ComponentModuleMetadataHandler
+import org.gradle.api.internal.artifacts.VariantTransformRegistry
+import org.gradle.api.attributes.AttributesSchema
+import org.gradle.api.internal.AsmBackedClassGenerator
 import org.gradle.api.internal.artifacts.query.ArtifactResolutionQueryFactory
 import spock.lang.Specification
 
 class DefaultDependencyHandlerTest extends Specification {
+
     private static final String TEST_CONF_NAME = "someConf"
+    private static final String UNKNOWN_TEST_CONF_NAME = "unknown"
+
     private ConfigurationContainer configurationContainer = Mock()
     private DependencyFactory dependencyFactory = Mock()
     private Configuration configuration = Mock()
     private ProjectFinder projectFinder = Mock()
     private DependencySet dependencySet = Mock()
 
-    private DefaultDependencyHandler dependencyHandler = new DefaultDependencyHandler(
-            configurationContainer, dependencyFactory, projectFinder, Stub(ComponentMetadataHandler), Stub(ComponentModuleMetadataHandler), Stub(ArtifactResolutionQueryFactory))
+    private DefaultDependencyHandler dependencyHandler = new AsmBackedClassGenerator().newInstance(DefaultDependencyHandler,
+        configurationContainer, dependencyFactory, projectFinder, Stub(ComponentMetadataHandler), Stub(ComponentModuleMetadataHandler), Stub(ArtifactResolutionQueryFactory),
+        Stub(AttributesSchema), Stub(VariantTransformRegistry))
 
     void setup() {
         _ * configurationContainer.findByName(TEST_CONF_NAME) >> configuration
-        _ * configurationContainer.getAt(TEST_CONF_NAME) >> configuration
+        _ * configurationContainer.getByName(TEST_CONF_NAME) >> configuration
+        _ * configurationContainer.getByName(UNKNOWN_TEST_CONF_NAME) >> { throw new UnknownDomainObjectException("") }
         _ * configuration.dependencies >> dependencySet
     }
 
@@ -160,6 +175,24 @@ class DefaultDependencyHandlerTest extends Specification {
         1 * dependencySet.add(dependency2)
     }
 
+    void "dynamic method fails for unknown configuration"() {
+        when:
+        dependencyHandler.unknown("someDep")
+
+        then:
+        def e = thrown(MissingMethodException)
+        e.message.startsWith('Could not find method unknown() for arguments [someDep] on ')
+    }
+
+    void "dynamic method fails for no args"() {
+        when:
+        dependencyHandler.someConf()
+
+        then:
+        def e = thrown(MissingMethodException)
+        e.message.startsWith('Could not find method someConf() for arguments [] on ')
+    }
+
     void "creates a project dependency from map"() {
         ProjectDependency projectDependency = Mock()
 
@@ -271,10 +304,10 @@ class DefaultDependencyHandlerTest extends Specification {
 
     void "cannot add dependency to unknown configuration"() {
         when:
-        dependencyHandler.unknown("someNotation")
+        dependencyHandler.add(UNKNOWN_TEST_CONF_NAME, "someNotation")
 
         then:
-        thrown(MissingMethodException)
+        thrown(UnknownDomainObjectException)
     }
 
     void "reasonable error when supplying null as a dependency notation"() {

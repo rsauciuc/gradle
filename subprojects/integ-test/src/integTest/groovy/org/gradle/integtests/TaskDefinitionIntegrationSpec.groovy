@@ -27,4 +27,24 @@ class TaskDefinitionIntegrationSpec extends AbstractIntegrationSpec {
         then:
         failure.assertHasCause("Could not create task 'a': Unknown argument(s) in task definition: [Type]")
     }
+
+    def "renders deprecation message when using left shift operator to define action"() {
+        given:
+        String taskName = 'helloWorld'
+        String message = 'Hello world!'
+
+        buildFile << """
+            task $taskName << {
+                println '$message'
+            }
+        """
+
+        when:
+        executer.expectDeprecationWarning()
+        succeeds taskName
+
+        then:
+        output.contains(message)
+        output.contains("The Task.leftShift(Closure) method has been deprecated and is scheduled to be removed in Gradle 5.0. Please use Task.doLast(Action) instead.")
+    }
 }

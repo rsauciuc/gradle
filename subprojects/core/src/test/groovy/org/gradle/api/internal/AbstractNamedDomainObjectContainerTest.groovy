@@ -17,6 +17,8 @@ package org.gradle.api.internal
 
 import org.gradle.api.Action
 import org.gradle.api.InvalidUserDataException
+import org.gradle.api.NamedDomainObjectContainer
+import org.gradle.api.reflect.TypeOf
 import org.gradle.internal.reflect.DirectInstantiator
 import org.gradle.internal.reflect.Instantiator
 import spock.lang.Issue
@@ -88,7 +90,7 @@ class AbstractNamedDomainObjectContainerTest extends Specification {
     }
 
     def "can configure existing object"() {
-        container.create('list1')
+        container.create('someObj')
 
         when:
         container.configure {
@@ -140,6 +142,17 @@ class AbstractNamedDomainObjectContainerTest extends Specification {
         then:
         container.obj1.prop == null
         container.obj2.prop == 'value'
+    }
+
+    def "does not implicitly create an object when closure parameter is used explicitly"() {
+        when:
+        container.configure {
+            it.obj1
+        }
+
+        then:
+        MissingPropertyException missingProp = thrown()
+        missingProp.property == 'obj1'
     }
 
     def "does not implicitly create an object when container is not being configured"() {
@@ -210,6 +223,12 @@ class AbstractNamedDomainObjectContainerTest extends Specification {
         container.list2.prop == 'list2'
     }
 
+    def "has public type"() {
+        expect:
+        container.publicType == new TypeOf<NamedDomainObjectContainer<TestObject>>() {}
+    }
+
+
     static class Owner {
         void thing(Closure closure) {}
     }
@@ -235,7 +254,7 @@ class DynamicOwner {
     def ownerMethod(String value) {
         return value
     }
-    
+
     def getOwnerProp() {
         return 'ownerProp'
     }

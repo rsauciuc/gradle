@@ -16,6 +16,9 @@
 
 package org.gradle.tooling.model.build;
 
+import org.gradle.api.Incubating;
+import org.gradle.tooling.model.BuildIdentifier;
+import org.gradle.tooling.model.BuildModel;
 import org.gradle.tooling.model.Model;
 import org.gradle.tooling.model.UnsupportedMethodException;
 
@@ -39,7 +42,14 @@ import org.gradle.tooling.model.UnsupportedMethodException;
  *
  * @since 1.0-milestone-8
  */
-public interface BuildEnvironment extends Model {
+public interface BuildEnvironment extends Model, BuildModel {
+    /**
+     * Returns the identifier for the Gradle build that this environment is used by.
+     *
+     * @since 2.13
+     */
+    @Incubating
+    BuildIdentifier getBuildIdentifier();
 
     /**
      * Returns information about the Gradle environment, for example the Gradle version.

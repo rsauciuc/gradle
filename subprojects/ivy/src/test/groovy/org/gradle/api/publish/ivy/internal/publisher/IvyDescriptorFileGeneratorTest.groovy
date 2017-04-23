@@ -15,23 +15,26 @@
  */
 
 package org.gradle.api.publish.ivy.internal.publisher
-
-import javax.xml.namespace.QName
 import org.gradle.api.Action
 import org.gradle.api.XmlProvider
 import org.gradle.api.artifacts.DependencyArtifact
+import org.gradle.api.artifacts.ExcludeRule
 import org.gradle.api.publish.ivy.internal.artifact.DefaultIvyArtifact
 import org.gradle.api.publish.ivy.internal.dependency.DefaultIvyDependency
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyConfiguration
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyPublicationIdentity
-import org.gradle.test.fixtures.file.TestDirectoryProvider
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TextUtil
+import org.junit.Rule
 import spock.lang.Specification
 
+import javax.xml.namespace.QName
+
 class IvyDescriptorFileGeneratorTest extends Specification {
-    TestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    @Rule
+    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+
     def projectIdentity = new DefaultIvyPublicationIdentity("my-org", "my-name", "my-version")
     IvyDescriptorFileGenerator generator = new IvyDescriptorFileGenerator(projectIdentity)
 
@@ -158,8 +161,8 @@ class IvyDescriptorFileGeneratorTest extends Specification {
 
     def "writes supplied dependencies"() {
         when:
-        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name-1', 'dep-version', "confMappingProject"))
-        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name-2', 'dep-version', null))
+        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name-1', 'dep-version', "confMappingProject", true))
+        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name-2', 'dep-version', null, true))
 
         then:
         with (ivyXml) {
@@ -193,7 +196,7 @@ class IvyDescriptorFileGeneratorTest extends Specification {
         artifact2.classifier >> "classy"
 
         and:
-        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name', 'dep-version', "confMapping", [artifact1, artifact2]))
+        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name', 'dep-version', "confMapping", true, [artifact1, artifact2]))
 
         then:
         includesMavenNamespace()
@@ -219,6 +222,42 @@ class IvyDescriptorFileGeneratorTest extends Specification {
                     it.@type.isEmpty()
                     it.@ext.isEmpty()
                     it."@m:classifier" == "classy"
+                }
+            }
+        }
+    }
+
+    def "writes dependency with exclusion"() {
+        def exclude1 = Mock(ExcludeRule) {
+            getGroup() >> 'excludeGroup1'
+            getModule() >> 'excludeModule1'
+        }
+        def exclude2 = Mock(ExcludeRule) {
+            getGroup() >> 'excludeGroup2'
+        }
+        def exclude3 = Mock(ExcludeRule) {
+            getModule() >> 'excludeModule3'
+        }
+
+
+        when:
+        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name-1', 'dep-version', "confMappingProject", true, [], [exclude1, exclude2, exclude3]))
+
+        then:
+        with (ivyXml) {
+            dependencies[0].dependency[0].exclude.size() == 3
+            with (dependencies[0].dependency[0]) {
+                with(exclude[0]) {
+                    it.@org == 'excludeGroup1'
+                    it.@module == 'excludeModule1'
+                }
+                with(exclude[1]) {
+                    it.@org == 'excludeGroup2'
+                    it.@module.isEmpty()
+                }
+                with(exclude[2]) {
+                    it.@org.isEmpty()
+                    it.@module == 'excludeModule3'
                 }
             }
         }

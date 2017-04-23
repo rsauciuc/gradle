@@ -17,15 +17,16 @@ package org.gradle.api.tasks.diagnostics;
 
 import org.gradle.api.Rule;
 import org.gradle.api.Task;
-import org.gradle.api.internal.project.AbstractProject;
+import org.gradle.api.internal.project.DefaultProject;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.tasks.TaskContainerInternal;
 import org.gradle.api.tasks.TaskDependency;
 import org.gradle.api.tasks.diagnostics.internal.TaskDetails;
 import org.gradle.api.tasks.diagnostics.internal.TaskReportRenderer;
-import org.gradle.util.TestUtil;
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider;
 import org.gradle.util.JUnit4GroovyMockery;
 import org.gradle.util.Path;
+import org.gradle.util.TestUtil;
 import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
@@ -49,10 +50,13 @@ import static org.gradle.util.WrapUtil.*;
 public class TaskReportTaskTest {
     private final JUnit4Mockery context = new JUnit4GroovyMockery();
     private final TaskReportRenderer renderer = context.mock(TaskReportRenderer.class);
-    private final ProjectInternal project = context.mock(AbstractProject.class);
+    private final ProjectInternal project = context.mock(DefaultProject.class);
     private final TaskContainerInternal taskContainer = context.mock(TaskContainerInternal.class);
     private final TaskContainerInternal implicitTasks = context.mock(TaskContainerInternal.class);
     private TaskReportTask task;
+
+    @org.junit.Rule
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
 
     @Before
     public void setup() {
@@ -69,7 +73,7 @@ public class TaskReportTaskTest {
             will(returnValue(toSet()));
         }});
 
-        task = TestUtil.createTask(TaskReportTask.class);
+        task = TestUtil.create(temporaryFolder).task(TaskReportTask.class);
         task.setRenderer(renderer);
     }
 
@@ -120,9 +124,6 @@ public class TaskReportTaskTest {
             inSequence(sequence);
 
             one(renderer).addTask(with(isTask(task4)));
-            inSequence(sequence);
-
-            one(renderer).addChildTask(with(isTask(task3)));
             inSequence(sequence);
 
             one(renderer).completeTasks();
@@ -193,7 +194,7 @@ public class TaskReportTaskTest {
     private Task task(String name) {
         return task(name, null);
     }
-    
+
     private Task task(final String name, final String taskGroup, final Task... dependencies) {
         final Task task = context.mock(Task.class);
         context.checking(new Expectations() {{
@@ -218,7 +219,7 @@ public class TaskReportTaskTest {
                     description.appendText("compare to");
                 }
             });
-            
+
             TaskDependency dependency = context.mock(TaskDependency.class);
             allowing(task).getTaskDependencies();
             will(returnValue(dependency));

@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 package org.gradle.integtests.resolve
+
+import groovy.transform.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractDependencyResolutionTest
+import spock.lang.Issue
 
 public class ConfigurationDefaultsIntegrationTest extends AbstractDependencyResolutionTest {
 
@@ -36,23 +39,27 @@ if (project.hasProperty('explicitDeps')) {
         conf "org:bar:1.0"
     }
 }
-task checkDefault << {
-    if (project.hasProperty('resolveChild')) {
-        configurations.child.resolve()
+task checkDefault {
+    doLast {
+        if (project.hasProperty('resolveChild')) {
+            configurations.child.resolve()
+        }
+
+        def deps = configurations.conf.incoming.resolutionResult.allDependencies
+        assert deps*.selected.id.displayName == ['org:foo:1.0']
+
+        def files = configurations.conf.files
+        assert files*.name == ["foo-1.0.jar"]
     }
-
-    def deps = configurations.conf.incoming.resolutionResult.allDependencies
-    assert deps*.selected.id.displayName == ['org:foo:1.0']
-
-    def files = configurations.conf.files
-    assert files*.name == ["foo-1.0.jar"]
 }
-task checkExplicit << {
-    def deps = configurations.conf.incoming.resolutionResult.allDependencies
-    assert deps*.selected.id.displayName == ['org:bar:1.0']
+task checkExplicit {
+    doLast {
+        def deps = configurations.conf.incoming.resolutionResult.allDependencies
+        assert deps*.selected.id.displayName == ['org:bar:1.0']
 
-    def files = configurations.conf.files
-    assert files*.name == ["bar-1.0.jar"]
+        def files = configurations.conf.files
+        assert files*.name == ["bar-1.0.jar"]
+    }
 }
 """
     }
@@ -81,6 +88,68 @@ configurations.conf.defaultDependencies { deps ->
         succeeds "checkExplicit"
     }
 
+    @Issue("gradle/gradle#812")
+    @NotYetImplemented
+    def "can use defaultDependencies in a multi-project build"() {
+        buildFile.text = """
+subprojects {
+    apply plugin: 'java'
+
+    repositories {
+        maven { url '${mavenRepo.uri}' }
+    }
+}
+
+project(":producer") {
+    configurations {
+        confWithDefault {
+            defaultDependencies {
+                add(project.dependencies.create("org:foo:1.0"))
+            }
+        }
+        compile {
+            extendsFrom confWithDefault
+        }
+    }
+    dependencies {
+        if (project.hasProperty('explicitDeps')) {
+            confWithDefault "org:bar:1.0"
+        }
+    }
+}
+
+project(":consumer") {
+    dependencies {
+        compile project(":producer")
+    }
+}
+
+subprojects {
+    task resolve {
+        dependsOn configurations.compile
+
+        doLast {
+            def resolvedJars = configurations.compile.files.collect { it.name }
+            if (project.hasProperty('explicitDeps')) {
+                assert "bar-1.0.jar" in resolvedJars
+            } else {
+                assert "foo-1.0.jar" in resolvedJars
+            }
+        }
+    }
+}
+"""
+        settingsFile << """
+include 'consumer', 'producer'
+"""
+        expect:
+        // relying on explicit dependency
+        succeeds("resolve", "-PexplicitDeps")
+        // relying on default dependency
+        succeeds("resolve")
+
+    }
+
     def "can use beforeResolve to specify default dependencies"() {
         buildFile << """
 def fooDep = project.dependencies.create("org:foo:1.0")
@@ -101,7 +170,7 @@ configurations.conf.incoming.beforeResolve {
         succeeds "checkExplicit"
     }
 
-    def "deprecation warning informs about defaultDependencies if beforeResolve used to add dependencies to observed configuration"() {
+    def "fails if beforeResolve used to add dependencies to observed configuration"() {
         buildFile << """
 def fooDep = project.dependencies.create("org:foo:1.0")
 configurations.conf.incoming.beforeResolve {
@@ -114,14 +183,11 @@ configurations.conf.incoming.beforeResolve {
 
         when:
         executer.withArgument("-PresolveChild")
-        executer.withDeprecationChecksDisabled()
 
         then:
-        succeeds "checkDefault"
+        fails "checkDefault"
 
         and:
-        output.contains "Changed dependencies of configuration ':conf' after it has been included in dependency resolution."
-        output.contains "Use 'defaultDependencies' instead of 'beforeResolve' to specify default dependencies for a configuration."
-        output.contains "Changed dependencies of parent of configuration ':child' after it has been resolved."
+        failure.assertHasCause "Cannot change dependencies of configuration ':conf' after it has been included in dependency resolution."
     }
 }

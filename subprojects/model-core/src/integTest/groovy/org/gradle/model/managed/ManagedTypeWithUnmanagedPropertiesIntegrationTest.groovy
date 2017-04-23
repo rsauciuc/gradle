@@ -20,11 +20,14 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class ManagedTypeWithUnmanagedPropertiesIntegrationTest extends AbstractIntegrationSpec {
 
-    def "can have unmanaged property"() {
+    def "can have unmanaged property of unsupported types"() {
         when:
         buildScript '''
             class UnmanagedThing {
               String value
+            }
+            class MyFile extends File {
+              MyFile(String s) { super(s) }
             }
 
             @Managed
@@ -32,6 +35,10 @@ class ManagedTypeWithUnmanagedPropertiesIntegrationTest extends AbstractIntegrat
                 @Unmanaged
                 UnmanagedThing getUnmanaged()
                 void setUnmanaged(UnmanagedThing unmanaged)
+
+                @Unmanaged
+                MyFile getFile()
+                void setFile(MyFile file)
             }
 
             class RulePlugin extends RuleSource {
@@ -113,5 +120,48 @@ class ManagedTypeWithUnmanagedPropertiesIntegrationTest extends AbstractIntegrat
         and:
         output.contains("fromPlugin: foo")
         output.contains("fromScript: foo")
+    }
+
+    def "can view unmanaged property as ModelElement"() {
+        when:
+        buildScript '''
+            @Managed
+            interface Platform {
+                @Unmanaged
+                OperatingSystem getOperatingSystem()
+                void setOperatingSystem(OperatingSystem os)
+            }
+
+            class OperatingSystem {
+            }
+
+            class RulePlugin extends RuleSource {
+                @Model
+                void platform(Platform platform) {
+                    platform.operatingSystem = new OperatingSystem()
+                }
+
+                @Mutate
+                void addTask(ModelMap<Task> tasks, @Path("platform.operatingSystem") ModelElement os) {
+                  tasks.create("fromPlugin") {
+                    doLast {
+                        println "os: $os"
+                        println "name: $os.name"
+                        println "display-name: $os.displayName"
+                    }
+                  }
+                }
+            }
+
+            apply type: RulePlugin
+        '''
+
+        then:
+        succeeds "fromPlugin"
+
+        and:
+        output.contains("os: OperatingSystem 'platform.operatingSystem'")
+        output.contains("name: operatingSystem")
+        output.contains("display-name: OperatingSystem 'platform.operatingSystem'")
     }
 }

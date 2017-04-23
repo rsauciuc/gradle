@@ -20,9 +20,9 @@ dependencies {
     compile project(":ide")
     compile project(':platformNative')
     compile project(':languageNative')
+    compile project(':testingNative')
 }
 
 useTestFixtures()
 useTestFixtures(project: ":platformNative")
 useClassycle()
-

@@ -18,6 +18,7 @@ package org.gradle.api.plugins.buildcomparison.outcome.internal.archive
 
 import com.google.common.collect.ImmutableSet
 import com.google.common.collect.Sets
+import groovy.transform.CompileStatic
 import org.gradle.api.Transformer
 import org.gradle.api.plugins.buildcomparison.outcome.internal.DefaultBuildOutcomeAssociation
 import org.gradle.api.plugins.buildcomparison.outcome.internal.archive.entry.ArchiveEntry
@@ -70,17 +71,17 @@ class GeneratedArchiveBuildOutcomeComparatorTest extends Specification {
                 entry(path: "d1/f2"), // only in from
                 entry(path: "d2/"), // only in from
                 entry(path: "f2"), // only in from
-                entry(path: "sourceSub.zip", subEntries: ImmutableSet.of( // only in from
+                entry(path: "sourceSub.zip", subEntries: set( // only in from
                         entry(parentPaths: ["sourceSub.zip"], path: "a.txt"), // only in from
                         entry(parentPaths: ["sourceSub.zip"], path: "b/"), // only in from
                         entry(parentPaths: ["sourceSub.zip"], path: "b/c.txt") // only in from
                 )),
-                entry(path: "sameSub.zip", subEntries: ImmutableSet.of(
+                entry(path: "sameSub.zip", subEntries: set(
                         entry(parentPaths: ["sameSub.zip"], path: "a.txt"),
                         entry(parentPaths: ["sameSub.zip"], path: "b/"),
                         entry(parentPaths: ["sameSub.zip"], path: "b/c.txt")
                 )),
-                entry(path: "differentSub.zip", subEntries: ImmutableSet.of(
+                entry(path: "differentSub.zip", subEntries: set(
                         entry(parentPaths: ["differentSub.zip"], path: "a.txt", size: 0),
                         entry(parentPaths: ["differentSub.zip"], path: "b/"),
                         entry(parentPaths: ["differentSub.zip"], path: "b/c.txt")
@@ -95,17 +96,17 @@ class GeneratedArchiveBuildOutcomeComparatorTest extends Specification {
                 entry(path: "d1/f3"), // only in to
                 entry(path: "d3/"), // only in to
                 entry(path: "f3"), // only in to
-                entry(path: "targetSub.zip", subEntries: ImmutableSet.of( // only in from
+                entry(path: "targetSub.zip", subEntries: set( // only in from
                         entry(parentPaths: ["targetSub.zip"], path: "a.txt"), // only in from
                         entry(parentPaths: ["targetSub.zip"], path: "b/"), // only in from
                         entry(parentPaths: ["targetSub.zip"], path: "b/c.txt") // only in from
                 )),
-                entry(path: "sameSub.zip", subEntries: ImmutableSet.of(
+                entry(path: "sameSub.zip", subEntries: set(
                         entry(parentPaths: ["sameSub.zip"], path: "a.txt"),
                         entry(parentPaths: ["sameSub.zip"], path: "b/"),
                         entry(parentPaths: ["sameSub.zip"], path: "b/c.txt")
                 )),
-                entry(path: "differentSub.zip", subEntries: ImmutableSet.of(
+                entry(path: "differentSub.zip", subEntries: set(
                         entry(parentPaths: ["differentSub.zip"], path: "a.txt", size: 1),
                         entry(parentPaths: ["differentSub.zip"], path: "b/"),
                         entry(parentPaths: ["differentSub.zip"], path: "b/c.txt")
@@ -177,6 +178,10 @@ class GeneratedArchiveBuildOutcomeComparatorTest extends Specification {
         indexed["differentSub.zip!/b/c.txt"].comparisonResultType == EQUAL
     }
 
+    @CompileStatic // Workaround for https://issues.apache.org/jira/browse/GROOVY-7879 on Java 9
+    static <T> ImmutableSet<T> set(T element1, T element2, T element3) {
+        return ImmutableSet.of(element1, element2, element3)
+    }
 
     def "comparison result types"() {
         given:

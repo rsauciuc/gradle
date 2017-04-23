@@ -15,10 +15,12 @@
  */
 
 package org.gradle.test.fixtures.keystore
+
 import org.apache.commons.io.FileUtils
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.integtests.fixtures.executer.GradleExecuter
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.test.fixtures.server.http.HttpServer
+import org.gradle.test.fixtures.server.http.HttpServerFixture
 
 class TestKeyStore {
     TestFile trustStore
@@ -43,35 +45,59 @@ class TestKeyStore {
         FileUtils.copyURLToFile(fileUrl, clientStore);
     }
 
-    void enableSslWithServerCert(HttpServer server) {
+    void enableSslWithServerCert(HttpServerFixture server) {
         server.enableSsl(trustStore.path, trustStorePassword)
     }
 
-    void enableSslWithServerAndClientCerts(HttpServer server) {
+    void enableSslWithServerAndClientCerts(HttpServerFixture server) {
         server.enableSsl(trustStore.path, trustStorePassword, keyStore.path, keyStorePassword)
     }
 
-    void enableSslWithServerAndBadClientCert(HttpServer server) {
+    void enableSslWithServerAndBadClientCert(HttpServerFixture server) {
         // intentionally use wrong trust store for server
         server.enableSsl(trustStore.path, trustStorePassword, trustStore.path, keyStorePassword)
     }
 
     void configureServerCert(GradleExecuter executer) {
-        executer.withArgument("-Djavax.net.ssl.trustStore=$trustStore.path")
-                .withArgument("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+        if (GradleContextualExecuter.embedded) {
+            executer.withArgument("-Djavax.net.ssl.trustStore=$trustStore.path")
+            executer.withArgument("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+        } else {
+            executer.withBuildJvmOpts("-Djavax.net.ssl.trustStore=$trustStore.path")
+            executer.withBuildJvmOpts("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+        }
     }
 
     void configureIncorrectServerCert(GradleExecuter executer) {
         // intentionally use wrong trust store
-        executer.withArgument("-Djavax.net.ssl.trustStore=$keyStore.path")
-                .withArgument("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+        if (GradleContextualExecuter.embedded) {
+            executer.withArgument("-Djavax.net.ssl.trustStore=$keyStore.path")
+            executer.withArgument("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+        } else {
+            executer.withBuildJvmOpts("-Djavax.net.ssl.trustStore=$keyStore.path")
+            executer.withBuildJvmOpts("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+        }
     }
 
     void configureServerAndClientCerts(GradleExecuter executer) {
-        executer.withArgument("-Djavax.net.ssl.trustStore=$trustStore.path")
+        if (GradleContextualExecuter.embedded) {
+            executer.withArgument("-Djavax.net.ssl.trustStore=$trustStore.path")
                 .withArgument("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
                 .withArgument("-Djavax.net.ssl.keyStore=$keyStore.path")
                 .withArgument("-Djavax.net.ssl.keyStorePassword=$keyStorePassword")
+        } else {
+            executer.withBuildJvmOpts("-Djavax.net.ssl.trustStore=$trustStore.path")
+                .withBuildJvmOpts("-Djavax.net.ssl.trustStorePassword=$trustStorePassword")
+                .withBuildJvmOpts("-Djavax.net.ssl.keyStore=$keyStore.path")
+                .withBuildJvmOpts("-Djavax.net.ssl.keyStorePassword=$keyStorePassword")
+        }
     }
 
+    List<String> getServerAndClientCertArgs() {
+        ["-Djavax.net.ssl.trustStore=$trustStore.path",
+         "-Djavax.net.ssl.trustStorePassword=$trustStorePassword",
+         "-Djavax.net.ssl.keyStore=$keyStore.path",
+         "-Djavax.net.ssl.keyStorePassword=$keyStorePassword"
+        ]
+    }
 }

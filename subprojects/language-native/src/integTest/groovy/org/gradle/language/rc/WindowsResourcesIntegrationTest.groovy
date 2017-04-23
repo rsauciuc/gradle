@@ -21,14 +21,12 @@ import org.gradle.nativeplatform.fixtures.RequiresInstalledToolChain
 import org.gradle.nativeplatform.fixtures.app.HelloWorldApp
 import org.gradle.nativeplatform.fixtures.app.WindowsResourceHelloWorldApp
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.test.fixtures.file.LeaksFileHandles
 import spock.lang.Ignore
 
-import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VisualCpp
+import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.VISUALCPP
 import static org.gradle.util.Matchers.containsText
 
-@RequiresInstalledToolChain(VisualCpp)
-@LeaksFileHandles
+@RequiresInstalledToolChain(VISUALCPP)
 class WindowsResourcesIntegrationTest extends AbstractNativeLanguageIntegrationTest {
 
     HelloWorldApp helloWorldApp = new WindowsResourceHelloWorldApp()
@@ -118,8 +116,8 @@ model {
         run "installMainExecutable"
 
         then:
-        resourceOnlyLibrary("build/binaries/resourcesSharedLibrary/resources").assertExists()
-        installation("build/install/mainExecutable").exec().out == "Hello!"
+        resourceOnlyLibrary("build/libs/resources/shared/resources").assertExists()
+        installation("build/install/main").exec().out == "Hello!"
     }
 
     @Ignore
@@ -128,7 +126,7 @@ model {
         // we create a project path that is ~180 characters to end up
         // with a path for the compiled resources.res > 260 chars
         def projectPathOffset = 180 - testDirectory.getAbsolutePath().length()
-        def nestedProjectPath = RandomStringUtils.randomAlphanumeric(projectPathOffset-10) + "/123456789"
+        def nestedProjectPath = RandomStringUtils.randomAlphanumeric(projectPathOffset - 10) + "/123456789"
 
         setup:
         def deepNestedProjectFolder = file(nestedProjectPath)

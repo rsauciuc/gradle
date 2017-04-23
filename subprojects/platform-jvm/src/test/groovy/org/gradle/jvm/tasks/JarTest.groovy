@@ -16,46 +16,76 @@
 
 package org.gradle.jvm.tasks
 
+import org.gradle.api.Action
+import org.gradle.api.file.CopySpec
+import org.gradle.api.java.archives.Manifest
 import org.gradle.api.java.archives.internal.DefaultManifest
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.bundling.AbstractArchiveTaskTest
-import org.junit.Before
-import org.junit.Test
-
-import static org.junit.Assert.assertEquals
-import static org.junit.Assert.assertNotNull
+import org.gradle.test.fixtures.archive.JarTestFixture
 
 class JarTest extends AbstractArchiveTaskTest {
     Jar jar
 
-    @Before public void setUp()  {
+    def setup() {
         jar = createTask(Jar)
         configure(jar)
     }
 
+    @Override
     AbstractArchiveTask getArchiveTask() {
         jar
     }
 
-    @Test public void testJar() {
-        assertEquals(Jar.DEFAULT_EXTENSION, jar.extension)
-        assertNotNull(jar.manifest)
-        assertNotNull(jar.metaInf)
+    def "test Jar"() {
+        expect:
+        jar.extension == Jar.DEFAULT_EXTENSION
+        jar.manifest != null
+        jar.metaInf != null
     }
 
-    @Test public void testManifest() {
+    def "correct jar manifest"() {
+        when:
         jar.manifest = new DefaultManifest(null);
         jar.manifest {
             attributes(key: 'value')
         }
-        assertEquals(jar.manifest.attributes.key, 'value')
+
+        then:
+        jar.manifest.attributes.key == 'value'
     }
 
-    @Test public void testManifestWithNullManifest() {
+    def "correct jar manifest from null manifest"() {
+        when:
         jar.manifest = null
         jar.manifest {
             attributes(key: 'value')
         }
-        assertEquals(jar.manifest.attributes.key, 'value')
+
+        then:
+        jar.manifest.attributes.key == 'value'
+    }
+
+    def "can configure manifest using an Action"() {
+        when:
+        jar.manifest({ Manifest manifest ->
+            manifest.attributes(key: 'value')
+        } as Action<Manifest>)
+
+        then:
+        jar.manifest.attributes.key == 'value'
+    }
+
+    def "can configure META-INF CopySpec using an Action"() {
+        given:
+        jar.metaInf({ CopySpec spec ->
+            spec.from temporaryFolder.createFile('file.txt')
+        } as Action<CopySpec>)
+
+        when:
+        jar.execute()
+
+        then:
+        new JarTestFixture(jar.archivePath).assertContainsFile('META-INF/file.txt')
     }
 }

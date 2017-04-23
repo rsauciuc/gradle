@@ -17,33 +17,45 @@
 package org.gradle.tooling.internal.consumer.connection
 
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter
+import org.gradle.tooling.internal.adapter.ViewBuilder
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping
 import org.gradle.tooling.internal.protocol.ModelBuilder
 import org.gradle.tooling.model.DomainObjectSet
 import org.gradle.tooling.model.GradleProject
+import org.gradle.tooling.model.ProjectIdentifier
 import org.gradle.tooling.model.gradle.GradleBuild
 import spock.lang.Specification
 
 class GradleBuildAdapterProducerTest extends Specification {
-    ProtocolToModelAdapter adapter = Mock(ProtocolToModelAdapter);
-    ModelMapping mapping = Mock(ModelMapping);
-    ModelBuilder builder = Mock(ModelBuilder);
-    ModelProducer delegate = Mock(ModelProducer)
+    def adapter = Mock(ProtocolToModelAdapter);
+    def mapping = Mock(ModelMapping);
+    def builder = Mock(ModelBuilder);
+    def delegate = Mock(ModelProducer)
+    def mappingProvider = Mock(HasCompatibilityMapping)
 
-    GradleBuildAdapterProducer modelProducer = new GradleBuildAdapterProducer(adapter, delegate);
+    GradleBuildAdapterProducer modelProducer = new GradleBuildAdapterProducer(adapter, delegate, mappingProvider);
 
     def "requests GradleProject on delegate when unsupported GradleBuild requested"() {
         setup:
-        GradleProject gradleProject = gradleProject()
-        ConsumerOperationParameters operationParameters = Mock(ConsumerOperationParameters)
-        adapter.adapt(GradleProject, gradleProject) >> gradleProject
-        adapter.adapt(GradleBuild, _) >> Mock(GradleBuild)
+        def gradleProject = gradleProject()
+        def gradleBuild = Mock(GradleBuild)
+        def operationParameters = Mock(ConsumerOperationParameters)
+        def viewBuilder1 = Mock(ViewBuilder)
+        def viewBuilder2 = Mock(ViewBuilder)
+
+        adapter.builder(GradleProject) >> viewBuilder1
+        viewBuilder1.build(gradleProject) >> gradleProject
+        adapter.builder(GradleBuild) >> viewBuilder2
+        mappingProvider.applyCompatibilityMapping(viewBuilder2, operationParameters) >> viewBuilder2
+        viewBuilder2.build(_) >> gradleBuild
+
         when:
         def model = modelProducer.produceModel(GradleBuild, operationParameters)
+
         then:
         1 * delegate.produceModel(GradleProject, operationParameters) >> gradleProject
-        model instanceof GradleBuild
+        model == gradleBuild
     }
 
     def "non GradleBuild model requests passed to delegate"() {
@@ -62,7 +74,7 @@ class GradleBuildAdapterProducerTest extends Specification {
         GradleProject gradleProject = Mock(GradleProject)
         1 * gradleProject.children >> ([] as DomainObjectSet<GradleProject>)
         1 * gradleProject.name >> "SomeProject"
-        1 * gradleProject.path >> ":"
+        1 * gradleProject.getProjectIdentifier() >> Stub(ProjectIdentifier)
         gradleProject
     }
 

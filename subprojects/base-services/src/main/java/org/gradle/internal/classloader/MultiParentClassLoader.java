@@ -21,7 +21,13 @@ import org.gradle.internal.reflect.JavaReflectionUtil;
 
 import java.io.IOException;
 import java.net.URL;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -91,7 +97,7 @@ public class MultiParentClassLoader extends ClassLoader implements ClassLoaderHi
             Package[] parentPackages = GET_PACKAGES_METHOD.invoke(parent);
             packages.addAll(Arrays.asList(parentPackages));
         }
-        return packages.toArray(new Package[packages.size()]);
+        return packages.toArray(new Package[0]);
     }
 
     @Override

@@ -24,6 +24,8 @@ import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Specification
 
+import java.util.concurrent.Callable
+
 import static org.gradle.util.TextUtil.toPlatformLineSeparators
 
 @UsesNativeServices
@@ -189,7 +191,29 @@ The following types/formats are supported:
   - A String or CharSequence path, for example 'src/main/java' or '/usr/include'.
   - A String or CharSequence URI, for example 'file:/usr/include'.
   - A File instance.
+  - A Path instance.
   - A URI or URL instance.""")
+    }
+
+    def "normalizes null-returning closure to null"() {
+        def ancestor = new File(tmpDir.testDirectory, "test")
+        def baseDir = new File(ancestor, "base")
+
+        when:
+        normalize(new Callable() {
+            @Override
+            Object call() throws Exception {
+                return null
+            }
+
+            @Override
+            String toString() {
+                return "null returning Callable"
+            }
+        }, baseDir)
+        then:
+        IllegalArgumentException e = thrown()
+        e.message == "Cannot convert path to File. path='null returning Callable' basedir='${baseDir.absolutePath}'"
     }
 
     def createLink(File link, File target) {
@@ -211,16 +235,16 @@ The following types/formats are supported:
     }
 
     private BaseDirFileResolver resolver(File baseDir = tmpDir.testDirectory) {
-        new BaseDirFileResolver(TestFiles.fileSystem(), baseDir)
+        new BaseDirFileResolver(TestFiles.fileSystem(), baseDir, TestFiles.getPatternSetFactory())
     }
 
     private File[] getFsRoots() {
         File.listRoots().findAll { !it.absolutePath.startsWith("A:") }
     }
-    
+
     private File nonexistentFsRoot() {
-        ('Z'..'A').collect { 
-            "$it:\\" 
+        ('Z'..'A').collect {
+            "$it:\\"
         }.findResult {
             new File(it).exists() ? null : new File(it)
         }

@@ -250,6 +250,20 @@ class PatternSetTest extends AbstractTestForPatternSet {
         excluded file('132')
     }
 
+    @Test
+    void testIntersectPatternSetEqualsAndHashCode() {
+        PatternSet basePatternSet = new PatternSet()
+        basePatternSet.include '*a*'
+        basePatternSet.exclude '*b*'
+
+        patternSet = basePatternSet.intersect()
+        patternSet.include '*a*'
+        patternSet.exclude '*b*'
+
+        assert patternSet.hashCode() != basePatternSet.hashCode()
+        assert !patternSet.equals(basePatternSet)
+    }
+
     @Issue("GRADLE-2566")
     @Test
     void canUseGStringsAsIncludes() {
@@ -276,6 +290,32 @@ class PatternSetTest extends AbstractTestForPatternSet {
         excluded file("aaa")
         excluded file("bbb")
         included file("ccc")
+    }
+
+    @Test
+    void supportIsEmptyMethod() {
+        assert patternSet.isEmpty()
+        assert patternSet.intersect().isEmpty()
+
+        patternSet = new PatternSet()
+        patternSet.include { false }
+        assert !patternSet.isEmpty()
+        assert !patternSet.intersect().isEmpty()
+
+        patternSet = new PatternSet()
+        patternSet.include("*.txt")
+        assert !patternSet.isEmpty()
+        assert !patternSet.intersect().isEmpty()
+
+        patternSet = new PatternSet()
+        patternSet.exclude { false }
+        assert !patternSet.isEmpty()
+        assert !patternSet.intersect().isEmpty()
+
+        patternSet = new PatternSet()
+        patternSet.exclude("*.txt")
+        assert !patternSet.isEmpty()
+        assert !patternSet.intersect().isEmpty()
     }
 
     void included(FileTreeElement file) {

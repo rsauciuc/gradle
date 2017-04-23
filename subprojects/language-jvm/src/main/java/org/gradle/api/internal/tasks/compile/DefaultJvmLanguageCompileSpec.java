@@ -16,71 +16,99 @@
 
 package org.gradle.api.internal.tasks.compile;
 
+import com.google.common.collect.ImmutableList;
 import org.gradle.api.file.FileCollection;
 
 import java.io.File;
 import java.io.Serializable;
+import java.util.List;
 
 public class DefaultJvmLanguageCompileSpec implements JvmLanguageCompileSpec, Serializable {
     private File workingDir;
     private File tempDir;
-    private Iterable<File> classpath;
+    private List<File> classpath;
     private File destinationDir;
     private FileCollection source;
     private String sourceCompatibility;
     private String targetCompatibility;
 
+    @Override
     public File getWorkingDir() {
         return workingDir;
     }
 
+    @Override
     public void setWorkingDir(File workingDir) {
         this.workingDir = workingDir;
     }
 
+    @Override
     public File getDestinationDir() {
         return destinationDir;
     }
+    @Override
     public void setDestinationDir(File destinationDir) {
         this.destinationDir = destinationDir;
     }
 
+    @Override
     public File getTempDir() {
         return tempDir;
     }
 
+    @Override
     public void setTempDir(File tempDir) {
         this.tempDir = tempDir;
     }
 
+    @Override
     public FileCollection getSource() {
         return source;
     }
 
+    @Override
     public void setSource(FileCollection source) {
         this.source = source;
     }
 
+    @Override
+    public List<File> getCompileClasspath() {
+        return classpath;
+    }
+
+    @Override
+    public void setCompileClasspath(List<File> classpath) {
+        this.classpath = classpath;
+    }
+
+    @Deprecated
+    @Override
     public Iterable<File> getClasspath() {
         return classpath;
     }
 
+    @Deprecated
+    @Override
     public void setClasspath(Iterable<File> classpath) {
-        this.classpath = classpath;
+        this.classpath = ImmutableList.copyOf(classpath);
     }
 
+    @Override
     public String getSourceCompatibility() {
         return sourceCompatibility;
     }
 
+    @Override
     public void setSourceCompatibility(String sourceCompatibility) {
         this.sourceCompatibility = sourceCompatibility;
     }
 
+    @Override
     public String getTargetCompatibility() {
         return targetCompatibility;
     }
 
+    @Override
     public void setTargetCompatibility(String targetCompatibility) {
         this.targetCompatibility = targetCompatibility;
     }

@@ -15,10 +15,13 @@
  */
 
 package org.gradle.integtests.resolve.http
+
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
 import org.gradle.integtests.fixtures.TestResources
 import org.gradle.test.fixtures.keystore.TestKeyStore
+import org.gradle.test.fixtures.server.http.AuthScheme
 import org.junit.Rule
+import spock.lang.Unroll
 
 import static org.gradle.util.Matchers.containsText
 
@@ -26,14 +29,16 @@ abstract class AbstractHttpsRepoResolveIntegrationTest extends AbstractHttpDepen
     @Rule TestResources resources = new TestResources(temporaryFolder)
     TestKeyStore keyStore
 
-    abstract protected String setupRepo()
+    abstract protected String setupRepo(boolean useAuth)
 
-    def "resolve with server certificate"() {
+    @Unroll
+    def "resolve with server certificate and #authSchemeName authentication"() {
         keyStore = TestKeyStore.init(resources.dir)
         keyStore.enableSslWithServerCert(server)
+        server.authenticationScheme = authScheme
 
-        def repoType = setupRepo()
-        setupBuildFile(repoType)
+        def repoType = setupRepo(useAuth)
+        setupBuildFile(repoType, useAuth)
 
         when:
         keyStore.configureServerCert(executer)
@@ -41,6 +46,15 @@ abstract class AbstractHttpsRepoResolveIntegrationTest extends AbstractHttpDepen
 
         then:
         file('libs').assertHasDescendants('my-module-1.0.jar')
+        and:
+        server.authenticationAttempts.asList() == authenticationAttempts
+
+        where:
+        useAuth | authScheme        | authSchemeName | authenticationAttempts
+        false   | null              | 'no'           | ['None']
+        true    | AuthScheme.BASIC  | 'basic'        | ['None', 'Basic']
+        true    | AuthScheme.DIGEST | 'digest'       | ['None', 'Digest']
+        true    | AuthScheme.NTLM   | 'ntlm'         | ['None', 'NTLM']
     }
 
     def "resolve with server and client certificate"() {
@@ -72,10 +86,10 @@ abstract class AbstractHttpsRepoResolveIntegrationTest extends AbstractHttpDepen
 
         then:
         failure.assertThatCause(containsText("Could not GET '${server.uri}/repo1/my-group/my-module/1.0/"))
-        failure.assertHasCause("peer not authenticated")
+        failure.error.contains("javax.net.ssl.SSLHandshakeException")
     }
 
-    def "decent error message when server can't authenticate client"() {
+    def "build fails when server can't authenticate client"() {
         keyStore = TestKeyStore.init(resources.dir)
         keyStore.enableSslWithServerAndBadClientCert(server)
 
@@ -89,13 +103,23 @@ abstract class AbstractHttpsRepoResolveIntegrationTest extends AbstractHttpDepen
 
         then:
         failure.assertThatCause(containsText("Could not GET '${server.uri}/repo1/my-group/my-module/1.0/"))
-        failure.assertHasCause("peer not authenticated")
+        failure.error.contains("at org.apache.http.conn.ssl.SSLConnectionSocketFactory.createLayeredSocket")
     }
 
-    private void setupBuildFile(String repoType) {
+    private void setupBuildFile(String repoType, boolean withCredentials = false) {
+        def credentials = """
+credentials {
+    username 'user'
+    password 'secret'
+}
+"""
+
         buildFile << """
 repositories {
-    $repoType { url '${server.uri}/repo1' }
+    $repoType {
+        url '${server.uri}/repo1'
+        ${withCredentials ? credentials : ''}
+    }
 }
 configurations { compile }
 dependencies {

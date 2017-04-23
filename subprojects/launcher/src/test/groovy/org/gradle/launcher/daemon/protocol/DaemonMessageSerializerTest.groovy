@@ -17,12 +17,11 @@
 package org.gradle.launcher.daemon.protocol
 
 import org.gradle.api.logging.LogLevel
-import org.gradle.internal.progress.OperationIdentifier
+import org.gradle.internal.logging.events.*
+import org.gradle.internal.logging.text.StyledTextOutput
+import org.gradle.internal.serialize.PlaceholderException
 import org.gradle.internal.serialize.Serializer
 import org.gradle.internal.serialize.SerializerSpec
-import org.gradle.logging.StyledTextOutput
-import org.gradle.logging.internal.*
-import org.gradle.messaging.remote.internal.PlaceholderException
 
 class DaemonMessageSerializerTest extends SerializerSpec {
     def serializer = DaemonMessageSerializer.create()
@@ -167,10 +166,9 @@ class DaemonMessageSerializerTest extends SerializerSpec {
 
     def "can serialize other messages"() {
         expect:
-        def message = new Cancel("id")
+        def message = new Cancel()
         def messageResult = serialize(message, serializer)
         messageResult instanceof Cancel
-        messageResult.identifier == "id"
     }
 
     OutputEvent serialize(OutputEvent event, Serializer<Object> serializer) {

@@ -18,37 +18,37 @@ package org.gradle.integtests.fixtures
 
 import org.gradle.internal.hash.HashUtil
 import org.gradle.test.fixtures.ConcurrentTestUtil
+import org.gradle.testing.internal.util.RetryUtil
 import org.gradle.util.TextUtil
 import org.junit.Assert
 
 class UrlValidator {
 
-    static void available(String theUrl, String application = null, int timeout = 30) {
+    static void available(String theUrl, String application = "service", int timeout = 30) {
         URL url = new URL(theUrl)
         try {
             ConcurrentTestUtil.poll(timeout) {
-                assert urlIsAvailable(url)
+                assertUrlIsAvailable(url)
             }
-        } catch(AssertionError e) {
-            throw new RuntimeException(String.format("Timeout waiting for %s to become available.", application != null ? application : theUrl));
+        } catch(Throwable t) {
+            throw new RuntimeException(String.format("Timeout waiting for %s to become available at [%s].", application, theUrl), t);
         }
     }
 
     static void notAvailable(String theUrl) {
-        try {
-            String content = new URL(theUrl).text
-            Assert.fail(String.format("Expected url '%s' to be unavailable instead we got:\n%s", theUrl, content));
-        } catch (SocketException ex) {
+        RetryUtil.retry {
+            try {
+                String content = new URL(theUrl).text
+                Thread.sleep(500)
+                Assert.fail(String.format("Expected url '%s' to be unavailable instead we got:\n%s", theUrl, content));
+            } catch (SocketException ex) {
+            }
         }
     }
 
-    private static boolean urlIsAvailable(URL url) {
-        try {
-            url.text
-            return true
-        } catch (IOException e) {
-            return false
-        }
+    // Throws IOException if URL is unavailable
+    private static assertUrlIsAvailable(URL url) {
+        assert url.text != null
     }
 
     /**

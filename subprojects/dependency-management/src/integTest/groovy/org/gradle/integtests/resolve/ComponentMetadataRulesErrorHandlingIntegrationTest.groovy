@@ -59,7 +59,7 @@ class ComponentMetadataRulesErrorHandlingIntegrationTest extends AbstractHttpDep
         failure.assertHasFileName("Build file '$buildFile.path'")
         failure.assertHasLineNumber(23)
         failure.assertHasCause("There was an error while evaluating a component metadata rule for org.test:projectA:1.0.")
-        failure.assertHasCause("No signature of method: org.gradle.api.internal.artifacts.repositories.resolver.ComponentMetadataDetailsAdapter_Decorated.foo()")
+        failure.assertHasCause("Could not find method foo() for arguments [] on object of type org.gradle.api.internal.artifacts.repositories.resolver.ComponentMetadataDetailsAdapter_Decorated.")
     }
 
     def "produces sensible error for invalid component metadata rule" () {
@@ -142,7 +142,8 @@ class ComponentMetadataRulesErrorHandlingIntegrationTest extends AbstractHttpDep
         failureDescriptionStartsWith("A problem occurred evaluating root project")
         failure.assertHasFileName("Build file '$buildFile.path'")
         failure.assertHasLineNumber(22)
-        failureHasCause("Type BadRuleSource is not a valid model rule source: \n- first parameter of rule method 'process' must be of type org.gradle.api.artifacts.ComponentMetadataDetails")
+        failureHasCause("""Type BadRuleSource is not a valid rule source:
+- Method process(java.lang.String) is not a valid rule method: First parameter of a rule method must be of type org.gradle.api.artifacts.ComponentMetadataDetails""")
 
     }
 

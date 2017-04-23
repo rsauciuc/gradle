@@ -29,17 +29,20 @@ class LifecycleBasePluginIntegrationTest extends AbstractIntegrationSpec {
 
     @Unroll
     def "throws deprecation warning when applied in build with #taskName"() {
-        when:
         buildFile << """
 
-        task $taskName << {
-            println "custom $taskName task"
+        task $taskName {
+            doLast {
+                println "custom $taskName task"
+            }
         }
         """
-        executer.withDeprecationChecksDisabled()
-        succeeds(taskName)
+
+        when:
+        fails(taskName)
+
         then:
-        output.contains("Defining custom '$taskName' task when using the standard Gradle lifecycle plugins has been deprecated and is scheduled to be removed")
+        failure.assertHasCause("Declaring custom '$taskName' task when using the standard Gradle lifecycle plugins is not allowed.")
         where:
         taskName << ["check", "clean", "build", "assemble"]
     }
@@ -57,37 +60,5 @@ class LifecycleBasePluginIntegrationTest extends AbstractIntegrationSpec {
 
         where:
         taskName << ["check", "build"]
-    }
-
-    def "binaries are built when build task execution is requested"() {
-        buildFile << """
-            import org.gradle.model.ModelMap
-
-            interface SampleBinary extends BinarySpec {
-            }
-
-            class DefaultSampleBinary extends BaseBinarySpec implements SampleBinary {
-            }
-
-            class SampleBinaryPlugin extends RuleSource {
-                @BinaryType
-                void register(BinaryTypeBuilder<SampleBinary> builder) {
-                    builder.defaultImplementation(DefaultSampleBinary)
-                }
-
-                @Mutate
-                void createSampleBinary(ModelMap<SampleBinary> binarySpecs) {
-                    binarySpecs.create("sampleBinary")
-                }
-            }
-
-            apply plugin: SampleBinaryPlugin
-        """
-
-        when:
-        succeeds "build"
-
-        then:
-        ":sampleBinary" in executedTasks
     }
 }

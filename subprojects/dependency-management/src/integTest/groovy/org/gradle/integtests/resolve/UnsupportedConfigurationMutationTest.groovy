@@ -20,6 +20,7 @@ import org.gradle.integtests.fixtures.FluidDependenciesResolveRunner
 import org.gradle.test.fixtures.maven.MavenFileRepository
 import org.junit.runner.RunWith
 import spock.lang.Issue
+import spock.lang.Unroll
 
 @RunWith(FluidDependenciesResolveRunner)
 class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
@@ -31,7 +32,7 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             dependencies { a files("some.jar") }
         """
         when: fails()
-        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been resolved.")
+        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been resolved")
     }
 
     def "does not allow adding artifacts to a configuration that has been resolved"() {
@@ -41,7 +42,7 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             artifacts { a file("some.jar") }
         """
         when: fails()
-        then: failure.assertHasCause("Cannot change artifacts of configuration ':a' after it has been resolved.")
+        then: failure.assertHasCause("Cannot change artifacts of configuration ':a' after it has been resolved")
     }
 
     def "does not allow changing excludes on a configuration that has been resolved"() {
@@ -51,82 +52,80 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             configurations.a.exclude group: 'someGroup'
         """
         when: fails()
-        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been resolved.")
+        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing conflict resolution on a configuration that has been resolved"() {
+    def "does not allow changing conflict resolution on a configuration that has been resolved"() {
         buildFile << """
             configurations { a }
             configurations.a.resolve()
             configurations.a.resolutionStrategy.failOnVersionConflict()
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed strategy of configuration ':a' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+        when: fails()
+        then: failure.assertHasCause("Cannot change strategy of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing forced versions on a configuration that has been resolved"() {
+    def "does not allow changing forced versions on a configuration that has been resolved"() {
         buildFile << """
             configurations { a }
             configurations.a.resolve()
             configurations.a.resolutionStrategy.force "org.utils:api:1.3"
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed strategy of configuration ':a' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+        when: fails()
+        then: failure.assertHasCause("Cannot change strategy of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing cache policy on a configuration that has been resolved"() {
+    def "does not allow changing cache policy on a configuration that has been resolved"() {
         buildFile << """
             configurations { a }
             configurations.a.resolve()
             configurations.a.resolutionStrategy.cacheChangingModulesFor 0, "seconds"
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed strategy of configuration ':a' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change strategy of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing resolution rules on a configuration that has been resolved"() {
+    def "does not allow changing resolution rules on a configuration that has been resolved"() {
         buildFile << """
             configurations { a }
             configurations.a.resolve()
             configurations.a.resolutionStrategy.eachDependency {}
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed strategy of configuration ':a' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change strategy of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing substitution rules on a configuration that has been resolved"() {
+    def "does not allow changing substitution rules on a configuration that has been resolved"() {
         buildFile << """
             configurations { a }
             configurations.a.resolve()
             configurations.a.resolutionStrategy.dependencySubstitution.all {}
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed strategy of configuration ':a' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change strategy of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing component selection rules on a configuration that has been resolved"() {
+    def "does not allow changing component selection rules on a configuration that has been resolved"() {
         buildFile << """
             configurations { a }
             configurations.a.resolve()
             configurations.a.resolutionStrategy.componentSelection.all {}
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed strategy of configuration ':a' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change strategy of configuration ':a' after it has been resolved")
     }
 
-    def "warns about changing dependencies of a configuration that has been resolved for task dependencies"() {
+    def "does not allow changing dependencies of a configuration that has been resolved for task dependencies"() {
         mavenRepo.module("org.utils", "extra", '1.5').publish()
 
         settingsFile << "include 'api', 'impl'"
@@ -142,9 +141,11 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             }
 
             project(":api") {
-                task addDependency << {
-                   dependencies {
-                        compile "org.utils:extra:1.5"
+                task addDependency {
+                    doLast {
+                        dependencies {
+                            compile "org.utils:extra:1.5"
+                        }
                     }
                 }
             }
@@ -154,56 +155,58 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
                     compile project(":api")
                 }
 
-                task addDependency << {
-                    dependencies {
-                        compile "org.utils:extra:1.5"
+                task addDependency {
+                    doLast {
+                        dependencies {
+                            compile "org.utils:extra:1.5"
+                        }
                     }
                 }
 
-                task modifyConfigDuringTaskExecution(dependsOn: [':impl:addDependency', configurations.compile]) << {
-                    def files = configurations.compile.files
-                    assert files*.name.sort() == ["api.jar", "extra-1.5.jar"]
-                    assert files*.exists() == [ true, true ]
+                task modifyConfigDuringTaskExecution(dependsOn: [':impl:addDependency', configurations.compile]) {
+                    doLast {
+                        def files = configurations.compile.files
+                        assert files*.name.sort() == ["api.jar", "extra-1.5.jar"]
+                        assert files*.exists() == [ true, true ]
+                    }
                 }
-                task modifyParentConfigDuringTaskExecution(dependsOn: [':impl:addDependency', configurations.testCompile]) << {
-                    def files = configurations.testCompile.files
-                    assert files*.name.sort() == ["api.jar", "extra-1.5.jar"]
-                    assert files*.exists() == [ true, true ]
+                task modifyParentConfigDuringTaskExecution(dependsOn: [':impl:addDependency', configurations.testCompile]) {
+                    doLast {
+                        def files = configurations.testCompile.files
+                        assert files*.name.sort() == ["api.jar", "extra-1.5.jar"]
+                        assert files*.exists() == [ true, true ]
+                    }
                 }
-                task modifyDependentConfigDuringTaskExecution(dependsOn: [':api:addDependency', configurations.compile]) << {
-                    def files = configurations.compile.files
-                    assert files*.name.sort() == ["api.jar"] // Late dependency is not honoured
-                    assert files*.exists() == [ true ]
+                task modifyDependentConfigDuringTaskExecution(dependsOn: [':api:addDependency', configurations.compile]) {
+                    doLast {
+                        def files = configurations.compile.files
+                        assert files*.name.sort() == ["api.jar"] // Late dependency is not honoured
+                        assert files*.exists() == [ true ]
+                    }
                 }
             }
 """
 
         when:
-        executer.withDeprecationChecksDisabled()
-        succeeds("impl:modifyConfigDuringTaskExecution")
+        fails("impl:modifyConfigDuringTaskExecution")
 
         then:
-        output.contains("Changed dependencies of configuration ':impl:compile' after task dependencies have been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        output.contains("Resolving configuration ':impl:compile' again after modification.")
+        failure.assertHasCause("Cannot change dependencies of configuration ':impl:compile' after task dependencies have been resolved")
 
         when:
-        executer.withDeprecationChecksDisabled()
-        succeeds("impl:modifyParentConfigDuringTaskExecution")
+        fails("impl:modifyParentConfigDuringTaskExecution")
 
         then:
-        output.contains("Changed dependencies of configuration ':impl:compile' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        output.contains("Changed dependencies of parent of configuration ':impl:testCompile' after task dependencies have been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        output.contains("Resolving configuration ':impl:testCompile' again after modification.")
+        failure.assertHasCause("Cannot change dependencies of configuration ':impl:compile' after it has been included in dependency resolution.")
 
         when:
-        executer.withDeprecationChecksDisabled()
-        succeeds("impl:modifyDependentConfigDuringTaskExecution")
+        fails("impl:modifyDependentConfigDuringTaskExecution")
 
         then:
-        output.contains("Changed dependencies of configuration ':api:compile' after task dependencies have been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+        failure.assertHasCause("Cannot change dependencies of configuration ':api:compile' after it has been included in dependency resolution.")
     }
 
-    def "warns about changing artifacts of a configuration that has been resolved for task dependencies"() {
+    def "does not allow changing artifacts of a configuration that has been resolved for task dependencies"() {
         mavenRepo.module("org.utils", "extra", '1.5').publish()
 
         settingsFile << "include 'api', 'impl'"
@@ -219,8 +222,10 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             }
 
             project(":api") {
-                task addArtifact << {
-                    artifacts { compile file("some.jar") }
+                task addArtifact {
+                    doLast {
+                        artifacts { compile file("some.jar") }
+                    }
                 }
             }
 
@@ -228,8 +233,10 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
                 dependencies {
                     compile project(":api")
                 }
-                task addArtifact << {
-                    artifacts { compile file("some.jar") }
+                task addArtifact {
+                    doLast {
+                        artifacts { compile file("some.jar") }
+                    }
                 }
 
                 task addArtifactToConfigDuringTaskExecution(dependsOn: [':impl:addArtifact', configurations.compile])
@@ -239,29 +246,24 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
 """
 
         when:
-        executer.withDeprecationChecksDisabled()
-
+        fails("impl:addArtifactToConfigDuringTaskExecution")
         then:
-        succeeds("impl:addArtifactToConfigDuringTaskExecution")
-        output.contains("Changed artifacts of configuration ':impl:compile' after task dependencies have been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+        failure.assertHasCause("Cannot change artifacts of configuration ':impl:compile' after task dependencies have been resolved")
 
         when:
-        executer.withDeprecationChecksDisabled()
+        fails("impl:addArtifactToParentConfigDuringTaskExecution")
 
         then:
-        succeeds("impl:addArtifactToParentConfigDuringTaskExecution")
-        output.contains("Changed artifacts of configuration ':impl:compile' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+        failure.assertHasCause("Cannot change artifacts of configuration ':impl:compile' after it has been included in dependency resolution.")
 
         when:
-        executer.withDeprecationChecksDisabled()
-
+        fails("impl:addArtifactToDependentConfigDuringTaskExecution")
         then:
-        succeeds("impl:addArtifactToDependentConfigDuringTaskExecution")
-        output.contains("Changed artifacts of configuration ':api:compile' after task dependencies have been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+        failure.assertHasCause("Cannot change artifacts of configuration ':api:compile' after it has been included in dependency resolution.")
     }
 
     @Issue("GRADLE-3155")
-    def "warns about adding dependencies to a configuration whose child has been resolved"() {
+    def "does not allow adding dependencies to a configuration whose child has been resolved"() {
         buildFile << """
             configurations {
                 a
@@ -271,15 +273,15 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             configurations.c.resolve()
             dependencies { a files("some.jar") }
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed dependencies of configuration ':a' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        and:  output.contains("Changed dependencies of parent of configuration ':c' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been included in dependency resolution.")
     }
 
     @Issue("GRADLE-3155")
-    def "warns about adding artifacts to a configuration whose child has been resolved"() {
+    def "does not allow adding artifacts to a configuration whose child has been resolved"() {
         buildFile << """
             configurations {
                 a
@@ -289,15 +291,15 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             configurations.c.resolve()
             artifacts { a file("some.jar") }
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed artifacts of configuration ':a' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        and:  output.contains("Changed artifacts of parent of configuration ':c' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change artifacts of configuration ':a' after it has been included in dependency resolution.")
     }
 
     @Issue("GRADLE-3155")
-    def "warns about changing a configuration whose child has been resolved"() {
+    def "does not allow changing a configuration whose child has been resolved"() {
         buildFile << """
             configurations {
                 a
@@ -307,11 +309,11 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             configurations.c.resolve()
             configurations.a.exclude group: 'someGroup'
         """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed dependencies of configuration ':a' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        and:  output.contains("Changed dependencies of parent of configuration ':c' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been included in dependency resolution.")
     }
 
     def "allows changing resolution stragegy of a configuration whose child has been resolved"() {
@@ -333,7 +335,7 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
         expect: succeeds()
     }
 
-    def "warning is upgraded to an error when configuration is resolved"() {
+    def "fails when configuration is resolved"() {
         buildFile << """
             configurations {
                 a
@@ -344,12 +346,11 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
             configurations.a.resolve()
             configurations.a.exclude group: 'otherGroup'
         """
-        executer.withDeprecationChecksDisabled()
+
+
 
         when: fails()
-        then: output.contains("Changed dependencies of configuration ':a' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        and: output.contains("Changed dependencies of parent of configuration ':b' after it has been resolved. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
-        and: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been resolved.")
+        then: failure.assertHasCause("Cannot change dependencies of configuration ':a' after it has been included in dependency resolution.")
     }
 
     @Issue("GRADLE-3155")
@@ -391,7 +392,7 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
         expect: succeeds()
     }
 
-    def "warns about changing a dependency project's dependencies after included in resolution"() {
+    def "does not allow changing a dependency project's dependencies after included in resolution"() {
         settingsFile << "include 'api', 'impl'"
         buildFile << """
             allprojects {
@@ -412,10 +413,10 @@ class UnsupportedConfigurationMutationTest extends AbstractIntegrationSpec {
                 }
             }
 """
-        executer.withDeprecationChecksDisabled()
 
-        when: succeeds()
-        then: output.contains("Changed dependencies of configuration ':api:compile' after it has been included in dependency resolution. This behaviour has been deprecated and is scheduled to be removed in Gradle 3.0")
+
+        when: fails()
+        then: failure.assertHasCause("Cannot change dependencies of configuration ':api:compile' after it has been included in dependency resolution.")
     }
 
     @Issue("GRADLE-3297")
@@ -449,5 +450,36 @@ task resolveChildFirst {
 
         then:
         succeeds("resolveChildFirst")
+    }
+
+    def "does not allow adding attributes to a configuration that has been resolved"() {
+        buildFile << """
+            configurations { a }
+            configurations.a.resolve()
+            configurations.a.attributes { attribute(Attribute.of('foo', String), 'bar') }
+        """
+        when: fails()
+        then: failure.assertHasCause("Cannot change attributes of configuration ':a' after it has been resolved")
+    }
+
+    @Unroll
+    def "cannot change the configuration role (#code) after it has been resolved"() {
+        buildFile << """
+            configurations { a }
+            configurations.a.resolve()
+            ${code}
+        """
+        when:
+        fails()
+
+        then:
+        failure.assertHasCause("Cannot change role of configuration ':a' after it has been resolved")
+
+        where:
+        role                      | code
+        'consume or publish only' | 'configurations.a.canBeResolved = false'
+        'query or resolve only'   | 'configurations.a.canBeConsumed = false'
+        'bucket'                  | 'configurations.a.canBeResolved = false; configurations.a.canBeConsumed = false'
+
     }
 }

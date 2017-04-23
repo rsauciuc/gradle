@@ -39,6 +39,15 @@ public class PropertiesToDaemonParametersConverter {
             }
         }
 
+        prop = properties.get(HEALTH_CHECK_INTERVAL_PROPERTY);
+        if (prop != null) {
+            try {
+                target.setPeriodicCheckInterval(new Integer(prop));
+            } catch (NumberFormatException e) {
+                throw new GradleException(String.format("Unable to parse %s property. Expected an int but got: %s", HEALTH_CHECK_INTERVAL_PROPERTY, prop), e);
+            }
+        }
+
         prop = properties.get(JVM_ARGS_PROPERTY);
         if (prop != null) {
             target.setJvmArgs(JvmOptions.fromString(prop));
@@ -68,6 +77,10 @@ public class PropertiesToDaemonParametersConverter {
         if (daemonEnabledPropertyValue != null) {
             target.setEnabled(isTrue(daemonEnabledPropertyValue));
         }
-        target.setDebug(isTrue(properties.get(DEBUG_MODE_PROPERTY)));
+
+        final String debugEnabledPropertyValue = properties.get(DEBUG_MODE_PROPERTY);
+        if (debugEnabledPropertyValue != null) {
+            target.setDebug(isTrue(debugEnabledPropertyValue));
+        }
     }
 }

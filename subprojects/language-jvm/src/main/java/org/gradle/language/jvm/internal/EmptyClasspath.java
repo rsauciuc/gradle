@@ -18,17 +18,19 @@ package org.gradle.language.jvm.internal;
 
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.file.collections.SimpleFileCollection;
-import org.gradle.api.internal.tasks.DefaultTaskDependency;
+import org.gradle.api.internal.tasks.TaskDependencies;
 import org.gradle.api.tasks.TaskDependency;
 import org.gradle.jvm.Classpath;
 
 // Temporary Classpath implementation for new jvm component model
 public class EmptyClasspath implements Classpath {
+    @Override
     public FileCollection getFiles() {
         return new SimpleFileCollection();
     }
 
+    @Override
     public TaskDependency getBuildDependencies() {
-        return new DefaultTaskDependency();
+        return TaskDependencies.EMPTY;
     }
 }

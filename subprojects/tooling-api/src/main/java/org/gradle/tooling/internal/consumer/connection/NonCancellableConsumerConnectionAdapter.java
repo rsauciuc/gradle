@@ -75,4 +75,5 @@ public class NonCancellableConsumerConnectionAdapter implements ConsumerConnecti
     private void handleCancellationPostOperation(BuildCancellationToken cancellationToken, Runnable callback) {
         cancellationToken.removeCallback(callback);
     }
+
 }

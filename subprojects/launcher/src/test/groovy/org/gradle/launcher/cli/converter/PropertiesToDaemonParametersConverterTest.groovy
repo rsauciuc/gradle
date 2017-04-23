@@ -27,7 +27,6 @@ import org.junit.Rule
 import spock.lang.Specification
 import spock.lang.Unroll
 
-import static org.gradle.launcher.daemon.configuration.DaemonUsage.*
 import static org.gradle.launcher.daemon.configuration.GradleProperties.*
 
 @UsesNativeServices
@@ -37,6 +36,13 @@ class PropertiesToDaemonParametersConverterTest extends Specification {
 
     def converter = new PropertiesToDaemonParametersConverter()
     def params = new DaemonParameters(new BuildLayoutParameters())
+
+    def "allows whitespace around boolean properties"() {
+        when:
+        converter.convert([ (DAEMON_ENABLED_PROPERTY): 'false ' ], params)
+        then:
+        !params.enabled
+    }
 
     def "can configure jvm args combined with a system property"() {
         when:
@@ -60,21 +66,23 @@ class PropertiesToDaemonParametersConverterTest extends Specification {
     def "configures from gradle properties"() {
         when:
         converter.convert([
-                (JVM_ARGS_PROPERTY)       : '-Xmx256m',
-                (JAVA_HOME_PROPERTY)      : Jvm.current().javaHome.absolutePath,
-                (DAEMON_ENABLED_PROPERTY) : "true",
-                (DAEMON_BASE_DIR_PROPERTY): new File("baseDir").absolutePath,
-                (IDLE_TIMEOUT_PROPERTY)   : "115",
-                (DEBUG_MODE_PROPERTY)     : "true",
+            (JVM_ARGS_PROPERTY)                 : '-Xmx256m',
+            (JAVA_HOME_PROPERTY)                : Jvm.current().javaHome.absolutePath,
+            (DAEMON_ENABLED_PROPERTY)           : "false",
+            (DAEMON_BASE_DIR_PROPERTY)          : new File("baseDir").absolutePath,
+            (IDLE_TIMEOUT_PROPERTY)             : "115",
+            (HEALTH_CHECK_INTERVAL_PROPERTY)  : "42",
+            (DEBUG_MODE_PROPERTY)               : "true",
         ], params)
 
         then:
         params.effectiveJvmArgs.contains("-Xmx256m")
         params.debug
         params.effectiveJvm == Jvm.current()
-        params.daemonUsage == EXPLICITLY_ENABLED
+        !params.enabled
         params.baseDir == new File("baseDir").absoluteFile
         params.idleTimeout == 115
+        params.periodicCheckInterval == 42
     }
 
     def "shows nice message for dummy java home"() {
@@ -108,12 +116,22 @@ class PropertiesToDaemonParametersConverterTest extends Specification {
         ex.message.contains 'asdf'
     }
 
+    def "shows nice message for invalid periodic check interval"() {
+        when:
+        converter.convert((GradleProperties.HEALTH_CHECK_INTERVAL_PROPERTY): 'bogus', params)
+
+        then:
+        def ex = thrown(GradleException)
+        ex.message.contains 'org.gradle.daemon.healthcheckinterval'
+        ex.message.contains 'bogus'
+    }
+
     def "does not explicitly set daemon usage if daemon system property is not specified"() {
         when:
         converter.convert([:], params)
 
         then:
-        params.daemonUsage == IMPLICITLY_DISABLED
+        params.enabled
     }
 
     @Unroll
@@ -122,11 +140,25 @@ class PropertiesToDaemonParametersConverterTest extends Specification {
         converter.convert((GradleProperties.DAEMON_ENABLED_PROPERTY): enabled.toString(), params)
 
         then:
-        params.daemonUsage == usage
+        params.enabled == propertyValue
 
         where:
-        enabled | usage
-        true    | EXPLICITLY_ENABLED
-        false   | EXPLICITLY_DISABLED
+        enabled | propertyValue
+        true    | true
+        false   | false
     }
+
+    def "enable debug mode from JVM args when default debug argument is used"() {
+        when:
+        converter.convert([
+            (JVM_ARGS_PROPERTY)                 : "-Xmx256m $debugArgs".toString(),
+        ], params)
+
+        then:
+        params.debug
+
+        where:
+        debugArgs << ['-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005', '-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=5005']
+    }
+
 }

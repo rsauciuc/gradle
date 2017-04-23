@@ -17,18 +17,19 @@
 package org.gradle.api.internal.tasks.scala;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.typesafe.zinc.*;
+import com.typesafe.zinc.IncOptions;
+import com.typesafe.zinc.Inputs;
 import org.gradle.api.internal.tasks.SimpleWorkResult;
 import org.gradle.api.internal.tasks.compile.CompilationFailedException;
-import org.gradle.language.base.internal.compile.Compiler;
 import org.gradle.api.internal.tasks.compile.JavaCompilerArgumentsBuilder;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.WorkResult;
-import org.gradle.internal.jvm.Jvm;
+import org.gradle.internal.time.Timer;
+import org.gradle.internal.time.Timers;
+import org.gradle.language.base.internal.compile.Compiler;
+import org.gradle.util.GFileUtils;
 import scala.Option;
-import xsbti.F0;
 
 import java.io.File;
 import java.io.Serializable;
@@ -38,38 +39,50 @@ public class ZincScalaCompiler implements Compiler<ScalaJavaJointCompileSpec>, S
     private static final Logger LOGGER = Logging.getLogger(ZincScalaCompiler.class);
     private final Iterable<File> scalaClasspath;
     private Iterable<File> zincClasspath;
+    private final File gradleUserHome;
 
-    public ZincScalaCompiler(Iterable<File> scalaClasspath, Iterable<File> zincClasspath) {
+    public ZincScalaCompiler(Iterable<File> scalaClasspath, Iterable<File> zincClasspath, File gradleUserHome) {
         this.scalaClasspath = scalaClasspath;
         this.zincClasspath = zincClasspath;
+        this.gradleUserHome = gradleUserHome;
     }
 
+    @Override
     public WorkResult execute(ScalaJavaJointCompileSpec spec) {
-        return Compiler.execute(scalaClasspath, zincClasspath, spec);
+        return Compiler.execute(scalaClasspath, zincClasspath, gradleUserHome, spec);
     }
 
     // need to defer loading of Zinc/sbt/Scala classes until we are
     // running in the compiler daemon and have them on the class path
     private static class Compiler {
-        static WorkResult execute(Iterable<File> scalaClasspath, Iterable<File> zincClasspath, ScalaJavaJointCompileSpec spec) {
+        static WorkResult execute(final Iterable<File> scalaClasspath, final Iterable<File> zincClasspath, File gradleUserHome, final ScalaJavaJointCompileSpec spec) {
             LOGGER.info("Compiling with Zinc Scala compiler.");
 
-            xsbti.Logger logger = new SbtLoggerAdapter();
+            final xsbti.Logger logger = new SbtLoggerAdapter();
 
-            com.typesafe.zinc.Compiler compiler = createCompiler(scalaClasspath, zincClasspath, logger);
+            Timer timer = Timers.startTimer();
+            com.typesafe.zinc.Compiler compiler = ZincScalaCompilerFactory.createParallelSafeCompiler(scalaClasspath, zincClasspath, logger, gradleUserHome);
+            LOGGER.info("Initialized Zinc Scala compiler: {}", timer.getElapsed());
+
             List<String> scalacOptions = new ZincScalaCompilerArgumentsGenerator().generate(spec);
-            List<String> javacOptions = new JavaCompilerArgumentsBuilder(spec).includeClasspath(false).build();
-            Inputs inputs = Inputs.create(ImmutableList.copyOf(spec.getClasspath()), ImmutableList.copyOf(spec.getSource()), spec.getDestinationDir(),
+            List<String> javacOptions = new JavaCompilerArgumentsBuilder(spec).includeClasspath(false).noEmptySourcePath().build();
+            Inputs inputs = Inputs.create(ImmutableList.copyOf(spec.getCompileClasspath()), ImmutableList.copyOf(spec.getSource()), spec.getDestinationDir(),
                     scalacOptions, javacOptions, spec.getScalaCompileOptions().getIncrementalOptions().getAnalysisFile(), spec.getAnalysisMap(), "mixed", getIncOptions(), true);
             if (LOGGER.isDebugEnabled()) {
                 Inputs.debug(inputs, logger);
             }
+
+            if (spec.getScalaCompileOptions().isForce()) {
+                GFileUtils.deleteDirectory(spec.getDestinationDir());
+            }
+            LOGGER.info("Prepared Zinc Scala inputs: {}", timer.getElapsed());
 
             try {
                 compiler.compile(inputs, logger);
             } catch (xsbti.CompileFailed e) {
                 throw new CompilationFailedException(e);
             }
+            LOGGER.info("Completed Scala compilation: {}", timer.getElapsed());
 
             return new SimpleWorkResult(true);
         }
@@ -92,35 +105,31 @@ public class ZincScalaCompiler implements Compiler<ScalaJavaJointCompileSpec>, S
             return options;
         }
 
-        static com.typesafe.zinc.Compiler createCompiler(Iterable<File> scalaClasspath, Iterable<File> zincClasspath, xsbti.Logger logger) {
-            ScalaLocation scalaLocation = ScalaLocation.fromPath(Lists.newArrayList(scalaClasspath));
-            SbtJars sbtJars = SbtJars.fromPath(Lists.newArrayList(zincClasspath));
-            Setup setup = Setup.create(scalaLocation, sbtJars, Jvm.current().getJavaHome(), true);
-            if (LOGGER.isDebugEnabled()) {
-                Setup.debug(setup, logger);
-            }
-            return com.typesafe.zinc.Compiler.getOrCreate(setup, logger);
-        }
     }
 
     private static class SbtLoggerAdapter implements xsbti.Logger {
-        public void error(F0<String> msg) {
+        @Override
+        public void error(xsbti.F0<String> msg) {
             LOGGER.error(msg.apply());
         }
 
-        public void warn(F0<String> msg) {
+        @Override
+        public void warn(xsbti.F0<String> msg) {
             LOGGER.warn(msg.apply());
         }
 
-        public void info(F0<String> msg) {
+        @Override
+        public void info(xsbti.F0<String> msg) {
             LOGGER.info(msg.apply());
         }
 
-        public void debug(F0<String> msg) {
+        @Override
+        public void debug(xsbti.F0<String> msg) {
             LOGGER.debug(msg.apply());
         }
 
-        public void trace(F0<Throwable> exception) {
+        @Override
+        public void trace(xsbti.F0<Throwable> exception) {
             LOGGER.trace(exception.apply().toString());
         }
     }

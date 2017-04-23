@@ -22,7 +22,6 @@ import org.gradle.model.internal.core.rule.describe.ModelRuleDescriptor;
 import org.gradle.model.internal.type.ModelType;
 
 import java.util.Collections;
-import java.util.List;
 
 public class EmptyModelProjection implements ModelProjection {
 
@@ -39,27 +38,17 @@ public class EmptyModelProjection implements ModelProjection {
 
     @Nullable
     @Override
-    public <T> ModelView<? extends T> asMutable(ModelType<T> type, MutableModelNode node, ModelRuleDescriptor ruleDescriptor, List<ModelView<?>> inputs) {
+    public <T> ModelView<? extends T> asMutable(ModelType<T> type, MutableModelNode node, ModelRuleDescriptor ruleDescriptor) {
         return null;
     }
 
     @Override
-    public <T> boolean canBeViewedAsMutable(ModelType<T> type) {
+    public <T> boolean canBeViewedAs(ModelType<T> type) {
         return false;
     }
 
     @Override
-    public <T> boolean canBeViewedAsImmutable(ModelType<T> type) {
-        return false;
-    }
-
-    @Override
-    public Iterable<String> getWritableTypeDescriptions(MutableModelNode node) {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public Iterable<String> getReadableTypeDescriptions(MutableModelNode node) {
+    public Iterable<String> getTypeDescriptions(MutableModelNode node) {
         return Collections.emptyList();
     }
 

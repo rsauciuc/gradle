@@ -18,13 +18,15 @@ package org.gradle.integtests.tooling.r112
 
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.BuildLauncher
 import org.gradle.tooling.exceptions.UnsupportedBuildArgumentException
-import org.gradle.tooling.model.*
+import org.gradle.tooling.model.GradleProject
+import org.gradle.tooling.model.GradleTask
+import org.gradle.tooling.model.Launchable
+import org.gradle.tooling.model.Task
+import org.gradle.tooling.model.TaskSelector
 import org.gradle.tooling.model.gradle.BuildInvocations
 
-@ToolingApiVersion(">=1.12")
 class BuildInvocationsCrossVersionSpec extends ToolingApiSpecification {
     def setup() {
         settingsFile << '''
@@ -34,37 +36,37 @@ include 'b:c'
 rootProject.name = 'test'
 '''
         buildFile << '''
-task t1 << {
-    println "t1 in $project.name"
+task t1 {
+    doLast {
+        println "t1 in $project.name"
+    }
 }
 
 project(':b') {
-    task t3 << {
-        println "t3 in $project.name"
+    task t3 {
+        doLast {
+            println "t3 in $project.name"
+        }
     }
-    task t2 << {
-        println "t2 in $project.name"
+    task t2 {
+        doLast {
+            println "t2 in $project.name"
+        }
     }
 }
 
 project(':b:c') {
-    task t1 << {
-        println "t1 in $project.name"
+    task t1 {
+        doLast {
+            println "t1 in $project.name"
+        }
     }
-    task t2 << {
-        println "t2 in $project.name"
+    task t2 {
+        doLast {
+            println "t2 in $project.name"
+        }
     }
 }'''
-    }
-
-    @TargetGradleVersion(">=1.8 <=1.11")
-    def "cannot fetch task selectors from action in older target version"() {
-        when:
-        withConnection { connection -> connection.action(new FetchAllTaskSelectorsBuildAction()).run() }
-
-        then:
-        Exception e = thrown()
-        e.cause.message.startsWith('No model of type \'BuildInvocations\' is available in this build.')
     }
 
     @TargetGradleVersion(">=1.12")
@@ -123,14 +125,14 @@ project(':b:c') {
             it.forLaunchables(selectorT1, selectorT2)
         }
         then:
-        result.result.assertTasksExecuted(':t1', ':b:c:t1', ':b:t2', ':b:c:t2')
+        result.result.assertTasksExecutedInOrder(':t1', ':b:c:t1', ':b:t2', ':b:c:t2')
 
         when:
         result = withBuild { BuildLauncher it ->
             it.forLaunchables(selectorT2, selectorT1)
         }
         then:
-        result.result.assertTasksExecuted(':b:t2', ':b:c:t2', ':t1', ':b:c:t1')
+        result.result.assertTasksExecutedInOrder(':b:t2', ':b:c:t2', ':t1', ':b:c:t1')
     }
 
     def "can fetch task selectors for root project from connection"() {
@@ -153,12 +155,6 @@ project(':b:c') {
         then:
         tasks.size() == 2
         tasks*.name as Set == ['t2', 't3'] as Set
-
-        when:
-        tasks[0].project
-        then:
-        UnsupportedMethodException e = thrown()
-        e != null
     }
 
     @TargetGradleVersion(">=2.0")
@@ -176,13 +172,6 @@ project(':b:c') {
         tasks*.name as Set == projectBExpectedTasks
 
         when:
-        tasks[0].project
-
-        then:
-        UnsupportedMethodException e = thrown()
-        e != null
-
-        when:
         tasks = withConnection { connection ->
             connection.action(new FetchTasksBuildAction(':')).run()
         }
@@ -190,12 +179,6 @@ project(':b:c') {
         then:
         tasks.size() == rootProjectExpectedTasks.size()
         tasks*.name as Set == rootProjectExpectedTasks
-
-        when:
-        tasks[0].project
-        then:
-        e = thrown()
-        e != null
     }
 
     @TargetGradleVersion(">=1.12")
@@ -242,14 +225,14 @@ project(':b:c') {
         }
 
         then:
-        result.result.assertTasksExecuted(':t1', ':b:t2', ':b:c:t1')
+        result.result.assertTasksExecutedInOrder(':t1', ':b:t2', ':b:c:t1')
 
         when:
         result = withBuild { BuildLauncher it ->
             it.forLaunchables(taskBCT1, taskBT2, taskT1)
         }
         then:
-        result.result.assertTasksExecuted(':b:c:t1', ':b:t2', ':t1')
+        result.result.assertTasksExecutedInOrder(':b:c:t1', ':b:t2', ':t1')
     }
 
     @TargetGradleVersion(">=1.12")
@@ -268,7 +251,7 @@ project(':b:c') {
             it.forLaunchables(selectorBT1, selectorBT3, taskT1)
         }
         then:
-        result.result.assertTasksExecuted(':b:c:t1', ':b:t3', ':t1')
+        result.result.assertTasksExecutedInOrder(':b:c:t1', ':b:t3', ':t1')
     }
 
     def "build tasks and selectors in order cross version"() {
@@ -287,7 +270,7 @@ project(':b:c') {
             it.forLaunchables(taskT1, selectorT1, selectorT2, taskBT2)
         }
         then:
-        result.result.assertTasksExecuted(':t1', ':b:c:t1', ':b:t2', ':b:c:t2')
+        result.result.assertTasksExecutedInOrder(':t1', ':b:c:t1', ':b:t2', ':b:c:t2')
     }
 
     @TargetGradleVersion("=1.12")
@@ -329,7 +312,6 @@ project(':b:c') {
         result.result.assertTasksExecuted(':b:c:t1', ':b:t3', ':t1')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
     def "can request tasks for root project"() {
         // TODO make sure it is for root project if default project is different
 
@@ -345,11 +327,5 @@ project(':b:c') {
         task != null
         task.name == 't1'
         task.path == ':t1'
-
-        when:
-        task.project
-
-        then:
-        UnsupportedMethodException e = thrown()
     }
 }

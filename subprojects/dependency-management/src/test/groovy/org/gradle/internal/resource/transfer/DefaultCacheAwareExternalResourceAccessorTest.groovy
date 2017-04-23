@@ -18,7 +18,9 @@ package org.gradle.internal.resource.transfer
 
 import org.gradle.api.Transformer
 import org.gradle.api.internal.artifacts.ivyservice.CacheLockingManager
+import org.gradle.api.internal.artifacts.ivyservice.resolutionstrategy.DefaultExternalResourceCachePolicy
 import org.gradle.api.internal.file.TemporaryFileProvider
+import org.gradle.cache.internal.ProducerGuard
 import org.gradle.internal.hash.HashUtil
 import org.gradle.internal.resource.ExternalResource
 import org.gradle.internal.resource.cached.CachedExternalResource
@@ -45,7 +47,14 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         createTemporaryFile(_, _, _) >> tempFile
     }
     final cacheLockingManager = Mock(CacheLockingManager)
-    final cache = new DefaultCacheAwareExternalResourceAccessor(repository, index, timeProvider, temporaryFileProvider, cacheLockingManager)
+    final cachePolicy = new DefaultExternalResourceCachePolicy()
+    final ProducerGuard<URI> producerGuard = Stub() {
+        guardByKey(_, _) >> { args ->
+            def (key, factory) = args
+            factory.create()
+        }
+    }
+    final cache = new DefaultCacheAwareExternalResourceAccessor(repository, index, timeProvider, temporaryFileProvider, cacheLockingManager, cachePolicy, producerGuard)
 
     def "returns null when the request resource is not cached and does not exist in the remote repository"() {
         def uri = new URI("scheme:thing")
@@ -62,7 +71,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         1 * index.lookup("scheme:thing") >> null
         1 * localCandidates.isNone() >> true
         1 * repository.withProgressLogging() >> progressLoggingRepo
-        1 * progressLoggingRepo.getResource(uri) >> null
+        1 * progressLoggingRepo.getResource(uri, false) >> null
         0 * _._
     }
 
@@ -80,7 +89,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         and:
         1 * index.lookup("scheme:thing") >> null
         1 * localCandidates.isNone() >> false
-        1 * repository.getResourceMetaData(uri) >> null
+        1 * repository.getResourceMetaData(uri, true) >> null
         0 * _._
     }
 
@@ -103,7 +112,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         1 * index.lookup("scheme:thing") >> null
         1 * localCandidates.isNone() >> true
         1 * repository.withProgressLogging() >> progressLoggingRepo
-        1 * progressLoggingRepo.getResource(uri) >> remoteResource
+        1 * progressLoggingRepo.getResource(uri, false) >> remoteResource
         _ * remoteResource.name >> "remoteResource"
         1 * remoteResource.withContent(_) >> { ExternalResource.ContentAction a ->
             a.execute(new ByteArrayInputStream(), metaData)
@@ -111,7 +120,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         1 * remoteResource.close()
 
         and:
-        1 * cacheLockingManager.useCache(_, _) >> { String description, org.gradle.internal.Factory factory ->
+        1 * cacheLockingManager.useCache(_) >> { org.gradle.internal.Factory factory ->
             return factory.create()
         }
         1 * fileStore.moveIntoCache(tempFile) >> localResource
@@ -167,7 +176,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         timeProvider.currentTime >> 24000L
         cached.cachedAt >> 23999L
         cached.externalResourceMetaData >> cachedMetaData
-        1 * repository.getResourceMetaData(uri) >> remoteMetaData
+        1 * repository.getResourceMetaData(uri, true) >> remoteMetaData
         localCandidates.none >> false
         remoteMetaData.sha1 >> sha1
         remoteMetaData.etag >> null
@@ -180,7 +189,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         0 * _._
 
         and:
-        1 * cacheLockingManager.useCache(_, _) >> { String description, org.gradle.internal.Factory factory ->
+        1 * cacheLockingManager.useCache(_) >> { org.gradle.internal.Factory factory ->
             return factory.create()
         }
         1 * fileStore.moveIntoCache(tempFile) >> localResource
@@ -210,14 +219,14 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
 
         and:
         1 * index.lookup("scheme:thing") >> null
-        1 * repository.getResourceMetaData(uri) >> remoteMetaData
+        1 * repository.getResourceMetaData(uri, true) >> remoteMetaData
         localCandidates.none >> false
         remoteMetaData.sha1 >> null
         remoteMetaData.etag >> null
         remoteMetaData.lastModified >> null
         cachedMetaData.etag >> null
         cachedMetaData.lastModified >> null
-        1 * repository.getResource(new URI("scheme:thing.sha1")) >> remoteSha1
+        1 * repository.getResource(new URI("scheme:thing.sha1"), true) >> remoteSha1
         1 * remoteSha1.withContent(_) >> { Transformer t ->
             t.transform(new ByteArrayInputStream(sha1.asZeroPaddedHexString(40).bytes))
         }
@@ -227,7 +236,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         0 * _._
 
         and:
-        1 * cacheLockingManager.useCache(_, _) >> { String description, org.gradle.internal.Factory factory ->
+        1 * cacheLockingManager.useCache(_) >> { org.gradle.internal.Factory factory ->
             return factory.create()
         }
         1 * fileStore.moveIntoCache(tempFile) >> localResource
@@ -254,16 +263,16 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
 
         and:
         1 * index.lookup("scheme:thing") >> null
-        1 * repository.getResourceMetaData(uri) >> remoteMetaData
+        1 * repository.getResourceMetaData(uri, true) >> remoteMetaData
         localCandidates.none >> false
         remoteMetaData.sha1 >> null
         remoteMetaData.etag >> null
         remoteMetaData.lastModified >> null
         cachedMetaData.etag >> null
         cachedMetaData.lastModified >> null
-        1 * repository.getResource(new URI("scheme:thing.sha1")) >> null
+        1 * repository.getResource(new URI("scheme:thing.sha1"), true) >> null
         1 * repository.withProgressLogging() >> progressLoggingRepo
-        1 * progressLoggingRepo.getResource(uri) >> remoteResource
+        1 * progressLoggingRepo.getResource(uri, true) >> remoteResource
         1 * remoteResource.withContent(_) >> { ExternalResource.ContentAction a ->
             a.execute(new ByteArrayInputStream(), remoteMetaData)
         }
@@ -271,7 +280,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         0 * _._
 
         and:
-        1 * cacheLockingManager.useCache(_, _) >> { String description, org.gradle.internal.Factory factory ->
+        1 * cacheLockingManager.useCache(_) >> { org.gradle.internal.Factory factory ->
             return factory.create()
         }
         1 * fileStore.moveIntoCache(tempFile) >> localResource
@@ -306,7 +315,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         timeProvider.currentTime >> 24000L
         cached.cachedAt >> 23999L
         cached.externalResourceMetaData >> cachedMetaData
-        1 * repository.getResourceMetaData(uri) >> remoteMetaData
+        1 * repository.getResourceMetaData(uri, true) >> remoteMetaData
         localCandidates.none >> false
         remoteMetaData.sha1 >> sha1
         remoteMetaData.etag >> null
@@ -317,7 +326,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         localCandidate.file >> candidate
         cached.cachedFile >> cachedFile
         1 * repository.withProgressLogging() >> progressLoggingRepo
-        1 * progressLoggingRepo.getResource(uri) >> remoteResource
+        1 * progressLoggingRepo.getResource(uri, true) >> remoteResource
         1 * remoteResource.withContent(_) >> { ExternalResource.ContentAction a ->
             a.execute(new ByteArrayInputStream(), remoteMetaData)
         }
@@ -325,7 +334,7 @@ class DefaultCacheAwareExternalResourceAccessorTest extends Specification {
         0 * _._
 
         and:
-        1 * cacheLockingManager.useCache(_, _) >> { String description, org.gradle.internal.Factory factory ->
+        1 * cacheLockingManager.useCache(_) >> { org.gradle.internal.Factory factory ->
             return factory.create()
         }
         1 * fileStore.moveIntoCache(tempFile) >> localResource

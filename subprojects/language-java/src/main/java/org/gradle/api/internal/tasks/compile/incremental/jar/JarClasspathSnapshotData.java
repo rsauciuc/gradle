@@ -16,16 +16,18 @@
 
 package org.gradle.api.internal.tasks.compile.incremental.jar;
 
+import com.google.common.hash.HashCode;
+
 import java.io.File;
 import java.util.Map;
 import java.util.Set;
 
 public class JarClasspathSnapshotData {
 
-    private final Map<File, byte[]> jarHashes;
+    private final Map<File, HashCode> jarHashes;
     private final Set<String> duplicateClasses;
 
-    public JarClasspathSnapshotData(Map<File, byte[]> jarHashes, Set<String> duplicateClasses) {
+    public JarClasspathSnapshotData(Map<File, HashCode> jarHashes, Set<String> duplicateClasses) {
         this.jarHashes = jarHashes;
         this.duplicateClasses = duplicateClasses;
     }
@@ -34,7 +36,7 @@ public class JarClasspathSnapshotData {
         return duplicateClasses;
     }
 
-    public Map<File, byte[]> getJarHashes() {
+    public Map<File, HashCode> getJarHashes() {
         return jarHashes;
     }
 }

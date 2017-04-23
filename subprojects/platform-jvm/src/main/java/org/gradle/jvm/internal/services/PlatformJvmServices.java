@@ -20,71 +20,94 @@ import org.gradle.api.internal.artifacts.ResolveContext;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.ComponentResolvers;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.DelegatingComponentResolvers;
 import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.ResolverProviderFactory;
-import org.gradle.api.internal.resolve.*;
+import org.gradle.api.internal.project.taskfactory.ClasspathPropertyAnnotationHandler;
+import org.gradle.api.internal.project.taskfactory.CompileClasspathPropertyAnnotationHandler;
+import org.gradle.api.internal.resolve.DefaultLocalLibraryResolver;
+import org.gradle.api.internal.resolve.LocalLibraryDependencyResolver;
+import org.gradle.api.internal.resolve.ProjectModelResolver;
+import org.gradle.api.internal.resolve.VariantBinarySelector;
 import org.gradle.internal.service.ServiceRegistration;
-import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.PluginServiceRegistry;
-import org.gradle.jvm.JarBinarySpec;
-import org.gradle.jvm.internal.DefaultJavaPlatformVariantAxisCompatibility;
+import org.gradle.jvm.JvmBinarySpec;
 import org.gradle.jvm.internal.JarBinaryRenderer;
+import org.gradle.jvm.internal.resolve.DefaultJavaPlatformVariantAxisCompatibility;
+import org.gradle.jvm.internal.resolve.DefaultLibraryResolutionErrorMessageBuilder;
+import org.gradle.jvm.internal.resolve.DefaultVariantAxisCompatibilityFactory;
+import org.gradle.jvm.internal.resolve.JvmLibraryResolveContext;
+import org.gradle.jvm.internal.resolve.JvmLocalLibraryMetaDataAdapter;
+import org.gradle.jvm.internal.resolve.JvmVariantSelector;
+import org.gradle.jvm.internal.resolve.VariantAxisCompatibilityFactory;
+import org.gradle.jvm.internal.resolve.VariantsMetaData;
 import org.gradle.jvm.platform.JavaPlatform;
-import org.gradle.language.base.internal.model.DefaultVariantAxisCompatibilityFactory;
-import org.gradle.language.base.internal.model.VariantAxisCompatibilityFactory;
-import org.gradle.language.base.internal.model.VariantsMetaData;
-import org.gradle.language.base.internal.resolve.DependentSourceSetResolveContext;
+import org.gradle.jvm.toolchain.internal.JavaInstallationProbe;
 import org.gradle.model.internal.manage.schema.ModelSchemaStore;
+import org.gradle.process.internal.ExecActionFactory;
+
+import java.util.List;
 
 public class PlatformJvmServices implements PluginServiceRegistry {
+    @Override
     public void registerGlobalServices(ServiceRegistration registration) {
         registration.add(JarBinaryRenderer.class);
         registration.add(VariantAxisCompatibilityFactory.class, DefaultVariantAxisCompatibilityFactory.of(JavaPlatform.class, new DefaultJavaPlatformVariantAxisCompatibility()));
+        registration.add(ClasspathPropertyAnnotationHandler.class);
+        registration.add(CompileClasspathPropertyAnnotationHandler.class);
     }
 
+    @Override
     public void registerBuildSessionServices(ServiceRegistration registration) {
     }
 
+    @Override
     public void registerBuildServices(ServiceRegistration registration) {
         registration.addProvider(new BuildScopeServices());
     }
 
+    @Override
     public void registerGradleServices(ServiceRegistration registration) {
     }
 
+    @Override
     public void registerProjectServices(ServiceRegistration registration) {
     }
 
     private class BuildScopeServices {
-        LocalLibraryDependencyResolverFactory createResolverProviderFactory(ProjectModelResolver projectModelResolver, ServiceRegistry registry) {
-            return new LocalLibraryDependencyResolverFactory(projectModelResolver, registry);
+        LocalLibraryDependencyResolverFactory createResolverProviderFactory(ProjectModelResolver projectModelResolver, ModelSchemaStore schemaStore, List<VariantAxisCompatibilityFactory> factories) {
+            return new LocalLibraryDependencyResolverFactory(projectModelResolver, schemaStore, factories);
+        }
+
+        JavaInstallationProbe createJavaInstallationProbe(ExecActionFactory factory) {
+            return new JavaInstallationProbe(factory);
         }
     }
 
     public static class LocalLibraryDependencyResolverFactory implements ResolverProviderFactory {
         private final ProjectModelResolver projectModelResolver;
-        private final ServiceRegistry registry;
+        private final ModelSchemaStore schemaStore;
+        private final List<VariantAxisCompatibilityFactory> factories;
 
-        public LocalLibraryDependencyResolverFactory(ProjectModelResolver projectModelResolver, ServiceRegistry registry) {
+        public LocalLibraryDependencyResolverFactory(ProjectModelResolver projectModelResolver, ModelSchemaStore schemaStore, List<VariantAxisCompatibilityFactory> factories) {
             this.projectModelResolver = projectModelResolver;
-            this.registry = registry;
+            this.schemaStore = schemaStore;
+            this.factories = factories;
         }
 
         @Override
         public boolean canCreate(ResolveContext context) {
-            return context instanceof DependentSourceSetResolveContext;
+            return context instanceof JvmLibraryResolveContext;
         }
 
         @Override
         public ComponentResolvers create(ResolveContext context) {
-            final ModelSchemaStore schemaStore = registry.get(ModelSchemaStore.class);
-            VariantsMetaData variants = ((DependentSourceSetResolveContext) context).getVariants();
+            VariantsMetaData variants = ((JvmLibraryResolveContext) context).getVariants();
+            VariantBinarySelector variantSelector = new JvmVariantSelector(factories, JvmBinarySpec.class, schemaStore, variants);
             JvmLocalLibraryMetaDataAdapter libraryMetaDataAdapter = new JvmLocalLibraryMetaDataAdapter();
-            LocalLibraryDependencyResolver<JarBinarySpec> delegate =
-                    new LocalLibraryDependencyResolver<JarBinarySpec>(
-                            JarBinarySpec.class,
+            LocalLibraryDependencyResolver delegate =
+                    new LocalLibraryDependencyResolver(
+                            JvmBinarySpec.class,
                             projectModelResolver,
-                            registry.getAll(VariantAxisCompatibilityFactory.class),
-                            variants,
-                            schemaStore,
+                            new DefaultLocalLibraryResolver(),
+                            variantSelector,
                             libraryMetaDataAdapter,
                             new DefaultLibraryResolutionErrorMessageBuilder(variants, schemaStore)
                     );

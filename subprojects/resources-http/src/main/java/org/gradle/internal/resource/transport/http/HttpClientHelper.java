@@ -16,67 +16,73 @@
 
 package org.gradle.internal.resource.transport.http;
 
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.Header;
+import org.apache.http.HeaderIterator;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHeaders;
+import org.apache.http.ProtocolVersion;
+import org.apache.http.StatusLine;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpHead;
 import org.apache.http.client.methods.HttpRequestBase;
-import org.apache.http.impl.client.DecompressingHttpClient;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.impl.client.DefaultRedirectStrategy;
-import org.apache.http.impl.client.SystemDefaultHttpClient;
+import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.client.utils.HttpClientUtils;
+import org.apache.http.entity.BufferedHttpEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.protocol.BasicHttpContext;
-import org.apache.http.util.EntityUtils;
+import org.apache.http.protocol.HttpContext;
 import org.gradle.api.UncheckedIOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
+import java.util.Locale;
 
 /**
  * Provides some convenience and unified logging.
  */
-public class HttpClientHelper {
+public class HttpClientHelper implements Closeable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(HttpClientHelper.class);
-    private final HttpClient client;
-    private final BasicHttpContext httpContext = new BasicHttpContext();
+    private CloseableHttpClient client;
+    private final HttpSettings settings;
+
+    private final HttpContext sharedContext;
 
     public HttpClientHelper(HttpSettings settings) {
-        alwaysUseKeepAliveConnections();
-        DefaultHttpClient client = new SystemDefaultHttpClient();
-        client.setRedirectStrategy(new AlwaysRedirectRedirectStrategy());
-        new HttpClientConfigurer(settings).configure(client);
-        this.client = new DecompressingHttpClient(client);
+        this.settings = settings;
+        if (!settings.getAuthenticationSettings().isEmpty()) {
+            sharedContext = new BasicHttpContext();
+        } else {
+            sharedContext = null;
+        }
     }
 
-    private void alwaysUseKeepAliveConnections() {
-        // HttpClient 4.2.2 does not use the correct default value for "http.keepAlive" system property (default is "true").
-        // HttpClient NTLM authentication fails badly when this property value is true.
-        // So we force it to be true here: effectively, we're ignoring any user-supplied value for our HttpClient configuration.
-        System.setProperty("http.keepAlive", "true");
+    public CloseableHttpResponse performRawHead(String source, boolean revalidate) {
+        return performRequest(new HttpHead(source), revalidate);
     }
 
-    public HttpResponse performRawHead(String source) {
-        return performRequest(new HttpHead(source));
+    public CloseableHttpResponse performHead(String source, boolean revalidate) {
+        return processResponse(source, "HEAD", performRawHead(source, revalidate));
     }
 
-    public HttpResponse performHead(String source) {
-        return processResponse(source, "HEAD", performRawHead(source));
+    public CloseableHttpResponse performRawGet(String source, boolean revalidate) {
+        return performRequest(new HttpGet(source), revalidate);
     }
 
-    public HttpResponse performRawGet(String source) {
-        return performRequest(new HttpGet(source));
+    public CloseableHttpResponse performGet(String source, boolean revalidate) {
+        return processResponse(source, "GET", performRawGet(source, revalidate));
     }
 
-    public HttpResponse performGet(String source) {
-        return processResponse(source, "GET", performRawGet(source));
-    }
-
-    public HttpResponse performRequest(HttpRequestBase request) {
+    public CloseableHttpResponse performRequest(HttpRequestBase request, boolean revalidate) {
         String method = request.getMethod();
-
-        HttpResponse response;
+        if (revalidate) {
+            request.addHeader(HttpHeaders.CACHE_CONTROL, "max-age=0");
+        }
+        CloseableHttpResponse response;
         try {
             response = executeGetOrHead(request);
         } catch (IOException e) {
@@ -86,34 +92,48 @@ public class HttpClientHelper {
         return response;
     }
 
-    protected HttpResponse executeGetOrHead(HttpRequestBase method) throws IOException {
-        HttpResponse httpResponse = performHttpRequest(method);
+    protected CloseableHttpResponse executeGetOrHead(HttpRequestBase method) throws IOException {
+        final CloseableHttpResponse httpResponse = performHttpRequest(method);
         // Consume content for non-successful, responses. This avoids the connection being left open.
         if (!wasSuccessful(httpResponse)) {
-            EntityUtils.consume(httpResponse.getEntity());
-            return httpResponse;
+            CloseableHttpResponse response = new AutoClosedHttpResponse(httpResponse);
+            HttpClientUtils.closeQuietly(httpResponse);
+            return response;
         }
         return httpResponse;
     }
 
-    public boolean wasMissing(HttpResponse response) {
+    public boolean wasMissing(CloseableHttpResponse response) {
         int statusCode = response.getStatusLine().getStatusCode();
         return statusCode == 404;
     }
 
-    public boolean wasSuccessful(HttpResponse response) {
+    public boolean wasSuccessful(CloseableHttpResponse response) {
         int statusCode = response.getStatusLine().getStatusCode();
         return statusCode >= 200 && statusCode < 400;
     }
 
-    public HttpResponse performHttpRequest(HttpRequestBase request) throws IOException {
-        // Without this, HTTP Client prohibits multiple redirects to the same location within the same context
-        httpContext.removeAttribute(DefaultRedirectStrategy.REDIRECT_LOCATIONS);
-        LOGGER.debug("Performing HTTP {}: {}", request.getMethod(), request.getURI());
-        return client.execute(request, httpContext);
+    public CloseableHttpResponse performHttpRequest(HttpRequestBase request) throws IOException {
+        if (sharedContext == null) {
+                // There's no authentication involved, requests can be done concurrently
+                return performHttpRequest(request, new BasicHttpContext());
+        }
+        // authentication is used, we cannot guarantee thread-safety in this case so requests need
+        // to be done with blocking
+        synchronized (this) {
+            return performHttpRequest(request, sharedContext);
+        }
     }
 
-    private HttpResponse processResponse(String source, String method, HttpResponse response) {
+
+    private CloseableHttpResponse performHttpRequest(HttpRequestBase request, HttpContext httpContext) throws IOException {
+        // Without this, HTTP Client prohibits multiple redirects to the same location within the same context
+        httpContext.removeAttribute(HttpClientContext.REDIRECT_LOCATIONS);
+        LOGGER.debug("Performing HTTP {}: {}", request.getMethod(), request.getURI());
+        return getClient().execute(request, httpContext);
+    }
+
+    private CloseableHttpResponse processResponse(String source, String method, CloseableHttpResponse response) {
         if (wasMissing(response)) {
             LOGGER.info("Resource missing. [HTTP {}: {}]", method, source);
             return null;
@@ -126,4 +146,174 @@ public class HttpClientHelper {
 
         return response;
     }
+
+    private synchronized CloseableHttpClient getClient() {
+        if (client == null) {
+            HttpClientBuilder builder = HttpClientBuilder.create();
+            builder.setRedirectStrategy(new AlwaysRedirectRedirectStrategy());
+            new HttpClientConfigurer(settings).configure(builder);
+            this.client = builder.build();
+        }
+        return client;
+    }
+
+    @Override
+    public synchronized void close() throws IOException {
+        if (client != null) {
+            client.close();
+        }
+    }
+
+    private static class AutoClosedHttpResponse implements CloseableHttpResponse {
+        private final HttpEntity entity;
+        private final CloseableHttpResponse httpResponse;
+
+        public AutoClosedHttpResponse(CloseableHttpResponse httpResponse) throws IOException {
+            this.httpResponse = httpResponse;
+            HttpEntity entity = httpResponse.getEntity();
+            this.entity = entity != null ? new BufferedHttpEntity(entity) : null;
+        }
+
+        @Override
+        public void close() throws IOException {
+        }
+
+        @Override
+        public StatusLine getStatusLine() {
+            return httpResponse.getStatusLine();
+        }
+
+        @Override
+        public void setStatusLine(StatusLine statusline) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setStatusLine(ProtocolVersion ver, int code) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setStatusLine(ProtocolVersion ver, int code, String reason) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setStatusCode(int code) throws IllegalStateException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setReasonPhrase(String reason) throws IllegalStateException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public HttpEntity getEntity() {
+            return entity;
+        }
+
+        @Override
+        public void setEntity(HttpEntity entity) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Locale getLocale() {
+            return httpResponse.getLocale();
+        }
+
+        @Override
+        public void setLocale(Locale loc) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProtocolVersion getProtocolVersion() {
+            return httpResponse.getProtocolVersion();
+        }
+
+        @Override
+        public boolean containsHeader(String name) {
+            return httpResponse.containsHeader(name);
+        }
+
+        @Override
+        public Header[] getHeaders(String name) {
+            return httpResponse.getHeaders(name);
+        }
+
+        @Override
+        public Header getFirstHeader(String name) {
+            return httpResponse.getFirstHeader(name);
+        }
+
+        @Override
+        public Header getLastHeader(String name) {
+            return httpResponse.getLastHeader(name);
+        }
+
+        @Override
+        public Header[] getAllHeaders() {
+            return httpResponse.getAllHeaders();
+        }
+
+        @Override
+        public void addHeader(Header header) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addHeader(String name, String value) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setHeader(Header header) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setHeader(String name, String value) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setHeaders(Header[] headers) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void removeHeader(Header header) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void removeHeaders(String name) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public HeaderIterator headerIterator() {
+            return httpResponse.headerIterator();
+        }
+
+        @Override
+        public HeaderIterator headerIterator(String name) {
+            return httpResponse.headerIterator(name);
+        }
+
+        @Override
+        @SuppressWarnings("deprecation")
+        public org.apache.http.params.HttpParams getParams() {
+            return httpResponse.getParams();
+        }
+
+        @Override
+        @SuppressWarnings("deprecation")
+        public void setParams(org.apache.http.params.HttpParams params) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
 }

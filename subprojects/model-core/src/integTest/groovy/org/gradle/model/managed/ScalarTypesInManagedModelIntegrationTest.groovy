@@ -58,6 +58,49 @@ class ScalarTypesInManagedModelIntegrationTest extends AbstractIntegrationSpec {
 
     }
 
+    def "can view property with scalar type as ModelElement"() {
+        given:
+        buildScript '''
+            @Managed
+            interface PrimitiveTypes {
+                int getIntProp()
+                void setIntProp(int value)
+
+                Long getLongProp()
+                void setLongProp(Long value)
+            }
+
+            class RulePlugin extends RuleSource {
+                @Model
+                void types(PrimitiveTypes primitiveTypes) {
+                }
+
+                @Mutate
+                void addCheckTask(ModelMap<Task> tasks, @Path("types.intProp") ModelElement intProp, @Path("types.longProp") ModelElement longProp) {
+                    tasks.create("check") {
+                        doLast {
+                            println "intProp: $intProp"
+                            println "intProp.name: $intProp.name"
+                            println "intProp.displayName: $intProp.displayName"
+                            println "longProp: $longProp"
+                        }
+                    }
+                }
+            }
+
+            apply type: RulePlugin
+        '''
+
+        when:
+        run "check"
+
+        then:
+        output.contains("intProp: int 'types.intProp'")
+        output.contains("intProp.name: intProp")
+        output.contains("intProp.displayName: int 'types.intProp'")
+        output.contains("longProp: Long 'types.longProp'")
+    }
+
     def "mismatched types error in managed type are propagated to the user"() {
         when:
         buildScript '''
@@ -78,10 +121,11 @@ class ScalarTypesInManagedModelIntegrationTest extends AbstractIntegrationSpec {
         '''
 
         then:
-        fails "modelReport"
+        fails "model"
 
         and:
-        failure.assertHasCause('Invalid managed model type PrimitiveTypes: setter method param must be of exactly the same type as the getter returns (expected: java.lang.Long, found: long) (invalid method: void PrimitiveTypes#setLongProperty(long))')
+        failure.assertHasCause """Type PrimitiveTypes is not a valid managed type:
+- Method setLongProperty(long) is not a valid method: it should take parameter with type 'Long'"""
     }
 
     def "values of primitive types are boxed as usual when using java"() {
@@ -137,7 +181,7 @@ class ScalarTypesInManagedModelIntegrationTest extends AbstractIntegrationSpec {
         succeeds "check"
     }
 
-    def "can set/get properties of all supported unmanaged types using Groovy"() {
+    def "can set/get properties of all supported scalar types using Groovy"() {
         when:
         buildScript '''
             @Managed
@@ -223,7 +267,7 @@ class ScalarTypesInManagedModelIntegrationTest extends AbstractIntegrationSpec {
         succeeds "check"
     }
 
-    def "can set/get properties of all supported unmanaged types using Java"() {
+    def "can set/get properties of all supported scalar types using Java"() {
         given:
         file('buildSrc/src/main/java/Rules.java') << '''
             import org.gradle.api.*;
@@ -562,7 +606,7 @@ class ScalarTypesInManagedModelIntegrationTest extends AbstractIntegrationSpec {
             def (type, value) = propertyDef
             def propName = type.primitive ? "primitive${type.name.capitalize()}${i++}" : "boxed${type.simpleName}${i++}"
             fails "check${propName.capitalize()}"
-            failure.assertHasCause(/Attempt to mutate closed view of model of type 'ManagedType' given to rule 'PluginRules#addCheckTask'/)
+            failure.assertHasCause(/Attempt to modify a read only view of model element 'createModel' of type 'ManagedType' given to rule PluginRules#addCheckTask(ModelMap<Task>, ManagedType)/)
         }
 
     }
@@ -710,7 +754,7 @@ class ScalarTypesInManagedModelIntegrationTest extends AbstractIntegrationSpec {
         fails 'check'
 
         then: "mutation is not allowed"
-        failure.assertHasCause("Attempt to mutate closed view of model of type 'java.util.Set<java.lang.String>' given to rule 'RulePlugin#checkUser'")
+        failure.assertHasCause("Attempt to modify a read only view of model element 'user.groups' of type 'Set<String>' given to rule RulePlugin#checkUser(ModelMap<Task>, User)")
     }
 
 }

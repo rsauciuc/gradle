@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright 2013 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,31 +15,18 @@
  */
 package org.gradle.testing.jacoco.plugins
 
-import org.gradle.api.Project
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
-import org.gradle.testing.jacoco.tasks.JacocoReport
-import org.gradle.util.TestUtil
-import spock.lang.Specification
+import org.gradle.language.base.plugins.LifecycleBasePlugin
+import org.gradle.test.fixtures.AbstractProjectBuilderSpec
+import org.gradle.util.Requires
+import org.gradle.util.TestPrecondition
+import spock.lang.Issue
+import spock.lang.Unroll
 
-class JacocoPluginSpec extends Specification {
-    Project project = TestUtil.createRootProject()
-
+class JacocoPluginSpec extends AbstractProjectBuilderSpec {
     def setup() {
         project.apply plugin: 'jacoco'
-    }
-
-    def 'jacoco plugin adds coverage report for test task when java plugin applied'() {
-        project.file("src/main/java").mkdirs()
-        when:
-        project.apply plugin:"java"
-        and:
-        project.evaluate()
-        then:
-        project.test.extensions.getByType(JacocoTaskExtension) != null
-        project.jacocoTestReport instanceof JacocoReport
-        project.jacocoTestReport.sourceDirectories*.absolutePath == project.files("src/main/java")*.absolutePath
-        project.jacocoTestReport.classDirectories == project.sourceSets.main.output
     }
 
     def 'jacoco applied to specific JavaExec task'() {
@@ -56,5 +43,70 @@ class JacocoPluginSpec extends Specification {
         Test task = project.tasks.create('customTest', Test)
         expect:
         task.extensions.getByType(JacocoTaskExtension) != null
+    }
+
+    @Requires(TestPrecondition.ONLINE)
+    @Unroll
+    @Issue("GRADLE-3498")
+    def 'jacoco task extension can be configured. includeNoLocationClasses: #includeNoLocationClassesValue'() {
+        given:
+        project.apply plugin: 'java'
+        project.repositories.jcenter()
+        def testTask = project.tasks.getByName('test')
+        JacocoTaskExtension extension = testTask.extensions.getByType(JacocoTaskExtension)
+
+        when:
+        extension.with {
+            destinationFile = project.file('build/jacoco/fake.exec')
+            append = false
+            includes = ['org.*', '*.?acoco*']
+            excludes = ['org.?joberstar']
+            excludeClassLoaders = ['com.sun.*', 'org.fak?.*']
+            includeNoLocationClasses = includeNoLocationClassesValue
+            sessionId = 'testSession'
+            dumpOnExit = false
+            output = JacocoTaskExtension.Output.TCP_SERVER
+            address = '1.1.1.1'
+            port = 100
+            classDumpDir = project.file('build/jacoco-dump')
+            jmx = true
+        }
+
+        def expected = new StringBuilder().with { builder ->
+            builder << "destfile=build/jacoco/fake.exec,"
+            builder << "append=false,"
+            builder << "includes=org.*:*.?acoco*,"
+            builder << "excludes=org.?joberstar,"
+            builder << "exclclassloader=com.sun.*:org.fak?.*,"
+            builder << "inclnolocationclasses=$includeNoLocationClassesValue,"
+            builder << "sessionid=testSession,"
+            builder << "dumponexit=false,"
+            builder << "output=tcpserver,"
+            builder << "address=1.1.1.1,"
+            builder << "port=100,"
+            builder << "classdumpdir=build/jacoco-dump,"
+            builder << "jmx=true"
+            builder.toString()
+        }
+
+        then:
+        def jvmArg = extension.asJvmArg
+        jvmArg.replaceFirst(/-javaagent:[^=]*\.jar=/, '') == expected
+
+        where:
+        includeNoLocationClassesValue << [true, false]
+    }
+
+    def "declares task property values for group and description"() {
+        given:
+        project.apply plugin: 'java'
+
+        expect:
+        def jacocoTestReportTask = project.tasks.getByName('jacocoTestReport')
+        def jacocoTestCoverageVerificationTask = project.tasks.getByName('jacocoTestCoverageVerification')
+        jacocoTestReportTask.group == LifecycleBasePlugin.VERIFICATION_GROUP
+        jacocoTestCoverageVerificationTask.group == LifecycleBasePlugin.VERIFICATION_GROUP
+        jacocoTestReportTask.description == 'Generates code coverage report for the test task.'
+        jacocoTestCoverageVerificationTask.description == 'Verifies code coverage metrics based on specified rules for the test task.'
     }
 }

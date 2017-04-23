@@ -16,7 +16,7 @@
 package org.gradle.integtests.resolve.ivy
 
 import org.gradle.integtests.fixtures.AbstractHttpDependencyResolutionTest
-import org.gradle.integtests.resolve.ResolveTestFixture
+import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import org.gradle.test.fixtures.Repository
 import org.gradle.test.fixtures.encoding.Identifier
 import org.gradle.test.fixtures.server.http.IvyHttpModule
@@ -248,7 +248,7 @@ dependencies {
     staticVersions group: "group", name: "projectA", version: "1.1"
     compile group: "group", name: "projectA", version: "latest.milestone"
 }
-task cache << { configurations.staticVersions.files }
+task cache { doLast { configurations.staticVersions.files } }
 """
 
         and:
@@ -1197,6 +1197,7 @@ dependencies {
         then:
         fails "checkDeps"
         failure.assertHasCause "Could not resolve all dependencies for configuration ':compile'."
+        failure.assertHasCause "Could not resolve group:projectA:1.+."
         failure.assertHasCause "No cached version listing for group:projectA:1.+ available for offline mode."
     }
 
@@ -1213,9 +1214,19 @@ dependencies {
     }
 
     def expectGetDynamicRevision(IvyHttpModule module) {
-        module.repository.directoryList(module.organisation, module.module).expectGet()
+        expectListVersions(module)
         module.ivy.expectGet()
         module.jar.expectGet()
+    }
+
+    private expectListVersions(IvyHttpModule module) {
+        module.repository.directoryList(module.organisation, module.module).expectGet()
+    }
+
+    def expectGetStatusOf(IvyHttpModule module, String status = 'release') {
+        def file = temporaryFolder.createFile("cheap-${module.version}.status")
+        file << status
+        server.expectGet("/repo/${module.organisation}/${module.module}/${module.version}/status.txt", file)
     }
 
     def useRepository(Repository... repo) {

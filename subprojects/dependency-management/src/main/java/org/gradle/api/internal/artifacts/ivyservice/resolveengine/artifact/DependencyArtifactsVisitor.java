@@ -16,9 +16,11 @@
 
 package org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact;
 
-import org.gradle.api.internal.artifacts.ResolvedConfigurationIdentifier;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.graph.DependencyGraphNode;
 
 public interface DependencyArtifactsVisitor {
-    void visitArtifacts(ResolvedConfigurationIdentifier parent, ResolvedConfigurationIdentifier child, ArtifactSet artifacts);
+    // TODO:DAZ Performing the topo-sort for nodes shouldn't be done in a DependencyArtifactsVisitor
+    void startArtifacts(DependencyGraphNode root);
+    void visitArtifacts(DependencyGraphNode from, DependencyGraphNode to, ArtifactSet artifacts);
     void finishArtifacts();
 }

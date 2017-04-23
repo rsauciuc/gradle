@@ -16,6 +16,7 @@
 package org.gradle.test.fixtures.maven
 
 import org.gradle.test.fixtures.Module
+import org.gradle.test.fixtures.ModuleArtifact
 import org.gradle.test.fixtures.file.TestFile
 
 interface MavenModule extends Module {
@@ -40,11 +41,15 @@ interface MavenModule extends Module {
 
     MavenModule parent(String group, String artifactId, String version)
 
-    MavenModule dependsOn(MavenModule module)
+    MavenModule dependsOnModules(String... dependencyArtifactIds)
+
+    MavenModule dependsOn(Module module)
+
+    MavenModule dependsOn(Map<String, ?> attributes, Module module)
 
     MavenModule dependsOn(String group, String artifactId, String version)
 
-    MavenModule dependsOn(String group, String artifactId, String version, String type, String scope)
+    MavenModule dependsOn(String group, String artifactId, String version, String type, String scope, String classifier)
 
     MavenModule hasPackaging(String packaging)
 
@@ -66,7 +71,11 @@ interface MavenModule extends Module {
 
     String getVersion()
 
+    ModuleArtifact getPom();
+
     TestFile getPomFile()
+
+    ModuleArtifact getArtifact();
 
     TestFile getArtifactFile()
 
@@ -75,4 +84,6 @@ interface MavenModule extends Module {
     MavenPom getParsedPom()
 
     MavenMetaData getRootMetaData()
+
+    boolean getUniqueSnapshots()
 }

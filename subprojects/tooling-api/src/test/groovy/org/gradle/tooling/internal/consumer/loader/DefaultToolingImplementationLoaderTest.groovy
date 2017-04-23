@@ -16,15 +16,43 @@
 package org.gradle.tooling.internal.consumer.loader
 
 import org.gradle.initialization.BuildCancellationToken
+import org.gradle.internal.actor.ActorFactory
 import org.gradle.internal.classloader.ClasspathUtil
 import org.gradle.internal.classpath.DefaultClassPath
-import org.gradle.logging.ProgressLoggerFactory
-import org.gradle.messaging.actor.ActorFactory
+import org.gradle.internal.logging.progress.ProgressLoggerFactory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.tooling.internal.consumer.ConnectionParameters
 import org.gradle.tooling.internal.consumer.Distribution
-import org.gradle.tooling.internal.consumer.connection.*
-import org.gradle.tooling.internal.protocol.*
+import org.gradle.tooling.internal.consumer.connection.ActionAwareConsumerConnection
+import org.gradle.tooling.internal.consumer.connection.BuildActionRunnerBackedConsumerConnection
+import org.gradle.tooling.internal.consumer.connection.CancellableConsumerConnection
+import org.gradle.tooling.internal.consumer.connection.ModelBuilderBackedConsumerConnection
+import org.gradle.tooling.internal.consumer.connection.NoToolingApiConnection
+import org.gradle.tooling.internal.consumer.connection.NonCancellableConsumerConnectionAdapter
+import org.gradle.tooling.internal.consumer.connection.ShutdownAwareConsumerConnection
+import org.gradle.tooling.internal.consumer.connection.UnsupportedOlderVersionConnection
+import org.gradle.tooling.internal.protocol.BuildActionRunner
+import org.gradle.tooling.internal.protocol.BuildExceptionVersion1
+import org.gradle.tooling.internal.protocol.BuildOperationParametersVersion1
+import org.gradle.tooling.internal.protocol.BuildParameters
+import org.gradle.tooling.internal.protocol.BuildParametersVersion1
+import org.gradle.tooling.internal.protocol.BuildResult
+import org.gradle.tooling.internal.protocol.ConfigurableConnection
+import org.gradle.tooling.internal.protocol.ConnectionMetaDataVersion1
+import org.gradle.tooling.internal.protocol.ConnectionVersion4
+import org.gradle.tooling.internal.protocol.InternalBuildAction
+import org.gradle.tooling.internal.protocol.InternalBuildActionExecutor
+import org.gradle.tooling.internal.protocol.InternalBuildActionFailureException
+import org.gradle.tooling.internal.protocol.InternalBuildProgressListener
+import org.gradle.tooling.internal.protocol.InternalCancellableConnection
+import org.gradle.tooling.internal.protocol.InternalCancellationToken
+import org.gradle.tooling.internal.protocol.InternalConnection
+import org.gradle.tooling.internal.protocol.InternalUnsupportedModelException
+import org.gradle.tooling.internal.protocol.ModelBuilder
+import org.gradle.tooling.internal.protocol.ModelIdentifier
+import org.gradle.tooling.internal.protocol.ProjectVersion3
+import org.gradle.tooling.internal.protocol.ShutdownParameters
+import org.gradle.tooling.internal.protocol.StoppableConnection
 import org.gradle.tooling.internal.protocol.exceptions.InternalUnsupportedBuildArgumentException
 import org.gradle.util.GradleVersion
 import org.junit.Rule
@@ -36,6 +64,7 @@ class DefaultToolingImplementationLoaderTest extends Specification {
     public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
     Distribution distribution = Mock()
     ProgressLoggerFactory loggerFactory = Mock()
+    InternalBuildProgressListener progressListener = Mock()
     ConnectionParameters connectionParameters = Stub() {
         getVerboseLogging() >> true
     }
@@ -45,16 +74,18 @@ class DefaultToolingImplementationLoaderTest extends Specification {
 
     def "locates connection implementation using meta-inf service then instantiates and configures the connection"() {
         given:
-        distribution.getToolingImplementationClasspath(loggerFactory, userHomeDir, cancellationToken) >> new DefaultClassPath(
-                getToolingApiResourcesDir(connectionImplementation),
-                ClasspathUtil.getClasspathForClass(TestConnection.class),
-                ClasspathUtil.getClasspathForClass(ActorFactory.class),
-                ClasspathUtil.getClasspathForClass(Logger.class),
-                ClasspathUtil.getClasspathForClass(GroovyObject.class),
-                ClasspathUtil.getClasspathForClass(GradleVersion.class))
+        distribution.getToolingImplementationClasspath(loggerFactory, progressListener, userHomeDir, cancellationToken) >> new DefaultClassPath(
+            getToolingApiResourcesDir(connectionImplementation),
+            ClasspathUtil.getClasspathForClass(TestConnection.class),
+            ClasspathUtil.getClasspathForClass(ActorFactory.class),
+            ClasspathUtil.getClasspathForClass(Logger.class),
+            ClasspathUtil.getClasspathForClass(GroovyObject.class),
+            ClasspathUtil.getClasspathForClass(GradleVersion.class))
 
         when:
-        def adaptedConnection = loader.create(distribution, loggerFactory, connectionParameters, cancellationToken)
+        def adaptedConnection = loader.create(distribution, loggerFactory, progressListener, connectionParameters, cancellationToken)
+        // unwrap ParameterValidatingConsumerConnection
+        adaptedConnection = adaptedConnection.delegate
 
         then:
         def consumerConnection = wrappedToNonCancellableAdapter ? adaptedConnection.delegate : adaptedConnection
@@ -74,24 +105,28 @@ class DefaultToolingImplementationLoaderTest extends Specification {
         TestR18Connection.class   | ActionAwareConsumerConnection.class              | true
         TestR16Connection.class   | ModelBuilderBackedConsumerConnection.class       | true
         TestR12Connection.class   | BuildActionRunnerBackedConsumerConnection.class  | true
-        TestR10M8Connection.class | InternalConnectionBackedConsumerConnection.class | true
     }
 
     def "locates connection implementation using meta-inf service for deprecated connection"() {
         given:
-        distribution.getToolingImplementationClasspath(loggerFactory, userHomeDir, cancellationToken) >> new DefaultClassPath(
-                getToolingApiResourcesDir(TestR10M3Connection.class),
-                ClasspathUtil.getClasspathForClass(TestConnection.class),
-                ClasspathUtil.getClasspathForClass(ActorFactory.class),
-                ClasspathUtil.getClasspathForClass(Logger.class),
-                ClasspathUtil.getClasspathForClass(GroovyObject.class),
-                ClasspathUtil.getClasspathForClass(GradleVersion.class))
+        distribution.getToolingImplementationClasspath(loggerFactory, progressListener, userHomeDir, cancellationToken) >> new DefaultClassPath(
+            getToolingApiResourcesDir(connectionImplementation),
+            ClasspathUtil.getClasspathForClass(TestConnection.class),
+            ClasspathUtil.getClasspathForClass(ActorFactory.class),
+            ClasspathUtil.getClasspathForClass(Logger.class),
+            ClasspathUtil.getClasspathForClass(GroovyObject.class),
+            ClasspathUtil.getClasspathForClass(GradleVersion.class))
 
         when:
-        def adaptedConnection = loader.create(distribution, loggerFactory, connectionParameters, cancellationToken)
+        def adaptedConnection = loader.create(distribution, loggerFactory, progressListener, connectionParameters, cancellationToken)
 
         then:
         adaptedConnection.class == UnsupportedOlderVersionConnection.class
+
+        where:
+        connectionImplementation  | _
+        TestR10M3Connection.class | _
+        TestR10M8Connection.class | _
     }
 
     private getToolingApiResourcesDir(Class implementation) {
@@ -103,10 +138,10 @@ class DefaultToolingImplementationLoaderTest extends Specification {
         def loader = new DefaultToolingImplementationLoader()
 
         given:
-        distribution.getToolingImplementationClasspath(loggerFactory, userHomeDir, cancellationToken) >> new DefaultClassPath()
+        distribution.getToolingImplementationClasspath(loggerFactory, progressListener, userHomeDir, cancellationToken) >> new DefaultClassPath()
 
         expect:
-        loader.create(distribution, loggerFactory, connectionParameters, cancellationToken) instanceof NoToolingApiConnection
+        loader.create(distribution, loggerFactory, progressListener, connectionParameters, cancellationToken) instanceof NoToolingApiConnection
     }
 }
 
@@ -140,13 +175,13 @@ class TestConnection extends TestR21Connection implements StoppableConnection {
 class TestR21Connection extends TestR18Connection implements InternalCancellableConnection {
     @Override
     BuildResult<?> getModel(ModelIdentifier modelIdentifier, InternalCancellationToken cancellationToken, BuildParameters operationParameters)
-            throws BuildExceptionVersion1, InternalUnsupportedModelException, InternalUnsupportedBuildArgumentException, IllegalStateException {
+        throws BuildExceptionVersion1, InternalUnsupportedModelException, InternalUnsupportedBuildArgumentException, IllegalStateException {
         throw new UnsupportedOperationException();
     }
 
     @Override
     def <T> BuildResult<T> run(InternalBuildAction<T> action, InternalCancellationToken cancellationToken, BuildParameters operationParameters)
-            throws BuildExceptionVersion1, InternalUnsupportedBuildArgumentException, InternalBuildActionFailureException, IllegalStateException {
+        throws BuildExceptionVersion1, InternalUnsupportedBuildArgumentException, InternalBuildActionFailureException, IllegalStateException {
         throw new UnsupportedOperationException();
     }
 

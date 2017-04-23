@@ -17,14 +17,14 @@
 package org.gradle.internal.resource.cached.ivy;
 
 import org.gradle.api.internal.artifacts.ivyservice.CacheLockingManager;
-import org.gradle.internal.resource.cached.CachedItem;
 import org.gradle.cache.PersistentIndexedCache;
 import org.gradle.internal.Factory;
+import org.gradle.internal.resource.cached.CachedItem;
 import org.gradle.internal.serialize.Serializer;
 
 import java.io.File;
 
-abstract public class AbstractCachedIndex<K, V extends CachedItem> {
+public abstract class AbstractCachedIndex<K, V extends CachedItem> {
     private final String persistentCacheFile;
     private final Serializer<K> keySerializer;
     private final Serializer<V> valueSerializer;
@@ -51,14 +51,10 @@ abstract public class AbstractCachedIndex<K, V extends CachedItem> {
         return cacheLockingManager.createCache(persistentCacheFile, keySerializer, valueSerializer);
     }
 
-    private String operationName(String action) {
-        return String.format("%s artifact resolution cache '%s'", action, persistentCacheFile);
-    }
-
     public V lookup(final K key) {
         assertKeyNotNull(key);
 
-        return cacheLockingManager.useCache(operationName("lookup from"), new Factory<V>() {
+        return cacheLockingManager.useCache(new Factory<V>() {
             public V create() {
                 V found = getPersistentCache().get(key);
                 if (found == null) {
@@ -74,7 +70,7 @@ abstract public class AbstractCachedIndex<K, V extends CachedItem> {
     }
 
     protected void storeInternal(final K key, final V entry) {
-        cacheLockingManager.useCache(operationName("store into"), new Runnable() {
+        cacheLockingManager.useCache(new Runnable() {
             public void run() {
                 getPersistentCache().put(key, entry);
             }
@@ -95,7 +91,7 @@ abstract public class AbstractCachedIndex<K, V extends CachedItem> {
 
     public void clear(final K key) {
         assertKeyNotNull(key);
-        cacheLockingManager.useCache(operationName("clear from"), new Runnable() {
+        cacheLockingManager.useCache(new Runnable() {
             public void run() {
                 getPersistentCache().remove(key);
             }

@@ -18,7 +18,7 @@ package org.gradle.plugin.use.resolve.service.internal;
 
 import net.jcip.annotations.ThreadSafe;
 import org.gradle.api.Nullable;
-import org.gradle.plugin.use.internal.PluginRequest;
+import org.gradle.plugin.management.internal.PluginRequestInternal;
 
 import java.io.Closeable;
 
@@ -48,7 +48,7 @@ public interface PluginResolutionServiceClient extends Closeable {
      * @param pluginRequest the plugin identity and version
      * @return the plugin data
      */
-    Response<PluginUseMetaData> queryPluginMetadata(String portalUrl, boolean shouldValidate, PluginRequest pluginRequest);
+    Response<PluginUseMetaData> queryPluginMetadata(String portalUrl, boolean shouldValidate, PluginRequestInternal pluginRequest);
 
     /**
      * Fetch status information about the current client.
@@ -82,7 +82,7 @@ public interface PluginResolutionServiceClient extends Closeable {
         String getClientStatusChecksum();
     }
 
-    public static class ErrorResponseResponse<T> implements Response<T> {
+    class ErrorResponseResponse<T> implements Response<T> {
         private final ErrorResponse errorResponse;
         private final int statusCode;
         private final String url;
@@ -120,7 +120,7 @@ public interface PluginResolutionServiceClient extends Closeable {
         }
     }
 
-    public static class SuccessResponse<T> implements Response<T> {
+    class SuccessResponse<T> implements Response<T> {
         private final T response;
         private final int statusCode;
         private final String url;

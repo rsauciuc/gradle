@@ -32,6 +32,7 @@ import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public abstract class AbstractLongRunningOperation<T extends AbstractLongRunningOperation<T>> implements LongRunningOperation {
@@ -114,6 +115,12 @@ public abstract class AbstractLongRunningOperation<T extends AbstractLongRunning
     }
 
     @Override
+    public T setEnvironmentVariables(Map<String, String> envVariables) {
+        operationParamsBuilder.setEnvironmentVariables(envVariables);
+        return getThis();
+    }
+
+    @Override
     public T addProgressListener(ProgressListener listener) {
         operationParamsBuilder.addProgressListener(listener);
         return getThis();
@@ -159,5 +166,9 @@ public abstract class AbstractLongRunningOperation<T extends AbstractLongRunning
     public T withInjectedClassPath(ClassPath classpath) {
         operationParamsBuilder.setInjectedPluginClasspath(classpath);
         return getThis();
+    }
+
+    public void copyFrom(ConsumerOperationParameters operationParameters) {
+        operationParamsBuilder.copyFrom(operationParameters);
     }
 }

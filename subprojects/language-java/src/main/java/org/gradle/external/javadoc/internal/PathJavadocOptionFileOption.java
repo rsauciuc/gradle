@@ -16,22 +16,26 @@
 
 package org.gradle.external.javadoc.internal;
 
+import com.google.common.collect.Lists;
+
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 public class PathJavadocOptionFileOption extends AbstractListJavadocOptionFileOption<List<File>> {
-
-    public PathJavadocOptionFileOption(String option, String joinBy) {
-        super(option, new ArrayList<File>(), joinBy);
-    }
 
     public PathJavadocOptionFileOption(String option, List<File> value, String joinBy) {
         super(option, value, joinBy);
     }
 
+    @Override
     public void writeCollectionValue(JavadocOptionFileWriterContext writerContext) throws IOException {
         writerContext.writePathOption(option, value, joinBy);
+    }
+
+    @Override
+    public PathJavadocOptionFileOption duplicate() {
+        List<File> duplicateValue = Lists.newArrayList(value);
+        return new PathJavadocOptionFileOption(option, duplicateValue, joinBy);
     }
 }

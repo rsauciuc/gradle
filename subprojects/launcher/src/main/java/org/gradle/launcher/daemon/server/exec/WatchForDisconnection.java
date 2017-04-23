@@ -21,15 +21,15 @@ import org.gradle.launcher.daemon.server.api.DaemonCommandAction;
 import org.gradle.launcher.daemon.server.api.DaemonCommandExecution;
 
 public class WatchForDisconnection implements DaemonCommandAction {
-
     private static final Logger LOGGER = Logging.getLogger(WatchForDisconnection.class);
+    public static final String EXPIRATION_REASON = "client disconnected";
 
     public void execute(final DaemonCommandExecution execution) {
         // Watch for the client disconnecting before we call stop()
         execution.getConnection().onDisconnect(new Runnable() {
             public void run() {
-                LOGGER.warn("client disconnection detected, stopping the daemon");
-                execution.getDaemonStateControl().requestForcefulStop();
+                LOGGER.warn("thread {}: client disconnection detected, canceling the build", Thread.currentThread().getId());
+                execution.getDaemonStateControl().requestCancel();
             }
         });
 
