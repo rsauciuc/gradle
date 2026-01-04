@@ -17,12 +17,13 @@
 package org.gradle.api.tasks;
 
 import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.file.copy.CopyAction;
 import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.file.copy.DestinationRootCopySpec;
 import org.gradle.api.internal.file.copy.FileCopyAction;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.instrumentation.api.annotations.NotToBeReplacedByLazyProperty;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.gradle.work.DisableCachingByDefault;
 
 import java.io.File;
 
@@ -31,7 +32,7 @@ import java.io.File;
  * implements {@link org.gradle.api.file.CopySpec CopySpec} for specifying what to copy.
  *
  * <p> Examples:
- * <pre autoTested=''>
+ * <pre class='autoTested'>
  * task copyDocs(type: Copy) {
  *     from 'src/main/doc'
  *     into 'build/target/doc'
@@ -67,7 +68,8 @@ import java.io.File;
  * }
  * </pre>
  */
-public class Copy extends AbstractCopyTask {
+@DisableCachingByDefault(because = "Not worth caching")
+public abstract class Copy extends AbstractCopyTask {
 
     @Override
     protected CopyAction createCopyAction() {
@@ -80,13 +82,11 @@ public class Copy extends AbstractCopyTask {
 
     @Override
     protected CopySpecInternal createRootSpec() {
-        Instantiator instantiator = getInstantiator();
-        FileResolver fileResolver = getFileResolver();
-
-        return instantiator.newInstance(DestinationRootCopySpec.class, fileResolver, super.createRootSpec());
+        return getProject().getObjects().newInstance(DestinationRootCopySpec.class, super.createRootSpec());
     }
 
     @Override
+    @NotToBeReplacedByLazyProperty(because = "Read-only nested like property")
     public DestinationRootCopySpec getRootSpec() {
         return (DestinationRootCopySpec) super.getRootSpec();
     }
@@ -97,6 +97,7 @@ public class Copy extends AbstractCopyTask {
      * @return The destination dir.
      */
     @OutputDirectory
+    @ToBeReplacedByLazyProperty
     public File getDestinationDir() {
         return getRootSpec().getDestinationDir();
     }
@@ -109,5 +110,4 @@ public class Copy extends AbstractCopyTask {
     public void setDestinationDir(File destinationDir) {
         into(destinationDir);
     }
-
 }

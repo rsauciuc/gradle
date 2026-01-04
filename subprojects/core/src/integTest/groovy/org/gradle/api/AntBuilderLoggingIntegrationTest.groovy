@@ -17,13 +17,12 @@
 package org.gradle.api
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
-import spock.lang.IgnoreIf
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 
-@IgnoreIf({ GradleContextualExecuter.daemon })
 class AntBuilderLoggingIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
-        buildFile << """
+        executer.requireIsolatedDaemons()
+        buildFile """
             ant.saveStreams = false
             task antTest {
                 doLast {
@@ -42,15 +41,16 @@ class AntBuilderLoggingIntegrationTest extends AbstractIntegrationSpec {
         succeeds("antTest")
 
         then:
-        result.output.contains("[ant:echo] WARN message")
-        result.error.contains("[ant:echo] ERROR message")
+        outputContains("[ant:echo] WARN message")
+        result.assertHasErrorOutput("[ant:echo] ERROR message")
 
         and:
-        ! result.output.contains("[ant:echo] INFO message")
-        ! result.output.contains("[ant:echo] DEBUG message")
-        ! result.output.contains("[ant:echo] VERBOSE message")
+        outputDoesNotContain("INFO message")
+        outputDoesNotContain("DEBUG message")
+        outputDoesNotContain("VERBOSE message")
     }
 
+    @UnsupportedWithConfigurationCache(because = "uses Ant")
     def "can increase verbosity of Ant logging" () {
         buildFile << """
             ant.lifecycleLogLevel = "INFO"
@@ -60,15 +60,16 @@ class AntBuilderLoggingIntegrationTest extends AbstractIntegrationSpec {
         succeeds("antTest")
 
         then:
-        result.output.contains("[ant:echo] INFO message")
-        result.output.contains("[ant:echo] WARN message")
-        result.error.contains("[ant:echo] ERROR message")
+        outputContains("[ant:echo] INFO message")
+        outputContains("[ant:echo] WARN message")
+        result.assertHasErrorOutput("[ant:echo] ERROR message")
 
         and:
-        ! result.output.contains("[ant:echo] DEBUG message")
-        ! result.output.contains("[ant:echo] VERBOSE message")
+        outputDoesNotContain("DEBUG message")
+        outputDoesNotContain("VERBOSE message")
     }
 
+    @UnsupportedWithConfigurationCache(because = "uses Ant")
     def "can decrease verbosity of Ant logging" () {
         buildFile << """
             ant.lifecycleLogLevel = "ERROR"
@@ -78,12 +79,12 @@ class AntBuilderLoggingIntegrationTest extends AbstractIntegrationSpec {
         succeeds("antTest")
 
         then:
-        result.error.contains("[ant:echo] ERROR message")
+        result.assertHasErrorOutput("[ant:echo] ERROR message")
 
         and:
-        ! result.output.contains("[ant:echo] INFO message")
-        ! result.output.contains("[ant:echo] WARN message")
-        ! result.output.contains("[ant:echo] DEBUG message")
-        ! result.output.contains("[ant:echo] VERBOSE message")
+        result.assertNotOutput("WARN message")
+        result.assertNotOutput("INFO message")
+        result.assertNotOutput("DEBUG message")
+        result.assertNotOutput("VERBOSE message")
     }
 }

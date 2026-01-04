@@ -16,20 +16,31 @@
 
 package org.gradle.internal.classpath;
 
+import org.gradle.internal.classpath.transforms.ClassTransform;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
 import java.net.URL;
 import java.util.Collection;
 
 /**
  * Represents a transformer that takes a given ClassPath and transforms it to a ClassPath with cached jars
  */
+@ServiceScope(Scope.UserHome.class)
 public interface CachedClasspathTransformer {
-    /**
-     * Transform a ClassPath object to a ClassPath with cached jars
-     */
-    ClassPath transform(ClassPath classPath);
 
     /**
-     * Transform a collection of urls to a new collection where the file urls are cached jars
+     * Transforms a classpath to a new classpath with a no-op transform that copies files to a cache location.
      */
-    Collection<URL> transform(Collection<URL> urls);
+    ClassPath copyingTransform(ClassPath classPath);
+
+    /**
+     * Transform a collection of urls to a new collection with a no-op transform that copies files to a cache location.
+     */
+    Collection<URL> copyingTransform(Collection<URL> urls);
+
+    /**
+     * Transforms a classpath to a classpath with the given transformations applied, result classpath files are cached in a cache location.
+     */
+    ClassPath transform(ClassPath classPath, ClassTransform classTransform);
 }

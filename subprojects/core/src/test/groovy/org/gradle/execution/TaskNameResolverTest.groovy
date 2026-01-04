@@ -18,25 +18,21 @@ package org.gradle.execution
 import org.gradle.api.Task
 import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.api.internal.project.ProjectState
 import org.gradle.api.internal.tasks.TaskContainerInternal
 import spock.lang.Specification
 
 class TaskNameResolverTest extends Specification {
-    def tasks = Mock(TaskContainerInternal)
-    def project = Mock(ProjectInternal)
-    def resolver = new TaskNameResolver()
-
-    def setup() {
-        _ * project.getTasks() >> tasks
-    }
 
     private final TaskNameResolver resolver = new TaskNameResolver()
 
     def "eagerly locates task with given name for single project"() {
         def task = task('task')
+        def projectState = projectState()
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def candidates = resolver.selectWithName('task', project, false)
+        def candidates = resolver.selectWithName('task', projectState, false)
 
         then:
         1 * tasks.discoverTasks()
@@ -56,26 +52,26 @@ class TaskNameResolverTest extends Specification {
 
     def "returns null when no task with given name for single project"() {
         given:
+        def projectState = projectState()
+        def tasks = projectState.getMutableModel().getTasks()
         tasks.names >> (['not-a-task'] as SortedSet)
 
         expect:
-        resolver.selectWithName('task', project, false) == null
+        resolver.selectWithName('task', projectState, false) == null
     }
 
     def "eagerly locates tasks with given name for multiple projects"() {
         given:
         def task1 = task('task')
         def task2 = task('task')
-        def childTasks = Mock(TaskContainerInternal)
-        def childProject = Mock(ProjectInternal) {
-            _ * getTasks() >> childTasks
-            _ * getChildProjects() >> [:]
-        }
+        def childProjectState = projectState()
+        def childTasks = childProjectState.getMutableModel().getTasks()
 
-        _ * project.childProjects >> [child: childProject]
+        def projectState = projectState([childProjectState] as Set)
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def results = resolver.selectWithName('task', project, true)
+        def results = resolver.selectWithName('task', projectState, true)
 
         then:
         1 * tasks.discoverTasks()
@@ -102,16 +98,14 @@ class TaskNameResolverTest extends Specification {
         given:
         def task1 = task('task')
         task1.impliesSubProjects >> true
-        def childTasks = Mock(TaskContainerInternal)
-        def childProject = Mock(ProjectInternal) {
-            _ * getTasks() >> childTasks
-            _ * getChildProjects() >> [:]
-        }
+        def childProjectState = projectState()
+        def childTasks = childProjectState.getMutableModel().getTasks()
 
-        _ * project.childProjects >> [child: childProject]
+        def projectState = projectState([childProjectState] as Set)
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def results = resolver.selectWithName('task', project, true)
+        def results = resolver.selectWithName('task', projectState, true)
 
         then:
         1 * tasks.discoverTasks()
@@ -134,15 +128,14 @@ class TaskNameResolverTest extends Specification {
     def "locates tasks in child projects with given name when missing in starting project"() {
         given:
         def task1 = task('task')
-        def childTasks = Mock(TaskContainerInternal)
-        def childProject = Mock(ProjectInternal) {
-            _ * getTasks() >> childTasks
-            _ * getChildProjects() >> [:]
-        }
-        _ * project.childProjects >> [child: childProject]
+        def childProjectState = projectState()
+        def childTasks = childProjectState.getMutableModel().getTasks()
+
+        def projectState = projectState([childProjectState] as Set)
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def results = resolver.selectWithName('task', project, true)
+        def results = resolver.selectWithName('task', projectState, true)
 
         then:
         1 * tasks.discoverTasks()
@@ -168,9 +161,11 @@ class TaskNameResolverTest extends Specification {
     def "lazily locates all tasks for a single project"() {
         given:
         def task1 = task('task1')
+        def projectState = projectState()
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def result = resolver.selectAll(project, false)
+        def result = resolver.selectAll(projectState, false)
 
         then:
         result.keySet() == ['task1', 'task2'] as Set
@@ -195,15 +190,14 @@ class TaskNameResolverTest extends Specification {
         given:
         def task1 = task('task1')
         def task2 = task('task1')
-        def childTasks = Mock(TaskContainerInternal)
-        def childProject = Mock(ProjectInternal) {
-            _ * getTasks() >> childTasks
-            _ * getChildProjects() >> [:]
-        }
-        _ * project.childProjects >> [child: childProject]
+        def childProjectState = projectState()
+        def childTasks = childProjectState.getMutableModel().getTasks()
+
+        def projectState = projectState([childProjectState] as Set)
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def result = resolver.selectAll(project, true)
+        def result = resolver.selectAll(projectState, true)
 
         then:
         result.keySet() == ['task1', 'task2', 'task3'] as Set
@@ -235,15 +229,14 @@ class TaskNameResolverTest extends Specification {
         given:
         def task1 = task('task1')
         task1.impliesSubProjects >> true
-        def childTasks = Mock(TaskContainerInternal)
-        def childProject = Mock(ProjectInternal) {
-            _ * getTasks() >> childTasks
-            _ * getChildProjects() >> [:]
-        }
-        _ * project.childProjects >> [child: childProject]
+        def childProjectState = projectState()
+        def childTasks = childProjectState.getMutableModel().getTasks()
+
+        def projectState = projectState([childProjectState] as Set)
+        def tasks = projectState.getMutableModel().getTasks()
 
         when:
-        def result = resolver.selectAll(project, true)
+        def result = resolver.selectAll(projectState, true)
 
         then:
         result.keySet() == ['task1', 'task2', 'task3'] as Set
@@ -276,9 +269,21 @@ class TaskNameResolverTest extends Specification {
         }
     }
 
-    List<Task> asTasks(TaskSelectionResult taskSelectionResult) {
+    private static List<Task> asTasks(TaskSelectionResult taskSelectionResult) {
         def result = []
         taskSelectionResult.collectTasks(result)
         return result
+    }
+
+    ProjectState projectState(Set<ProjectState> children = []) {
+        def state = Mock(ProjectState) {
+            getChildProjects() >> children
+        }
+        def project = Mock(ProjectInternal) {
+            getOwner() >> state
+            getTasks() >> Mock(TaskContainerInternal)
+        }
+        _ * state.getMutableModel() >> project
+        state
     }
 }

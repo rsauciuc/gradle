@@ -16,15 +16,9 @@
 
 package org.gradle.api.internal.component;
 
-import org.gradle.api.artifacts.ModuleDependency;
-import org.gradle.api.artifacts.PublishArtifact;
-import org.gradle.api.attributes.Usage;
+import org.gradle.api.component.SoftwareComponentVariant;
 
-import java.util.Set;
-
-
-public interface UsageContext {
-    Usage getUsage();
-    Set<PublishArtifact> getArtifacts();
-    Set<ModuleDependency> getDependencies();
-}
+/**
+ * This is a legacy type and should be avoided if possible. Use {@link SoftwareComponentVariant} instead.
+ */
+public interface UsageContext extends SoftwareComponentVariant {}

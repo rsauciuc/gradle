@@ -24,15 +24,16 @@ import org.gradle.api.file.FileTree
 import org.gradle.api.file.FileVisitDetails
 import org.gradle.api.file.FileVisitor
 import org.gradle.api.file.RelativePath
-import org.gradle.api.internal.ClosureBackedAction
-import org.gradle.api.internal.ThreadGlobalInstantiator
 import org.gradle.api.internal.file.CopyActionProcessingStreamAction
-import org.gradle.api.internal.tasks.SimpleWorkResult
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.tasks.WorkResult
+import org.gradle.api.tasks.WorkResults
 import org.gradle.internal.logging.ConfigureLogging
 import org.gradle.internal.logging.TestOutputEventListener
 import org.gradle.internal.nativeintegration.filesystem.FileSystem
 import org.gradle.internal.reflect.Instantiator
+import org.gradle.util.internal.ClosureBackedAction
+import org.gradle.util.TestUtil
 import org.junit.Rule
 import spock.lang.Shared
 import spock.lang.Specification
@@ -46,15 +47,15 @@ class DuplicateHandlingCopyActionExecutorTest extends Specification {
     def delegate = new CopyAction() {
         WorkResult execute(CopyActionProcessingStream stream) {
             stream.process(delegateAction)
-            return new SimpleWorkResult(true)
+            return WorkResults.didWork(true);
         }
     }
 
     def outputEventListener = new TestOutputEventListener()
     @Rule ConfigureLogging logging = new ConfigureLogging(outputEventListener)
 
-    @Shared Instantiator instantiator = ThreadGlobalInstantiator.getOrCreate()
-    def executer = new CopyActionExecuter(instantiator, fileSystem, false)
+    @Shared Instantiator instantiator = TestUtil.instantiatorFactory().decorateLenient()
+    def executer = new CopyActionExecuter(instantiator, TestUtil.propertyFactory(), fileSystem, false, TestFiles.documentationRegistry())
     def copySpec = Mock(MyCopySpec) {
         getChildren() >> []
     }
@@ -144,7 +145,7 @@ class DuplicateHandlingCopyActionExecutorTest extends Specification {
         then:
         2 * delegateAction.processFile({ it.relativePath.pathString == '/root/path/file1.txt' })
         1 * delegateAction.processFile({ it.relativePath.pathString == '/root/path/file2.txt' })
-        outputEventListener.toString().contains('[WARN] [org.gradle.api.internal.file.copy.DuplicateHandlingCopyActionDecorator] Encountered duplicate path "/root/path/file1.txt"')
+        outputEventListener.toString().contains("[WARN] [org.gradle.api.internal.file.copy.DuplicateHandlingCopyActionDecorator] file 'path/file1.txt' will be copied to '/root/path/file1.txt', overwriting file 'path/file1.txt', which has already been copied there.")
     }
 
 
@@ -159,7 +160,7 @@ class DuplicateHandlingCopyActionExecutorTest extends Specification {
         then:
         2 * delegateAction.processFile({ it.relativePath.pathString == '/root/path/file1.txt' })
         1 * delegateAction.processFile({ it.relativePath.pathString == '/root/path/file2.txt' })
-        outputEventListener.toString().contains('[WARN] [org.gradle.api.internal.file.copy.DuplicateHandlingCopyActionDecorator] Encountered duplicate path "/root/path/file1.txt"')
+        outputEventListener.toString().contains("[WARN] [org.gradle.api.internal.file.copy.DuplicateHandlingCopyActionDecorator] file 'path/file1.txt' will be copied to '/root/path/file1.txt', overwriting file 'path/file1.txt', which has already been copied there.")
     }
 
     def duplicatesFailByPerFileConfiguration() {
@@ -185,6 +186,7 @@ class DuplicateHandlingCopyActionExecutorTest extends Specification {
             fileNames.each { filename ->
                 def fvd = Mock(FileVisitDetails) {
                     getRelativePath() >> new RelativePath(true, filename)
+                    toString() >> "file '${filename}'"
                 }
                 visitor.visitFile(fvd)
             }

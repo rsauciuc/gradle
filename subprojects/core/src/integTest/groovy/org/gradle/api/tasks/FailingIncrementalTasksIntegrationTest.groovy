@@ -23,25 +23,99 @@ class FailingIncrementalTasksIntegrationTest extends AbstractIntegrationSpec {
     def "consecutively failing task has correct up-to-date status and failure"() {
         buildFile << """
             task foo {
-                outputs.file("out.txt")
+                def outFile = project.file("out.txt")
+                outputs.file(outFile)
                 doLast {
-                    if (project.file("out.txt").exists()) {
+                    if (outFile.exists()) {
                         throw new RuntimeException("Boo!")
                     }
-                    project.file("out.txt") << "xxx"
+                    outFile << "xxx"
                 }
             }
         """
 
-        when:
-        run "foo"
-        file("out.txt") << "force rerun"
-        def failure1 = runAndFail "foo"
-        def failure2 = runAndFail "foo"
+        expect:
+        succeeds "foo"
 
+        when:
+        file("out.txt") << "force rerun"
+        fails "foo"
         then:
-        failure1.assertHasCause("Boo!")
-        failure2.assertHasCause("Boo!")
+        failureHasCause "Boo!"
+
+        when:
+        fails "foo", "--info"
+        then:
+        failureHasCause "Boo!"
+        output.contains "Task has failed previously."
         //this exposes an issue we used to have with in-memory cache.
+    }
+
+    def "incremental task after previous failure #description"() {
+        file("src/input.txt") << "input"
+        buildFile << """
+            abstract class IncrementalTask extends DefaultTask {
+
+                @Inject
+                abstract ProviderFactory getProviders()
+
+                @Inject
+                abstract ProjectLayout getLayout()
+
+                @Incremental @InputDirectory File sourceDir
+                @OutputDirectory File destinationDir
+
+                @TaskAction
+                void process(InputChanges inputs) {
+                    def outputTxt = layout.projectDirectory.file("\$destinationDir/output.txt").asFile
+                    outputTxt.text = "output"
+                    def modifyOutputs = providers.gradleProperty('modifyOutputs').orNull
+                    if (modifyOutputs) {
+                        switch (modifyOutputs) {
+                            case "add":
+                                layout.projectDirectory.file("\$destinationDir/output-\${System.currentTimeMillis()}.txt").asFile.text = "output"
+                                break
+                            case "change":
+                                outputTxt.text = "changed output -- \${System.currentTimeMillis()}"
+                                break
+                            case "remove":
+                                outputTxt.delete()
+                                break
+                        }
+                    }
+
+                    def expectIncremental = providers.gradleProperty('expectIncremental')
+                    if (expectIncremental.isPresent()) {
+                        assert inputs.incremental == expectIncremental.map { Boolean.parseBoolean(it) }.get()
+                    }
+
+                    if (providers.gradleProperty('fail').isPresent()) {
+                        throw new RuntimeException("Failure")
+                    }
+                }
+            }
+
+            task incrementalTask(type: IncrementalTask) {
+                sourceDir = file("src")
+                destinationDir = file("build")
+            }
+        """
+        executer.withArgument("--no-problems-report")
+        succeeds "incrementalTask", "-PexpectIncremental=false"
+
+        file("src/input-change.txt") << "input"
+        executer.withArgument("--no-problems-report")
+        fails "incrementalTask", "-PexpectIncremental=true", "-PmodifyOutputs=$modifyOutputs", "-Pfail"
+
+        expect:
+        executer.withArgument("--no-problems-report")
+        succeeds "incrementalTask", "-PexpectIncremental=$incremental"
+
+        where:
+        modifyOutputs | incremental | description
+        "add"         | false       | "with additional outputs is fully rebuilt"
+        "change"      | false       | "with changed outputs is fully rebuilt"
+        "remove"      | false       | "with removed outputs is fully rebuilt"
+        "none"        | true        | "with unmodified outputs is executed as incremental"
     }
 }

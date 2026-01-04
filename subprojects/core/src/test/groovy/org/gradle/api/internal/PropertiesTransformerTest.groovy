@@ -16,11 +16,12 @@
 package org.gradle.api.internal
 
 import org.gradle.api.Action
+import org.gradle.util.internal.ClosureBackedAction
 import spock.lang.Specification
 
 class PropertiesTransformerTest extends Specification {
     final PropertiesTransformer transformer = new PropertiesTransformer()
-    
+
     def 'returns original when no action specified'() {
         given:
         Map map = [test:'value']
@@ -31,7 +32,7 @@ class PropertiesTransformerTest extends Specification {
         then:
         result == test
     }
-    
+
     def 'action can access properties'() {
         given:
         Action<Properties> action = Mock()
@@ -47,7 +48,7 @@ class PropertiesTransformerTest extends Specification {
         }
         props(changed:'new', added:'value') == result
     }
-    
+
     def 'can use closure as action'() {
         given:
         transformer.addAction action { Properties props ->
@@ -58,7 +59,7 @@ class PropertiesTransformerTest extends Specification {
         then:
         props(added:'value') == result
     }
-    
+
     def 'can chain actions'() {
         given:
         transformer.addAction action { Properties props ->
@@ -76,7 +77,7 @@ class PropertiesTransformerTest extends Specification {
         then:
         props(changed:'new', added:'value') == result
     }
-    
+
     def 'can transform to an OutputStream'() {
         given:
         transformer.addAction action { Properties props ->
@@ -92,7 +93,7 @@ class PropertiesTransformerTest extends Specification {
         result.load(new ByteArrayInputStream(outstr.toByteArray()))
         result == [added: 'value']
     }
-    
+
     Properties props(Map map) {
         Properties props = new Properties()
         props.putAll(map)

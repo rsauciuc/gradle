@@ -17,74 +17,96 @@
 package org.gradle.api.tasks;
 
 import groovy.lang.Closure;
+import org.gradle.api.Project;
+import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.file.FileTreeElement;
 import org.gradle.api.internal.ConventionTask;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.util.PatternFilterable;
-import org.gradle.api.tasks.util.PatternSet;
-import org.gradle.internal.Factory;
+import org.gradle.api.tasks.util.internal.PatternSetFactory;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.gradle.work.DisableCachingByDefault;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 
 /**
  * A {@code SourceTask} performs some operation on source files.
  */
-public class SourceTask extends ConventionTask implements PatternFilterable {
-    protected final List<Object> source = new ArrayList<Object>();
+@NullMarked
+@DisableCachingByDefault(because = "Super-class, not to be instantiated directly")
+public abstract class SourceTask extends ConventionTask implements PatternFilterable {
+    private ConfigurableFileCollection sourceFiles = getProject().getObjects().fileCollection();
     private final PatternFilterable patternSet;
 
     public SourceTask() {
-        patternSet = getPatternSetFactory().create();
+        patternSet = getPatternSetFactory().createPatternSet();
     }
 
     @Inject
-    protected Factory<PatternSet> getPatternSetFactory() {
-        throw new UnsupportedOperationException();
+    protected abstract PatternSetFactory getPatternSetFactory();
+
+    @Internal
+    protected PatternFilterable getPatternSet() {
+        return patternSet;
     }
 
     /**
      * Returns the source for this task, after the include and exclude patterns have been applied. Ignores source files which do not exist.
      *
+     * <p>
+     * The {@link PathSensitivity} for the sources is configured to be {@link PathSensitivity#ABSOLUTE}.
+     * If your sources are less strict, please change it accordingly by overriding this method in your subclass.
+     * </p>
+     *
      * @return The source.
      */
     @InputFiles
     @SkipWhenEmpty
+    @IgnoreEmptyDirectories
+    @ToBeReplacedByLazyProperty
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileTree getSource() {
-        ArrayList<Object> copy = new ArrayList<Object>(this.source);
-        FileTree src = getProject().files(copy).getAsFileTree();
-        return src == null ? getProject().files().getAsFileTree() : src.matching(patternSet);
+        return sourceFiles.getAsFileTree().matching(patternSet);
     }
 
     /**
-     * Sets the source for this task. The given source object is evaluated as per {@link org.gradle.api.Project#files(Object...)}.
+     * Sets the source for this task.
+     *
+     * @param source The source.
+     * @since 4.0
+     */
+    public void setSource(FileTree source) {
+        setSource((Object) source);
+    }
+
+    /**
+     * Sets the source for this task. The given source object is evaluated as per {@link Project#files(Object...)}.
      *
      * @param source The source.
      */
     public void setSource(Object source) {
-        this.source.clear();
-        this.source.add(source);
+        sourceFiles = getProject().getObjects().fileCollection().from(source);
     }
 
     /**
-     * Adds some source to this task. The given source objects will be evaluated as per {@link org.gradle.api.Project#files(Object...)}.
+     * Adds some source to this task. The given source objects will be evaluated as per {@link Project#files(Object...)}.
      *
      * @param sources The source to add
      * @return this
      */
-    public SourceTask source(Object... sources) {
-        for (Object source : sources) {
-            this.source.add(source);
-        }
+    public SourceTask source(@Nullable Object... sources) {
+        sourceFiles.from(sources);
         return this;
     }
 
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask include(String... includes) {
         patternSet.include(includes);
         return this;
@@ -93,6 +115,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask include(Iterable<String> includes) {
         patternSet.include(includes);
         return this;
@@ -101,6 +124,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask include(Spec<FileTreeElement> includeSpec) {
         patternSet.include(includeSpec);
         return this;
@@ -109,6 +133,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask include(Closure includeSpec) {
         patternSet.include(includeSpec);
         return this;
@@ -117,6 +142,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask exclude(String... excludes) {
         patternSet.exclude(excludes);
         return this;
@@ -125,6 +151,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask exclude(Iterable<String> excludes) {
         patternSet.exclude(excludes);
         return this;
@@ -133,6 +160,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask exclude(Spec<FileTreeElement> excludeSpec) {
         patternSet.exclude(excludeSpec);
         return this;
@@ -141,6 +169,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask exclude(Closure excludeSpec) {
         patternSet.exclude(excludeSpec);
         return this;
@@ -149,7 +178,9 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     @Internal
+    @ToBeReplacedByLazyProperty
     public Set<String> getIncludes() {
         return patternSet.getIncludes();
     }
@@ -157,6 +188,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask setIncludes(Iterable<String> includes) {
         patternSet.setIncludes(includes);
         return this;
@@ -165,7 +197,9 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     @Internal
+    @ToBeReplacedByLazyProperty
     public Set<String> getExcludes() {
         return patternSet.getExcludes();
     }
@@ -173,6 +207,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     /**
      * {@inheritDoc}
      */
+    @Override
     public SourceTask setExcludes(Iterable<String> excludes) {
         patternSet.setExcludes(excludes);
         return this;

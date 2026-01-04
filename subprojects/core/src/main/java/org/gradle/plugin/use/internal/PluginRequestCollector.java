@@ -16,31 +16,38 @@
 
 package org.gradle.plugin.use.internal;
 
-import com.google.common.collect.ListMultimap;
-import org.gradle.api.Transformer;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Strings;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.exceptions.LocationAwareException;
+import org.gradle.plugin.internal.InvalidPluginIdException;
+import org.gradle.plugin.internal.InvalidPluginVersionException;
+import org.gradle.plugin.management.PluginRequest;
 import org.gradle.plugin.management.internal.DefaultPluginRequest;
-import org.gradle.plugin.management.internal.DefaultPluginRequests;
-import org.gradle.plugin.management.internal.PluginRequestInternal;
 import org.gradle.plugin.management.internal.InvalidPluginRequestException;
+import org.gradle.plugin.management.internal.PluginRequestInternal;
 import org.gradle.plugin.management.internal.PluginRequests;
 import org.gradle.plugin.use.PluginDependenciesSpec;
 import org.gradle.plugin.use.PluginDependencySpec;
 import org.gradle.plugin.use.PluginId;
-import org.gradle.util.CollectionUtils;
 
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
-import static org.gradle.util.CollectionUtils.collect;
+import static java.util.stream.Collectors.groupingBy;
+import static org.gradle.util.internal.CollectionUtils.collect;
 
 /**
  * The real delegate of the plugins {} block.
  *
- * The {@link PluginUseScriptBlockMetadataExtractor} interacts with this type.
+ * The {@link PluginUseScriptBlockMetadataCompiler} interacts with this type.
  */
 public class PluginRequestCollector {
+    public static final String EMPTY_VALUE = "cannot be null or empty";
 
     private final ScriptSource scriptSource;
 
@@ -48,19 +55,81 @@ public class PluginRequestCollector {
         this.scriptSource = scriptSource;
     }
 
-    private static class DependencySpecImpl implements PluginDependencySpec {
+    private final List<PluginDependencySpecImpl> specs = new LinkedList<PluginDependencySpecImpl>();
+
+    public PluginDependenciesSpec createSpec(final int pluginsBlockLineNumber) {
+        return new PluginDependenciesSpecImpl(pluginsBlockLineNumber);
+    }
+
+    public PluginRequests getPluginRequests() {
+        if (specs.isEmpty()) {
+            return PluginRequests.EMPTY;
+        }
+        return PluginRequests.of(listPluginRequests());
+    }
+
+    @VisibleForTesting
+    List<PluginRequestInternal> listPluginRequests() {
+        List<PluginRequestInternal> pluginRequests = collect(specs, original ->
+            new DefaultPluginRequest(original.id, original.apply, PluginRequestInternal.Origin.OTHER, scriptSource.getDisplayName(), original.lineNumber, original.version, null, null, null)
+        );
+
+        Map<PluginId, List<PluginRequestInternal>> groupedById = pluginRequests.stream().collect(groupingBy(PluginRequest::getId, Collectors.toList()));
+
+        // Check for duplicates
+        for (PluginId key : groupedById.keySet()) {
+            Collection<PluginRequestInternal> pluginRequestsForId = groupedById.get(key);
+            if (pluginRequestsForId.size() > 1) {
+                Iterator<PluginRequestInternal> iterator = pluginRequestsForId.iterator();
+                PluginRequestInternal first = iterator.next();
+                PluginRequestInternal second = iterator.next();
+
+                InvalidPluginRequestException exception = new InvalidPluginRequestException(second, "Plugin with id '" + key + "' was already requested at line " + first.getLineNumber());
+                throw new LocationAwareException(exception, second.getScriptDisplayName(), second.getLineNumber());
+            }
+        }
+        return pluginRequests;
+    }
+
+    private class PluginDependenciesSpecImpl implements PluginDependenciesSpec {
+        private final int blockLineNumber;
+
+        public PluginDependenciesSpecImpl(int blockLineNumber) {
+            this.blockLineNumber = blockLineNumber;
+        }
+
+        @Override
+        public PluginDependencySpec id(String id) {
+            return id(id, blockLineNumber);
+        }
+
+        public PluginDependencySpec id(String id, int requestLineNumber) {
+            PluginDependencySpecImpl spec = new PluginDependencySpecImpl(id, requestLineNumber);
+            specs.add(spec);
+            return spec;
+        }
+    }
+
+    private static class PluginDependencySpecImpl implements PluginDependencySpec {
         private final PluginId id;
         private String version;
         private boolean apply;
         private final int lineNumber;
 
-        private DependencySpecImpl(String id, int lineNumber) {
+        private PluginDependencySpecImpl(String id, int lineNumber) {
+            if (Strings.isNullOrEmpty(id)) {
+                throw new InvalidPluginIdException(id, EMPTY_VALUE);
+            }
             this.id = DefaultPluginId.of(id);
             this.apply = true;
             this.lineNumber = lineNumber;
         }
 
+        @Override
         public PluginDependencySpec version(String version) {
+            if (Strings.isNullOrEmpty(version)) {
+                throw new InvalidPluginVersionException(version, EMPTY_VALUE);
+            }
             this.version = version;
             return this;
         }
@@ -70,49 +139,6 @@ public class PluginRequestCollector {
             this.apply = apply;
             return this;
         }
-    }
-
-    private final List<DependencySpecImpl> specs = new LinkedList<DependencySpecImpl>();
-
-    public PluginDependenciesSpec createSpec(final int lineNumber) {
-        return new PluginDependenciesSpec() {
-            public PluginDependencySpec id(String id) {
-                DependencySpecImpl spec = new DependencySpecImpl(id, lineNumber);
-                specs.add(spec);
-                return spec;
-            }
-        };
-    }
-
-    public PluginRequests getPluginRequests() {
-        return new DefaultPluginRequests(listPluginRequests());
-    }
-
-    public List<PluginRequestInternal> listPluginRequests() {
-        List<PluginRequestInternal> pluginRequests = collect(specs, new Transformer<PluginRequestInternal, DependencySpecImpl>() {
-            public PluginRequestInternal transform(DependencySpecImpl original) {
-                return new DefaultPluginRequest(original.id, original.version, original.apply, original.lineNumber, scriptSource);
-            }
-        });
-
-        ListMultimap<PluginId, PluginRequestInternal> groupedById = CollectionUtils.groupBy(pluginRequests, new Transformer<PluginId, PluginRequestInternal>() {
-            public PluginId transform(PluginRequestInternal pluginRequest) {
-                return pluginRequest.getId();
-            }
-        });
-
-        // Check for duplicates
-        for (PluginId key : groupedById.keySet()) {
-            List<PluginRequestInternal> pluginRequestsForId = groupedById.get(key);
-            if (pluginRequestsForId.size() > 1) {
-                PluginRequestInternal first = pluginRequests.get(0);
-                PluginRequestInternal second = pluginRequests.get(1);
-
-                InvalidPluginRequestException exception = new InvalidPluginRequestException(second, "Plugin with id '" + key + "' was already requested at line " + first.getLineNumber());
-                throw new LocationAwareException(exception, second.getScriptDisplayName(), second.getLineNumber());
-            }
-        }
-        return pluginRequests;
     }
 
 }

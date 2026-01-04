@@ -15,24 +15,28 @@
  */
 package org.gradle.api.internal.file
 
+
+import org.gradle.api.provider.Provider
 import org.gradle.internal.typeconversion.UnsupportedNotationException
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
 import org.gradle.util.UsesNativeServices
+import org.junit.Assume
 import org.junit.Rule
 import spock.lang.Specification
 
 import java.util.concurrent.Callable
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 @UsesNativeServices
 class BaseDirFileResolverSpec extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "normalizes absolute path which points to an absolute link"() {
         def target = createFile(new File(tmpDir.testDirectory, 'target.txt'))
         def file = new File(tmpDir.testDirectory, 'a/other.txt')
@@ -43,7 +47,7 @@ class BaseDirFileResolverSpec extends Specification {
         normalize(file) == file
     }
 
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "normalizes absolute path which points to a relative link"() {
         def target = createFile(new File(tmpDir.testDirectory, 'target.txt'))
         def file = new File(tmpDir.testDirectory, 'a/other.txt')
@@ -54,29 +58,17 @@ class BaseDirFileResolverSpec extends Specification {
         normalize(file) == file
     }
 
-    @Requires(TestPrecondition.CASE_INSENSITIVE_FS)
-    def "normalizes absolute path which has mismatched case"() {
+    @Requires(UnitTestPreconditions.CaseInsensitiveFs)
+    def "does not normalize case"() {
         def file = createFile(new File(tmpDir.testDirectory, 'dir/file.txt'))
         def path = new File(tmpDir.testDirectory, 'dir/FILE.txt')
         assert path.exists() && path.file
 
         expect:
-        normalize(path) == file
+        normalize(path) == path
     }
 
-    @Requires([TestPrecondition.SYMLINKS, TestPrecondition.CASE_INSENSITIVE_FS])
-    def "normalizes absolute path which points to a target using mismatched case"() {
-        def target = createFile(new File(tmpDir.testDirectory, 'target.txt'))
-        def file = new File(tmpDir.testDirectory, 'dir/file.txt')
-        createLink(file, target)
-        def path = new File(tmpDir.testDirectory, 'dir/FILE.txt')
-        assert path.exists() && path.file
-
-        expect:
-        normalize(path) == file
-    }
-
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "normalizes path which points to a link to something that does not exist"() {
         def file = new File(tmpDir.testDirectory, 'a/other.txt')
         createLink(file, 'unknown.txt')
@@ -86,7 +78,7 @@ class BaseDirFileResolverSpec extends Specification {
         normalize(file) == file
     }
 
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "normalizes path when ancestor is an absolute link"() {
         def target = createFile(new File(tmpDir.testDirectory, 'target/file.txt'))
         def file = new File(tmpDir.testDirectory, 'a/b/file.txt')
@@ -95,26 +87,6 @@ class BaseDirFileResolverSpec extends Specification {
 
         expect:
         normalize(file) == file
-    }
-
-    @Requires(TestPrecondition.CASE_INSENSITIVE_FS)
-    def "normalizes path when ancestor has mismatched case"() {
-        def file = createFile(new File(tmpDir.testDirectory, "a/b/file.txt"))
-        def path = new File(tmpDir.testDirectory, "A/b/file.txt")
-        assert file.exists() && file.file
-
-        expect:
-        normalize(path) == file
-    }
-
-    @Requires(TestPrecondition.CASE_INSENSITIVE_FS)
-    def "normalizes ancestor with mismatched case when target file does not exist"() {
-        tmpDir.createDir("a")
-        def file = new File(tmpDir.testDirectory, "a/b/file.txt")
-        def path = new File(tmpDir.testDirectory, "A/b/file.txt")
-
-        expect:
-        normalize(path) == file
     }
 
     def "normalizes relative path"() {
@@ -133,9 +105,9 @@ class BaseDirFileResolverSpec extends Specification {
         normalize(".", baseDir) == baseDir
     }
 
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "normalizes relative path when base dir is a link"() {
-        def target = createFile(new File(tmpDir.testDirectory, 'target/file.txt'))
+        createFile(new File(tmpDir.testDirectory, 'target/file.txt'))
         def baseDir = new File(tmpDir.testDirectory, 'base')
         createLink(baseDir, "target")
         def file = new File(baseDir, 'file.txt')
@@ -145,25 +117,25 @@ class BaseDirFileResolverSpec extends Specification {
         normalize('file.txt', baseDir) == file
     }
 
-    @Requires(TestPrecondition.WINDOWS)
-    def "normalizes path which uses windows 8.3 name"() {
-        def file = createFile(new File(tmpDir.testDirectory, 'dir/file-with-long-name.txt'))
+    @Requires(UnitTestPreconditions.Windows)
+    def "does not normalize windows 8.3 names"() {
+        createFile(new File(tmpDir.testDirectory, 'dir/file-with-long-name.txt'))
         def path = new File(tmpDir.testDirectory, 'dir/FILE-W~1.TXT')
-        assert path.exists() && path.file
+        Assume.assumeTrue(path.exists() && path.file)
 
         expect:
-        normalize(path) == file
+        normalize(path) == path
     }
 
     def "normalizes file system roots"() {
         expect:
-        normalize(root) == root
+        normalize(root) == new File(root)
 
         where:
-        root << getFsRoots()
+        root << getFsRoots().collect { it.absolutePath }
     }
 
-    @Requires(TestPrecondition.WINDOWS)
+    @Requires(UnitTestPreconditions.Windows)
     def "normalizes non-existent file system root"() {
         def file = nonexistentFsRoot()
         assert !file.exists()
@@ -186,13 +158,24 @@ class BaseDirFileResolverSpec extends Specification {
 
         then:
         UnsupportedNotationException e = thrown()
-        e.message == toPlatformLineSeparators("""Cannot convert the provided notation to a File or URI: 12.
+        e.message == toPlatformLineSeparators("""Cannot convert the provided notation to a File: 12.
 The following types/formats are supported:
   - A String or CharSequence path, for example 'src/main/java' or '/usr/include'.
   - A String or CharSequence URI, for example 'file:/usr/include'.
   - A File instance.
   - A Path instance.
-  - A URI or URL instance.""")
+  - A Directory instance.
+  - A RegularFile instance.
+  - A URI or URL instance of file.
+  - A TextResource instance.""")
+    }
+
+    def "does not allow resolving empty path"() {
+        when:
+        normalize("")
+        then:
+        def ex = thrown IllegalArgumentException
+        ex.message.contains "Cannot convert '' to File"
     }
 
     def "normalizes null-returning closure to null"() {
@@ -213,7 +196,49 @@ The following types/formats are supported:
         }, baseDir)
         then:
         IllegalArgumentException e = thrown()
-        e.message == "Cannot convert path to File. path='null returning Callable' basedir='${baseDir.absolutePath}'"
+        e.message == "Cannot convert 'null returning Callable' to File."
+    }
+
+    def "normalizes Provider value"() {
+        def baseDir = tmpDir.testDirectory.file("base")
+        def file = tmpDir.testDirectory.file("test")
+        def provider1 = Stub(Provider)
+        provider1.get() >> file
+        def provider2 = Stub(Provider)
+        provider2.get() >> "value"
+
+        expect:
+        normalize(provider1, baseDir) == file
+        normalize(provider2, baseDir) == baseDir.file("value")
+    }
+
+    def "does not allow resolving null URI"() {
+        when:
+        normalizeURI(null)
+        then:
+        def ex = thrown IllegalArgumentException
+        ex.message.contains "Cannot convert 'null' to URI"
+    }
+
+    def "does not allow resolving empty URI"() {
+        when:
+        normalizeURI("")
+        then:
+        def ex = thrown IllegalArgumentException
+        ex.message.contains "Cannot convert '' to URI"
+    }
+
+    def "normalizes Provider value for uri"() {
+        def baseDir = tmpDir.testDirectory.file("base")
+        def file = tmpDir.testDirectory.file("test")
+        def provider1 = Stub(Provider)
+        provider1.get() >> file
+        def provider2 = Stub(Provider)
+        provider2.get() >> "value"
+
+        expect:
+        normalizeURI(provider1, baseDir) == file.toURI()
+        normalizeURI(provider2, baseDir) == baseDir.file("value").toURI()
     }
 
     def createLink(File link, File target) {
@@ -234,8 +259,12 @@ The following types/formats are supported:
         resolver(baseDir).resolve(path)
     }
 
+    def normalizeURI(Object path, File baseDir = tmpDir.testDirectory) {
+        resolver(baseDir).resolveUri(path)
+    }
+
     private BaseDirFileResolver resolver(File baseDir = tmpDir.testDirectory) {
-        new BaseDirFileResolver(TestFiles.fileSystem(), baseDir, TestFiles.getPatternSetFactory())
+        new BaseDirFileResolver(baseDir)
     }
 
     private File[] getFsRoots() {

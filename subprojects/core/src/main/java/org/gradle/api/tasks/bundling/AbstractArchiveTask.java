@@ -17,61 +17,103 @@ package org.gradle.api.tasks.bundling;
 
 import groovy.lang.Closure;
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
+import org.gradle.api.file.ConfigurableFilePermissions;
 import org.gradle.api.file.CopySpec;
+import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.FileSystemOperations;
+import org.gradle.api.file.RegularFile;
+import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.internal.file.copy.CopyActionExecuter;
+import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.Property;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.AbstractCopyTask;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.OutputFile;
-import org.gradle.internal.nativeplatform.filesystem.FileSystem;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.gradle.internal.nativeintegration.filesystem.FileSystem;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.GUtil;
+import org.gradle.util.internal.GUtil;
+import org.gradle.work.DisableCachingByDefault;
+import org.jspecify.annotations.Nullable;
 
-import java.io.File;
+import javax.inject.Inject;
+
+import static org.gradle.api.internal.lambdas.SerializableLambdas.transformer;
 
 /**
  * {@code AbstractArchiveTask} is the base class for all archive tasks.
  */
+@DisableCachingByDefault(because = "Abstract super-class, not to be instantiated directly")
 public abstract class AbstractArchiveTask extends AbstractCopyTask {
-    private File destinationDir;
-    private String customName;
-    private String baseName;
-    private String appendix;
-    private String version;
-    private String extension;
-    private String classifier = "";
-    private boolean preserveFileTimestamps = true;
-    private boolean reproducibleFileOrder;
 
-    /**
-     * Returns the archive name. If the name has not been explicitly set, the pattern for the name is:
-     * <code>[baseName]-[appendix]-[version]-[classifier].[extension]</code>
-     *
-     * @return the archive name.
-     */
-    @Internal("Represented as part of archivePath")
-    public String getArchiveName() {
-        if (customName != null) {
-            return customName;
-        }
-        String name = GUtil.elvis(getBaseName(), "") + maybe(getBaseName(), getAppendix());
-        name += maybe(name, getVersion());
-        name += maybe(name, getClassifier());
-        name += GUtil.isTrue(getExtension()) ? "." + getExtension() : "";
-        return name;
+    private static final String USE_FILE_SYSTEM_PERMISSIONS_PROPERTY = "org.gradle.archives.use-file-system-permissions";
+
+    // All of these field names are really long to prevent collisions with the groovy setters.
+    // Groovy will try to set the private fields if given the opportunity.
+    // This makes it much more difficult for this to happen accidentally.
+    private final DirectoryProperty archiveDestinationDirectory;
+    private final RegularFileProperty archiveFile;
+    private final Property<String> archiveName;
+    private final Property<String> archiveBaseName;
+    private final Property<String> archiveAppendix;
+    private final Property<String> archiveVersion;
+    private final Property<String> archiveExtension;
+    private final Property<String> archiveClassifier;
+    private final Property<Boolean> archivePreserveFileTimestamps;
+    private final Property<Boolean> archiveReproducibleFileOrder;
+
+    public AbstractArchiveTask() {
+        ObjectFactory objectFactory = getProject().getObjects();
+
+        archiveDestinationDirectory = objectFactory.directoryProperty();
+        archiveBaseName = objectFactory.property(String.class);
+        archiveAppendix = objectFactory.property(String.class);
+        archiveVersion = objectFactory.property(String.class);
+        archiveExtension = objectFactory.property(String.class);
+        archiveClassifier = objectFactory.property(String.class).convention("");
+
+        archiveName = objectFactory.property(String.class);
+        archiveName.convention(getProject().provider(() -> {
+            // [baseName]-[appendix]-[version]-[classifier].[extension]
+            String name = GUtil.elvis(archiveBaseName.getOrNull(), "");
+            name += maybe(name, archiveAppendix.getOrNull());
+            name += maybe(name, archiveVersion.getOrNull());
+            name += maybe(name, archiveClassifier.getOrNull());
+
+            String extension = archiveExtension.getOrNull();
+            name += GUtil.isTrue(extension) ? "." + extension : "";
+            return name;
+        }));
+
+        archiveFile = objectFactory.fileProperty();
+        archiveFile.convention(archiveDestinationDirectory.file(archiveName));
+
+        archivePreserveFileTimestamps = objectFactory.property(Boolean.class).convention(false);
+        archiveReproducibleFileOrder = objectFactory.property(Boolean.class).convention(true);
+        configureDefaultPermissions();
     }
 
-    /**
-     * Sets the archive name.
-     *
-     * @param name the archive name.
-     */
-    public void setArchiveName(String name) {
-        customName = name;
+    private void configureDefaultPermissions() {
+        ConfigurableFilePermissions defaultDirPermissions = getFileSystemOperations().permissions(FileSystem.DEFAULT_DIR_MODE);
+        ConfigurableFilePermissions defaultFilePermissions = getFileSystemOperations().permissions(FileSystem.DEFAULT_FILE_MODE);
+
+        getDirPermissions().convention(defaultDirPermissions);
+        getFilePermissions().convention(defaultFilePermissions);
+
+        Provider<Boolean> useFileSystemPermissions = getProject().getProviders()
+            .gradleProperty(USE_FILE_SYSTEM_PERMISSIONS_PROPERTY)
+            .map(transformer(value -> Boolean.parseBoolean(value.trim())))
+            .orElse(false);
+        getDirPermissions().set(useFileSystemPermissions.map(transformer(fileSystemPermissions -> fileSystemPermissions ? null : defaultDirPermissions)));
+        getFilePermissions().set(useFileSystemPermissions.map(transformer(fileSystemPermissions -> fileSystemPermissions ? null : defaultFilePermissions)));
     }
 
-    private String maybe(String prefix, String value) {
+    @Inject
+    protected abstract FileSystemOperations getFileSystemOperations();
+
+    private static String maybe(@Nullable String prefix, @Nullable String value) {
         if (GUtil.isTrue(value)) {
             if (GUtil.isTrue(prefix)) {
                 return "-".concat(value);
@@ -83,105 +125,111 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
     }
 
     /**
-     * The path where the archive is constructed. The path is simply the {@code destinationDir} plus the {@code archiveName}.
+     * Returns the archive name. If the name has not been explicitly set, the pattern for the name is:
+     * <code>[archiveBaseName]-[archiveAppendix]-[archiveVersion]-[archiveClassifier].[archiveExtension]</code>
      *
-     * @return a File object with the path to the archive
+     * @return the archive name.
+     * @since 5.1
      */
-    @OutputFile
-    public File getArchivePath() {
-        return new File(getDestinationDir(), getArchiveName());
+    @Internal("Represented as part of archiveFile")
+    public Property<String> getArchiveFileName() {
+        return archiveName;
     }
 
     /**
-     * Returns the directory where the archive is generated into.
+     * The {@link RegularFile} where the archive is constructed.
+     * The path is simply the {@code destinationDirectory} plus the {@code archiveFileName}.
      *
-     * @return the directory
+     * @return a {@link RegularFile} object with the path to the archive
+     * @since 5.1
      */
-    @Internal("Represented as part of archivePath")
-    public File getDestinationDir() {
-        return destinationDir;
+    @OutputFile
+    public Provider<RegularFile> getArchiveFile() {
+        // TODO: Turn this into an `@implSpec` annotation on the comment above:
+        // https://github.com/gradle/gradle/issues/7486
+        /*
+         * This returns a provider of {@link RegularFile} instead of {@link RegularFileProperty} in order to
+         * prevent users calling {@link org.gradle.api.provider.Property#set} and causing a plugin or users using
+         * {@link AbstractArchiveTask#getArchivePath()} to break or have strange behaviour.
+         * An example can be found
+         * <a href="https://github.com/gradle/gradle-native/issues/893#issuecomment-430776251">here</a>.
+         */
+        return archiveFile;
     }
 
-    public void setDestinationDir(File destinationDir) {
-        this.destinationDir = destinationDir;
+    /**
+     * The directory where the archive will be placed.
+     *
+     * @since 5.1
+     */
+    @Internal("Represented by the archiveFile")
+    public DirectoryProperty getDestinationDirectory() {
+        return archiveDestinationDirectory;
     }
 
     /**
      * Returns the base name of the archive.
      *
-     * @return the base name.
+     * @return the base name. Internal property may be null.
+     * @since 5.1
      */
-    @Internal("Represented as part of archiveName")
-    public String getBaseName() {
-        return baseName;
-    }
-
-    public void setBaseName(String baseName) {
-        this.baseName = baseName;
+    @Internal("Represented as part of archiveFile")
+    public Property<String> getArchiveBaseName() {
+        return archiveBaseName;
     }
 
     /**
      * Returns the appendix part of the archive name, if any.
      *
      * @return the appendix. May be null
+     * @since 5.1
      */
-    @Internal("Represented as part of archiveName")
-    public String getAppendix() {
-        return appendix;
-    }
-
-    public void setAppendix(String appendix) {
-        this.appendix = appendix;
+    @Internal("Represented as part of archiveFile")
+    public Property<String> getArchiveAppendix() {
+        return archiveAppendix;
     }
 
     /**
-     * Returns the version part of the archive name, if any.
+     * Returns the version part of the archive name.
      *
-     * @return the version. May be null.
+     * @return the version. Internal property may be null.
+     * @since 5.1
      */
-    @Internal("Represented as part of archiveName")
-    public String getVersion() {
-        return version;
-    }
-
-    public void setVersion(String version) {
-        this.version = version;
+    @Internal("Represented as part of archiveFile")
+    public Property<String> getArchiveVersion() {
+        return archiveVersion;
     }
 
     /**
      * Returns the extension part of the archive name.
+     *
+     * @since 5.1
      */
-    @Internal("Represented as part of archiveName")
-    public String getExtension() {
-        return extension;
-    }
-
-    public void setExtension(String extension) {
-        this.extension = extension;
+    @Internal("Represented as part of archiveFile")
+    public Property<String> getArchiveExtension() {
+        return archiveExtension;
     }
 
     /**
      * Returns the classifier part of the archive name, if any.
      *
-     * @return The classifier. May be null.
+     * @return The classifier. Internal property may be null.
+     * @since 5.1
      */
-    @Internal("Represented as part of archiveName")
-    public String getClassifier() {
-        return classifier;
-    }
-
-    public void setClassifier(String classifier) {
-        this.classifier = classifier;
+    @Internal("Represented as part of archiveFile")
+    public Property<String> getArchiveClassifier() {
+        return archiveClassifier;
     }
 
     /**
      * Specifies the destination directory *inside* the archive for the files.
      * The destination is evaluated as per {@link org.gradle.api.Project#file(Object)}.
-     * Don't mix it up with {@link #getDestinationDir()} which specifies the output directory for the archive.
+     * Don't mix it up with {@link #getDestinationDirectory()} which specifies the output directory for the archive.
      *
      * @param destPath destination directory *inside* the archive for the files
      * @return this
      */
+    @Override
     public AbstractArchiveTask into(Object destPath) {
         super.into(destPath);
         return this;
@@ -190,12 +238,13 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
     /**
      * Creates and configures a child {@code CopySpec} with a destination directory *inside* the archive for the files.
      * The destination is evaluated as per {@link org.gradle.api.Project#file(Object)}.
-     * Don't mix it up with {@link #getDestinationDir()} which specifies the output directory for the archive.
+     * Don't mix it up with {@link #getDestinationDirectory()} which specifies the output directory for the archive.
      *
      * @param destPath destination directory *inside* the archive for the files
      * @param configureClosure The closure to use to configure the child {@code CopySpec}.
      * @return this
      */
+    @Override
     public AbstractArchiveTask into(Object destPath, Closure configureClosure) {
         super.into(destPath, configureClosure);
         return this;
@@ -205,12 +254,13 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
     /**
      * Creates and configures a child {@code CopySpec} with a destination directory *inside* the archive for the files.
      * The destination is evaluated as per {@link org.gradle.api.Project#file(Object)}.
-     * Don't mix it up with {@link #getDestinationDir()} which specifies the output directory for the archive.
+     * Don't mix it up with {@link #getDestinationDirectory()} which specifies the output directory for the archive.
      *
      * @param destPath destination directory *inside* the archive for the files
      * @param copySpec The closure to use to configure the child {@code CopySpec}.
      * @return this
      */
+    @Override
     public CopySpec into(Object destPath, Action<? super CopySpec> copySpec) {
         super.into(destPath, copySpec);
         return this;
@@ -219,30 +269,29 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
     /**
      * Specifies whether file timestamps should be preserved in the archive.
      * <p>
-     * If <tt>false</tt> this ensures that archive entries have the same time for builds between different machines, Java versions and operating systems.
+     * If <code>false</code> this ensures that archive entries have the same time for builds between different machines, Java versions and operating systems.
      * </p>
      *
+     * @return <code>true</code> if file timestamps should be preserved for archive entries
      * @since 3.4
-     * @return <tt>true</tt> if file timestamps should be preserved for archive entries
      */
     @Input
-    @Incubating
+    @ToBeReplacedByLazyProperty
     public boolean isPreserveFileTimestamps() {
-        return preserveFileTimestamps;
+        return archivePreserveFileTimestamps.get();
     }
 
     /**
      * Specifies whether file timestamps should be preserved in the archive.
      * <p>
-     * If <tt>false</tt> this ensures that archive entries have the same time for builds between different machines, Java versions and operating systems.
+     * If <code>false</code> this ensures that archive entries have the same time for builds between different machines, Java versions and operating systems.
      * </p>
      *
+     * @param preserveFileTimestamps <code>true</code> if file timestamps should be preserved for archive entries
      * @since 3.4
-     * @param preserveFileTimestamps <tt>true</tt> if file timestamps should be preserved for archive entries
      */
-    @Incubating
     public void setPreserveFileTimestamps(boolean preserveFileTimestamps) {
-        this.preserveFileTimestamps = preserveFileTimestamps;
+        archivePreserveFileTimestamps.set(preserveFileTimestamps);
     }
 
     /**
@@ -253,14 +302,15 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
      * This helps Gradle reliably produce byte-for-byte reproducible archives.
      * </p>
      *
+     * @return <code>true</code> if the files should read from disk in a reproducible order.
      * @since 3.4
-     * @return <tt>true</tt> if the files should read from disk in a reproducible order.
      */
     @Input
-    @Incubating
+    @ToBeReplacedByLazyProperty
     public boolean isReproducibleFileOrder() {
-        return reproducibleFileOrder;
+        return archiveReproducibleFileOrder.get();
     }
+
     /**
      * Specifies whether to enforce a reproducible file order when reading files from directories.
      * <p>
@@ -269,12 +319,27 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
      * This helps Gradle reliably produce byte-for-byte reproducible archives.
      * </p>
      *
+     * @param reproducibleFileOrder <code>true</code> if the files should read from disk in a reproducible order.
      * @since 3.4
-     * @param reproducibleFileOrder <tt>true</tt> if the files should read from disk in a reproducible order.
      */
-    @Incubating
     public void setReproducibleFileOrder(boolean reproducibleFileOrder) {
-        this.reproducibleFileOrder = reproducibleFileOrder;
+        archiveReproducibleFileOrder.set(reproducibleFileOrder);
+    }
+
+    /**
+     * Sets the directory and file permissions for archived files to be read from the file system.
+     * <p>
+     * Any subsequent configuration of {@link #getDirPermissions()} or {@link #getFilePermissions()} will override this setting, but only for the specifically configured property.
+     * <p>
+     * Note: On Windows, file system permissions are not supported, and permissions will be set to <code>755</code> for directories and <code>644</code> for files.
+     * <p>
+     * This setting can also be applied to all archive tasks of the build via <code>org.gradle.archives.use-file-system-permissions=true</code> property.
+     *
+     * @since 9.0.0
+     */
+    public void useFileSystemPermissions() {
+        getFilePermissions().set(getProject().getProviders().provider(() -> null));
+        getDirPermissions().set(getProject().getProviders().provider(() -> null));
     }
 
     @Override
@@ -282,6 +347,6 @@ public abstract class AbstractArchiveTask extends AbstractCopyTask {
         Instantiator instantiator = getInstantiator();
         FileSystem fileSystem = getFileSystem();
 
-        return new CopyActionExecuter(instantiator, fileSystem, isReproducibleFileOrder());
+        return new CopyActionExecuter(instantiator, getPropertyFactory(), fileSystem, isReproducibleFileOrder(), getDocumentationRegistry());
     }
 }

@@ -20,7 +20,7 @@ import org.gradle.groovy.scripts.Transformer;
 import org.gradle.internal.serialize.Serializer;
 
 /**
- * A stateful “backing” for a compilation operation.
+ * A stateful "backing" for a compilation operation.
  * <p>
  * The compilation may extract data from the source under compilation, made available after compilation by {@link #getExtractedData()}.
  * The exposed transformer typically gathers the data while transforming.
@@ -37,6 +37,12 @@ public interface CompileOperation<T> {
      * Used to distinguish between the classes compiled from the same script with different transformers, so should be a valid java identifier.
      */
     String getId();
+
+    /**
+     * The stage of this compile operation.
+     * This is exposed by {@link org.gradle.internal.scripts.CompileScriptBuildOperationType.Details#getStage()}.
+     * */
+    String getStage();
 
     Transformer getTransformer();
 

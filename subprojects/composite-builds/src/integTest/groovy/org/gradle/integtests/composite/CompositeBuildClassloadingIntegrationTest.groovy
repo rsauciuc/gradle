@@ -19,6 +19,7 @@ package org.gradle.integtests.composite
 import org.gradle.integtests.fixtures.build.BuildTestFile
 import org.gradle.test.fixtures.file.LeaksFileHandles
 import spock.lang.Issue
+
 /**
  * Tests for classloading related bugs with a composite build.
  */
@@ -30,9 +31,7 @@ class CompositeBuildClassloadingIntegrationTest extends AbstractCompositeBuildIn
         given:
         file('gradle-user-home/init.gradle') << """
             initscript {
-                repositories {
-                    mavenCentral()
-                }
+                ${mavenCentralRepository()}
 
                 File searchDir = gradle.startParameter.projectDir ?: gradle.startParameter.currentDir
                 def version = new File(searchDir, 'version.txt').text

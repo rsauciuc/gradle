@@ -17,7 +17,7 @@ package org.gradle.groovy.scripts.internal;
 
 import org.gradle.api.GradleScriptException;
 import org.gradle.groovy.scripts.Script;
-import org.gradle.groovy.scripts.ScriptExecutionListener;
+import org.gradle.internal.scripts.ScriptExecutionListener;
 import org.gradle.groovy.scripts.ScriptRunner;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.reflect.Instantiator;
@@ -32,6 +32,7 @@ public class DefaultScriptRunnerFactory implements ScriptRunnerFactory {
         this.instantiator = instantiator;
     }
 
+    @Override
     public <T extends Script, M> ScriptRunner<T, M> create(CompiledScript<T, M> script, ScriptSource source, ClassLoader contextClassLoader) {
         return new ScriptRunnerImpl<T, M>(script, source, contextClassLoader);
     }
@@ -55,7 +56,7 @@ public class DefaultScriptRunnerFactory implements ScriptRunnerFactory {
                 script = instantiator.newInstance(scriptClass);
                 script.setScriptSource(source);
                 script.setContextClassloader(contextClassLoader);
-                listener.scriptClassLoaded(source, scriptClass);
+                listener.onScriptClassLoaded(source, scriptClass);
             }
             return script;
         }

@@ -15,14 +15,25 @@
  */
 package org.gradle.internal.invocation;
 
-import org.gradle.StartParameter;
+import org.gradle.api.internal.StartParameterInternal;
 
 /**
- * An object that performs some action with a {@link BuildController} and produces a “result” object (e.g. the output).
- * <p>
- * Implementations of this are typically composed to bootstrap a build in a certain environment.
- * <p>
+ * An object that describes the top level build action to perform, e.g. run some tasks, build a tooling model, run some tests, etc.
  */
 public interface BuildAction {
-    StartParameter getStartParameter();
+    StartParameterInternal getStartParameter();
+
+    /**
+     * Will this action result in tasks being run?
+     *
+     * <p>An action may both run tasks and create a model.</p>
+     */
+    boolean isRunTasks();
+
+    /**
+     * Will this action return a tooling model as its result?
+     *
+     * <p>An action may both run tasks and create a model.</p>
+     */
+    boolean isCreateModel();
 }

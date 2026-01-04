@@ -15,7 +15,6 @@
  */
 package org.gradle.api.internal.project.ant;
 
-import groovy.util.AntBuilder;
 import org.apache.tools.ant.ComponentHelper;
 import org.apache.tools.ant.Project;
 import org.apache.tools.ant.Target;
@@ -28,6 +27,7 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 
+@SuppressWarnings("deprecation")
 public class BasicAntBuilder extends org.gradle.api.AntBuilder implements Closeable {
     private final Field nodeField;
     private final List children;
@@ -36,9 +36,9 @@ public class BasicAntBuilder extends org.gradle.api.AntBuilder implements Closea
         // These are used to discard references to tasks so they can be garbage collected
         Field collectorField;
         try {
-            nodeField = AntBuilder.class.getDeclaredField("lastCompletedNode");
+            nodeField = groovy.ant.AntBuilder.class.getDeclaredField("lastCompletedNode");
             nodeField.setAccessible(true);
-            collectorField = AntBuilder.class.getDeclaredField("collectorTarget");
+            collectorField = groovy.ant.AntBuilder.class.getDeclaredField("collectorTarget");
             collectorField.setAccessible(true);
             Target target = (Target) collectorField.get(this);
             Field childrenField = Target.class.getDeclaredField("children");
@@ -62,11 +62,23 @@ public class BasicAntBuilder extends org.gradle.api.AntBuilder implements Closea
         throw new UnsupportedOperationException();
     }
 
+    @Override
     public void importBuild(Object antBuildFile) {
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public void importBuild(Object antBuildFile, String baseDirectory) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public void importBuild(Object antBuildFile, Transformer<? extends String, ? super String> taskNamer) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void importBuild(Object antBuildFile, String baseDirectory, Transformer<? extends String, ? super String> taskNamer) {
         throw new UnsupportedOperationException();
     }
 
@@ -91,6 +103,7 @@ public class BasicAntBuilder extends org.gradle.api.AntBuilder implements Closea
         throw new UnsupportedOperationException();
     }
 
+    @Override
     protected Object postNodeCompletion(Object parent, Object node) {
         try {
             return nodeField.get(this);
@@ -99,6 +112,7 @@ public class BasicAntBuilder extends org.gradle.api.AntBuilder implements Closea
         }
     }
 
+    @Override
     protected Object doInvokeMethod(String methodName, Object name, Object args) {
         Object value = super.doInvokeMethod(methodName, name, args);
         // Discard the node so it can be garbage collected. Some Ant tasks cache a potentially large amount of state
@@ -112,6 +126,7 @@ public class BasicAntBuilder extends org.gradle.api.AntBuilder implements Closea
         return value;
     }
 
+    @Override
     public void close() {
         Project project = getProject();
         project.fireBuildFinished(null);

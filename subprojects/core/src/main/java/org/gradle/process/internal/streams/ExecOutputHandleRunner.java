@@ -19,11 +19,13 @@ package org.gradle.process.internal.streams;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.concurrent.CompositeStoppable;
+import org.gradle.internal.operations.BuildOperationRef;
+import org.gradle.internal.operations.CurrentBuildOperationRef;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.concurrent.Executor;
+import java.util.concurrent.CountDownLatch;
 
 public class ExecOutputHandleRunner implements Runnable {
     private final static Logger LOGGER = Logging.getLogger(ExecOutputHandleRunner.class);
@@ -32,45 +34,89 @@ public class ExecOutputHandleRunner implements Runnable {
     private final InputStream inputStream;
     private final OutputStream outputStream;
     private final int bufferSize;
+    private final CountDownLatch completed;
+    private volatile boolean closed;
+    private volatile BuildOperationRef associatedBuildOperation;
 
-    public ExecOutputHandleRunner(String displayName, InputStream inputStream, OutputStream outputStream) {
-        this(displayName, inputStream, outputStream, 2048);
+    public ExecOutputHandleRunner(String displayName, InputStream inputStream, OutputStream outputStream, CountDownLatch completed) {
+        this(displayName, inputStream, outputStream, 8192, completed);
     }
 
-    ExecOutputHandleRunner(String displayName, InputStream inputStream, OutputStream outputStream, int bufferSize) {
+    ExecOutputHandleRunner(String displayName, InputStream inputStream, OutputStream outputStream, int bufferSize, CountDownLatch completed) {
         this.displayName = displayName;
         this.inputStream = inputStream;
         this.outputStream = outputStream;
         this.bufferSize = bufferSize;
+        this.completed = completed;
     }
 
+    public void associateBuildOperation(BuildOperationRef startupRef) {
+        this.associatedBuildOperation = startupRef;
+    }
+
+    public void clearAssociatedBuildOperation() {
+        this.associatedBuildOperation = null;
+    }
+
+    @Override
     public void run() {
-        byte[] buffer = new byte[bufferSize];
         try {
-            while (true) {
+            forwardContent();
+        } finally {
+            completed.countDown();
+        }
+    }
+
+    private void forwardContent() {
+        try {
+            byte[] buffer = new byte[bufferSize];
+            while (!closed) {
                 int nread = inputStream.read(buffer);
                 if (nread < 0) {
                     break;
                 }
-                outputStream.write(buffer, 0, nread);
-                outputStream.flush();
+                BuildOperationRef startupRef = this.associatedBuildOperation;
+                if (startupRef != null) {
+                    CurrentBuildOperationRef.instance().with(startupRef, () -> {
+                        writeBuffer(buffer, nread);
+                        return null;
+                    });
+                } else {
+                    writeBuffer(buffer, nread);
+                }
             }
             CompositeStoppable.stoppable(inputStream, outputStream).stop();
         } catch (Throwable t) {
-            LOGGER.error(String.format("Could not %s.", displayName), t);
+            if (!closed && !wasInterrupted(t)) {
+                LOGGER.error(String.format("Could not %s.", displayName), t);
+            }
         }
     }
 
-    public void run(Executor executor) {
-        executor.execute(this);
+    private void writeBuffer(byte[] buffer, int nread) throws IOException {
+        outputStream.write(buffer, 0, nread);
+        outputStream.flush();
+    }
+
+    /**
+     * This can happen e.g. on IBM JDK when a remote process was terminated. Instead of
+     * returning -1 on the next read() call, it will interrupt the current read call.
+     */
+    private boolean wasInterrupted(Throwable t) {
+        return t instanceof IOException && "Interrupted system call".equals(t.getMessage());
     }
 
     public void closeInput() throws IOException {
+        disconnect();
         inputStream.close();
     }
 
     @Override
     public String toString() {
         return displayName;
+    }
+
+    public void disconnect() {
+        closed = true;
     }
 }

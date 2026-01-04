@@ -17,19 +17,94 @@
 package org.gradle.api
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
+import spock.lang.Issue
 
 class ProjectConfigurationIntegrationTest extends AbstractIntegrationSpec {
 
-    def "accessing the task by path from containing project is safe"() {
-        buildFile << """
-            task foobar
-            println "the name: " + tasks.getByPath(":foobar").name
+    @ToBeFixedForIsolatedProjects(because = "allprojects, evaluationDependsOn")
+    def "shows deprecation warning when calling Project#afterEvaluate(Closure) after the project was evaluated"() {
+        buildFile << '''
+            allprojects { p ->
+                println "[1] Adding afterEvaluate for $p.name"
+                p.afterEvaluate {
+                    println "[1] afterEvaluate $p.name"
+                }
+            }
+
+            project(':a') {
+                println "[2] Adding evaluationDependsOn"
+                evaluationDependsOn(':b')
+            }
+
+            allprojects { p ->
+                println "[3] Adding afterEvaluate for $p.name"
+                p.afterEvaluate {
+                    println "[3] afterEvaluate $p.name"
+                }
+            }
+        '''
+        createDirs("a", "b")
+        settingsFile << """
+            rootProject.name = 'root'
+            include 'a', 'b'
         """
 
-        when:
-        run()
+        expect:
+        def result = fails()
+        result.assertHasDescription("A problem occurred evaluating root project 'root'.")
+        failure.assertHasCause("Cannot run Project.afterEvaluate(Closure) when the project is already evaluated.")
+    }
 
-        then:
-        output.contains "the name: foobar"
+    @ToBeFixedForIsolatedProjects(because = "allprojects, evaluationDependsOn")
+    def "shows deprecation warning when calling Project#afterEvaluate(Action) after the project was evaluated"() {
+        buildFile '''
+            allprojects { p ->
+                println "[1] Adding afterEvaluate for $p.name"
+                p.afterEvaluate new Action<Project>() {
+                    void execute(Project proj) {
+                        println "[1] afterEvaluate $proj.name"
+                    }
+                }
+            }
+
+            project(':a') {
+                println "[2] Adding evaluationDependsOn"
+                evaluationDependsOn(':b')
+            }
+
+            allprojects { p ->
+                println "[3] Adding afterEvaluate for $p.name"
+                p.afterEvaluate new Action<Project>() {
+                    void execute(Project proj) {
+                        println "[3] afterEvaluate $proj.name"
+                    }
+                }
+            }
+        '''
+        createDirs("a", "b")
+        settingsFile << """
+            rootProject.name = 'root'
+            include 'a', 'b'
+        """
+
+        expect:
+        def result = fails()
+        result.assertHasDescription("A problem occurred evaluating root project 'root'.")
+        failure.assertHasCause("Cannot run Project.afterEvaluate(Action) when the project is already evaluated.")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/4823")
+    @ToBeFixedForIsolatedProjects(because = "evaluationDependsOn is not IP compatible")
+    def "evaluationDependsOn deep project forces evaluation of parents"() {
+        given:
+        createDirs("a", "b", "b/c")
+        settingsFile << "include(':a', ':b:c')"
+        file("a/build.gradle") << "evaluationDependsOn(':b:c')"
+        file("b/build.gradle") << "plugins { id('org.gradle.hello-world') version '0.2' apply false }"
+        file("b/c/build.gradle") << "import org.gradle.plugin.HelloWorldTask"
+
+        expect:
+        succeeds 'help'
     }
 }

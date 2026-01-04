@@ -16,40 +16,39 @@
 
 package org.gradle.api.internal.changedetection.state
 
-import com.google.common.base.Charsets
-import com.google.common.hash.Hashing
-import org.gradle.api.file.FileTreeElement
 import org.gradle.api.internal.cache.StringInterner
 import org.gradle.api.internal.changedetection.state.CachingFileHasher.FileInfo
 import org.gradle.api.internal.file.TestFiles
-import org.gradle.api.internal.hash.FileHasher
-import org.gradle.cache.PersistentIndexedCache
-import org.gradle.internal.nativeintegration.filesystem.DefaultFileMetadata
-import org.gradle.internal.resource.TextResource
+import org.gradle.cache.IndexedCache
+import org.gradle.internal.file.FileMetadata.AccessType
+import org.gradle.internal.file.impl.DefaultFileMetadata
+import org.gradle.internal.hash.FileHasher
+import org.gradle.internal.hash.TestHashCodes
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
 class CachingFileHasherTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def target = Mock(FileHasher)
-    def cache = Mock(PersistentIndexedCache)
-    def cacheAccess = Mock(TaskHistoryStore)
+    def cache = Mock(IndexedCache)
+    def cacheAccess = Mock(CrossBuildFileHashCache)
     def timeStampInspector = Mock(FileTimeStampInspector)
-    def hash = Hashing.md5().hashString("hello", Charsets.UTF_8)
-    def oldHash = Hashing.md5().hashString("hi", Charsets.UTF_8)
+    def hash = TestHashCodes.hashCodeFrom(0x0123)
+    def oldHash = TestHashCodes.hashCodeFrom(0x0321)
     def file = tmpDir.createFile("testfile")
     def fileSystem = TestFiles.fileSystem()
+    def statisticsCollector = Mock(FileHasherStatistics.Collector)
     CachingFileHasher hasher
 
     def setup() {
         file.write("some-content")
-        1 * cacheAccess.createCache("fileHashes", _, _, _, _) >> cache
-        hasher = new CachingFileHasher(target, cacheAccess, new StringInterner(), timeStampInspector, "fileHashes", fileSystem)
+        1 * cacheAccess.createIndexedCache({ it.cacheName == "fileHashes"  }, _, _) >> cache
+        hasher = new CachingFileHasher(target, cacheAccess, new StringInterner(), timeStampInspector, "fileHashes", fileSystem, 1000, statisticsCollector)
     }
 
-    def hashesFileWhenHashNotCached() {
+    def "hashes file when hash not cached"() {
         def stat = fileSystem.stat(file)
 
         when:
@@ -60,17 +59,18 @@ class CachingFileHasherTest extends Specification {
 
         and:
         1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, stat.lastModified) >> true
-        1 * cache.get(file.absolutePath) >> null
+        1 * cache.getIfPresent(file.absolutePath) >> null
         1 * target.hash(file) >> hash
         1 * cache.put(file.absolutePath, _) >> { String key, FileInfo fileInfo ->
             assert fileInfo.hash == hash
             assert fileInfo.length == stat.length
             assert fileInfo.timestamp == stat.lastModified
         }
-        0 * _._
+        1 * statisticsCollector.reportFileHashed(file.length())
+        0 * _
     }
 
-    def hashesFileWhenLengthHasChanged() {
+    def "hashes file when length has changed"() {
         def stat = fileSystem.stat(file)
 
         when:
@@ -81,17 +81,18 @@ class CachingFileHasherTest extends Specification {
 
         and:
         1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, stat.lastModified) >> true
-        1 * cache.get(file.absolutePath) >> new FileInfo(oldHash, 1024, stat.lastModified)
+        1 * cache.getIfPresent(file.absolutePath) >> new FileInfo(oldHash, 1024, stat.lastModified)
         1 * target.hash(file) >> hash
         1 * cache.put(file.absolutePath, _) >> { String key, FileInfo fileInfo ->
             assert fileInfo.hash == hash
             assert fileInfo.length == stat.length
             assert fileInfo.timestamp == stat.lastModified
         }
-        0 * _._
+        1 * statisticsCollector.reportFileHashed(file.length())
+        0 * _
     }
 
-    def hashesFileWhenTimestampHasChanged() {
+    def "hashes file when timestamp has changed"() {
         def stat = fileSystem.stat(file)
 
         when:
@@ -102,17 +103,18 @@ class CachingFileHasherTest extends Specification {
 
         and:
         1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, stat.lastModified) >> true
-        1 * cache.get(file.absolutePath) >> new FileInfo(oldHash, file.length(), 124)
+        1 * cache.getIfPresent(file.absolutePath) >> new FileInfo(oldHash, file.length(), 124)
         1 * target.hash(file) >> hash
         1 * cache.put(file.absolutePath, _) >> { String key, FileInfo fileInfo ->
             assert fileInfo.hash == hash
             assert fileInfo.length == stat.length
             assert fileInfo.timestamp == stat.lastModified
         }
-        0 * _._
+        1 * statisticsCollector.reportFileHashed(file.length())
+        0 * _
     }
 
-    def doesNotHashFileWhenTimestampAndLengthHaveNotChanged() {
+    def "does not hash file when timestamp and length have not changed"() {
         def stat = fileSystem.stat(file)
 
         when:
@@ -123,11 +125,11 @@ class CachingFileHasherTest extends Specification {
 
         and:
         1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, stat.lastModified) >> true
-        1 * cache.get(file.absolutePath) >> new FileInfo(hash, stat.length, stat.lastModified)
-        0 * _._
+        1 * cache.getIfPresent(file.absolutePath) >> new FileInfo(hash, stat.length, stat.lastModified)
+        0 * _
     }
 
-    def doesNotLoadCachedValueWhenTimestampCannotBeUsedToDetectChange() {
+    def "does not load cached value when timestamp cannot be used to detect change"() {
         def stat = fileSystem.stat(file)
 
         when:
@@ -144,87 +146,31 @@ class CachingFileHasherTest extends Specification {
             assert fileInfo.length == stat.length
             assert fileInfo.timestamp == stat.lastModified
         }
-        0 * _._
+        1 * statisticsCollector.reportFileHashed(file.length())
+        0 * _
     }
 
-    def hashesFileDetails() {
+    def "hashes given file length and last modified"() {
         long lastModified = 123l
         long length = 321l
-        def fileDetails = Mock(FileTreeElement)
+        def fileMetadata = DefaultFileMetadata.file(lastModified, length, AccessType.DIRECT)
 
         when:
-        def result = hasher.hash(fileDetails)
-
-        then:
-        result == hash
-
-        and:
-        _ * fileDetails.file >> file
-        _ * fileDetails.lastModified >> lastModified
-        _ * fileDetails.size >> length
-        1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, lastModified) >> true
-        1 * cache.get(file.absolutePath) >> null
-        1 * target.hash(file) >> hash
-        1 * cache.put(file.absolutePath, _) >> { String key, FileInfo fileInfo ->
-            assert fileInfo.hash == hash
-            assert fileInfo.length == length
-            assert fileInfo.timestamp == lastModified
-        }
-        0 * _._
-    }
-
-    def hashesGivenFileMetadataSnapshot() {
-        long lastModified = 123l
-        long length = 321l
-        def fileDetails = DefaultFileMetadata.file(lastModified, length)
-
-        when:
-        def result = hasher.hash(file, fileDetails)
+        def result = hasher.hash(file, fileMetadata.length, fileMetadata.lastModified)
 
         then:
         result == hash
 
         and:
         1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, lastModified) >> true
-        1 * cache.get(file.absolutePath) >> null
+        1 * cache.getIfPresent(file.absolutePath) >> null
         1 * target.hash(file) >> hash
         1 * cache.put(file.absolutePath, _) >> { String key, FileInfo fileInfo ->
             assert fileInfo.hash == hash
             assert fileInfo.length == length
             assert fileInfo.timestamp == lastModified
         }
-        0 * _._
-    }
-
-    def hashesBackingFileWhenResourceIsBackedByFile() {
-        def stat = fileSystem.stat(file)
-        def resource = Mock(TextResource)
-
-        when:
-        def result = hasher.hash(resource)
-
-        then:
-        result == hash
-
-        and:
-        1 * resource.file >> file
-        1 * timeStampInspector.timestampCanBeUsedToDetectFileChange(file.absolutePath, stat.lastModified) >> true
-        1 * cache.get(file.absolutePath) >> new FileInfo(hash, stat.length, stat.lastModified)
-        0 * _._
-    }
-
-    def hashesContentWhenResourceIsNotBackedByFile() {
-        def resource = Mock(TextResource)
-
-        when:
-        def result = hasher.hash(resource)
-
-        then:
-        result == hash
-
-        and:
-        1 * resource.file >> null
-        1 * target.hash(resource) >> hash
-        0 * _._
+        1 * statisticsCollector.reportFileHashed(length)
+        0 * _
     }
 }

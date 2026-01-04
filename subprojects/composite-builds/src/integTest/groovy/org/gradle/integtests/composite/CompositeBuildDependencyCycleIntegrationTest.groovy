@@ -18,7 +18,7 @@ package org.gradle.integtests.composite
 
 import org.gradle.integtests.fixtures.build.BuildTestFile
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
-import org.gradle.test.fixtures.maven.MavenModule
+import spock.lang.Issue
 
 /**
  * Tests for resolving dependency cycles in a composite build.
@@ -27,33 +27,60 @@ class CompositeBuildDependencyCycleIntegrationTest extends AbstractCompositeBuil
     BuildTestFile buildB
     BuildTestFile buildC
     ResolveTestFixture resolve
-    MavenModule publishedModuleB
-    List arguments = []
+
+    def getCommon() {
+        """
+            plugins {
+                id("java-library")
+            }
+
+            // Add additional configurations that do not bring in build dependencies,
+            // allowing us to verify the structure of the dependency graph without making
+            // the task graph cycle checker angry.
+            configurations {
+                resolvable("graph") {
+                    extendsFrom(implementation)
+                    attributes {
+                        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, "no-build-deps"))
+                    }
+                }
+                consumable("graphElements") {
+                    extendsFrom(implementation)
+                    attributes {
+                        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, "no-build-deps"))
+                    }
+                    outgoing.artifact(file("\${project.name}-\${version}.jar"))
+                }
+            }
+        """
+    }
 
     def setup() {
-        publishedModuleB = mavenRepo.module("org.test", "buildB", "1.0").publish()
-        resolve = new ResolveTestFixture(buildA.buildFile)
+        resolve = new ResolveTestFixture(buildA)
 
-        buildA.buildFile << """
-            task resolveArtifacts(type: Copy) {
-                from configurations.compile
-                into 'libs'
+        // AbstractCompositeBuildIntegrationTest automatically adds content to the buildA build file,
+        // preventing us from using the plugins block.
+        buildA.buildFile.text = """
+            ${common}
+            group = 'org.test'
+            version = '1.0'
+            repositories {
+                maven {
+                    url = "${mavenRepo.uri}"
+                }
             }
-"""
+            ${resolve.configureProject("graph", "runtimeClasspath")}
+        """
 
         buildB = multiProjectBuild("buildB", ['b1', 'b2']) {
-            buildFile << """
-                allprojects {
-                    apply plugin: 'java'
-                }
-"""
+            [delegate, project("b1"), project("b2")].each { p ->
+                p.buildFile << common
+            }
         }
         includedBuilds << buildB
 
         buildC = singleProjectBuild("buildC") {
-            buildFile << """
-                apply plugin: 'java'
-"""
+            buildFile << common
         }
         includedBuilds << buildC
     }
@@ -65,16 +92,18 @@ class CompositeBuildDependencyCycleIntegrationTest extends AbstractCompositeBuil
         dependency buildC, "org.test:buildB:1.0"
 
         when:
-        resolve.withoutBuildingArtifacts()
-        resolveSucceeds(":checkDeps")
+        resolveSucceeds(":checkGraph")
 
         then:
         checkGraph {
-            edge("org.test:buildB:1.0", "project :buildB:", "org.test:buildB:1.0") {
+            edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                configuration = "runtimeElements"
                 compositeSubstitute()
-                edge("org.test:buildC:1.0", "project :buildC:", "org.test:buildC:1.0") {
+                edge("org.test:buildC:1.0", ":buildC", "org.test:buildC:1.0") {
+                    configuration = "runtimeElements"
                     compositeSubstitute()
-                    edge("org.test:buildB:1.0", "project :buildB:", "org.test:buildB:1.0") {
+                    edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                        configuration = "runtimeElements"
                         compositeSubstitute()
                     }
                 }
@@ -82,14 +111,13 @@ class CompositeBuildDependencyCycleIntegrationTest extends AbstractCompositeBuil
         }
 
         when:
-        resolveFails(":resolveArtifacts")
+        resolveFails(":checkRuntimeClasspath")
 
         then:
-        failure
-            .assertHasDescription("Failed to build artifacts for build 'buildB'")
-            .assertHasCause("Failed to build artifacts for build 'buildC'")
-            .assertHasCause("Could not download buildB.jar (project :buildB:)")
-            .assertHasCause("Included build dependency cycle: build 'buildB' -> build 'buildC' -> build 'buildB'")
+        failure.assertHasDescription("""Circular dependency between the following tasks:
+:buildB:compileJava
+\\--- :buildC:compileJava
+     \\--- :buildB:compileJava (*)""")
     }
 
     def "indirect dependency cycle between included builds"() {
@@ -100,27 +128,30 @@ class CompositeBuildDependencyCycleIntegrationTest extends AbstractCompositeBuil
 
         def buildD = singleProjectBuild("buildD") {
             buildFile << """
-                apply plugin: 'java'
+                $common
                 dependencies {
-                    compile "org.test:buildB:1.0"
+                    implementation "org.test:buildB:1.0"
                 }
-"""
+            """
         }
         includedBuilds << buildD
 
         when:
-        resolve.withoutBuildingArtifacts()
-        resolveSucceeds(":checkDeps")
+        resolveSucceeds(":checkGraph")
 
         then:
         checkGraph {
-            edge("org.test:buildB:1.0", "project :buildB:", "org.test:buildB:1.0") {
+            edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                configuration = "runtimeElements"
                 compositeSubstitute()
-                edge("org.test:buildC:1.0", "project :buildC:", "org.test:buildC:1.0") {
+                edge("org.test:buildC:1.0", ":buildC", "org.test:buildC:1.0") {
+                    configuration = "runtimeElements"
                     compositeSubstitute()
-                    edge("org.test:buildD:1.0", "project :buildD:", "org.test:buildD:1.0") {
+                    edge("org.test:buildD:1.0", ":buildD", "org.test:buildD:1.0") {
+                        configuration = "runtimeElements"
                         compositeSubstitute()
-                        edge("org.test:buildB:1.0", "project :buildB:", "org.test:buildB:1.0") {
+                        edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                            configuration = "runtimeElements"
                             compositeSubstitute()
                         }
                     }
@@ -129,56 +160,48 @@ class CompositeBuildDependencyCycleIntegrationTest extends AbstractCompositeBuil
         }
 
         when:
-        resolveFails(":resolveArtifacts")
+        resolveFails(":checkRuntimeClasspath")
 
         then:
-        failure
-            .assertHasDescription("Failed to build artifacts for build 'buildB'")
-            .assertHasCause("Failed to build artifacts for build 'buildC'")
-            .assertHasCause("Failed to build artifacts for build 'buildD'")
-            .assertHasCause("Could not download buildB.jar (project :buildB:)")
-            .assertHasCause("Included build dependency cycle: build 'buildB' -> build 'buildC' -> build 'buildD' -> build 'buildB'")
+        failure.assertHasDescription("""Circular dependency between the following tasks:
+:buildB:compileJava
+\\--- :buildC:compileJava
+     \\--- :buildD:compileJava
+          \\--- :buildB:compileJava (*)""")
     }
 
     // Not actually a cycle, just documenting behaviour
     def "dependency cycle between different projects of included builds"() {
         given:
         dependency "org.test:b1:1.0"
-        buildB.buildFile << """
-project(':b1') {
-    dependencies { 
-        compile "org.test:buildC:1.0"
-    }
-}
-"""
+        buildB.project("b1").buildFile << """
+            dependencies {
+                implementation "org.test:buildC:1.0"
+            }
+        """
         dependency buildC, "org.test:b2:1.0"
 
         when:
-        resolve.withoutBuildingArtifacts()
-        resolveSucceeds(":checkDeps")
+        resolveSucceeds(":checkGraph")
 
         then:
         checkGraph {
-            edge("org.test:b1:1.0", "project :buildB:b1", "org.test:b1:1.0") {
+            edge("org.test:b1:1.0", ":buildB:b1", "org.test:b1:1.0") {
+                configuration = "runtimeElements"
                 compositeSubstitute()
-                edge("org.test:buildC:1.0", "project :buildC:", "org.test:buildC:1.0") {
+                edge("org.test:buildC:1.0", ":buildC", "org.test:buildC:1.0") {
+                    configuration = "runtimeElements"
                     compositeSubstitute()
-                    edge("org.test:b2:1.0", "project :buildB:b2", "org.test:b2:1.0") {
+                    edge("org.test:b2:1.0", ":buildB:b2", "org.test:b2:1.0") {
+                        configuration = "runtimeElements"
                         compositeSubstitute()
                     }
                 }
             }
         }
 
-        when:
-        resolveFails(":resolveArtifacts")
-
-        then:
-        failure
-            .assertHasDescription("Failed to build artifacts for build 'buildB'")
-            .assertHasCause("Failed to build artifacts for build 'buildC'")
-            .assertHasCause("Could not download b2.jar (project :buildB:b2)")
-            .assertHasCause("Included build dependency cycle: build 'buildB' -> build 'buildC' -> build 'buildB'")
+        and:
+        resolveSucceeds(":checkRuntimeClasspath")
     }
 
     def "compile-only dependency cycle between included builds"() {
@@ -186,35 +209,34 @@ project(':b1') {
         dependency "org.test:buildB:1.0"
         dependency buildB, "org.test:buildC:1.0"
         buildC.buildFile << """
-            apply plugin: 'java'
             dependencies {
                 compileOnly "org.test:buildB:1.0"
             }
-"""
+        """
 
         when:
-        resolve.withoutBuildingArtifacts()
-        resolveSucceeds(":checkDeps")
+        resolveSucceeds(":checkGraph")
 
         then: // No cycle when building dependency graph
         checkGraph {
-            edge("org.test:buildB:1.0", "project :buildB:", "org.test:buildB:1.0") {
+            edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                configuration = "runtimeElements"
                 compositeSubstitute()
-                edge("org.test:buildC:1.0", "project :buildC:", "org.test:buildC:1.0") {
+                edge("org.test:buildC:1.0", ":buildC", "org.test:buildC:1.0") {
+                    configuration = "runtimeElements"
                     compositeSubstitute()
                 }
             }
         }
 
         when:
-        resolveFails(":resolveArtifacts")
+        resolveFails(":checkRuntimeClasspath")
 
         then:
-        failure
-            .assertHasDescription("Failed to build artifacts for build 'buildB'")
-            .assertHasCause("Failed to build artifacts for build 'buildC'")
-            .assertHasCause("Could not download buildB.jar (project :buildB:)")
-            .assertHasCause("Included build dependency cycle: build 'buildB' -> build 'buildC' -> build 'buildB'")
+        failure.assertHasDescription("""Circular dependency between the following tasks:
+:buildB:compileJava
+\\--- :buildC:compileJava
+     \\--- :buildB:compileJava (*)""")
     }
 
     def "dependency cycle between subprojects in an included multiproject build"() {
@@ -223,60 +245,216 @@ project(':b1') {
 
         buildB.buildFile << """
             dependencies {
-                compile "org.test:b1:1.0"
+                implementation "org.test:b1:1.0"
             }
-            project(':b1') {
-                dependencies {
-                    compile "org.test:b2:1.0"
-                }
+        """
+        buildB.project("b1").buildFile << """
+            dependencies {
+                implementation "org.test:b2:1.0"
             }
-            project(':b2') {
-                dependencies {
-                    compile "org.test:b1:1.0"
-                }
+        """
+
+        buildB.project("b2").buildFile << """
+            dependencies {
+                implementation "org.test:b1:1.0"
             }
-"""
+        """
 
         when:
-        resolve.withoutBuildingArtifacts()
-        resolveSucceeds(":checkDeps")
+        resolveSucceeds(":checkGraph")
 
         then:
         checkGraph {
-            edge("org.test:buildB:1.0", "project :buildB:", "org.test:buildB:1.0") {
+            edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                configuration = "runtimeElements"
                 compositeSubstitute()
-                edge("org.test:b1:1.0", "project :buildB:b1", "org.test:b1:1.0") {
+                edge("org.test:b1:1.0", ":buildB:b1", "org.test:b1:1.0") {
+                    configuration = "runtimeElements"
                     compositeSubstitute()
-                    edge("org.test:b2:1.0", "project :buildB:b2", "org.test:b2:1.0") {
+                    edge("org.test:b2:1.0", ":buildB:b2", "org.test:b2:1.0") {
+                        configuration = "runtimeElements"
                         compositeSubstitute()
-                        edge("org.test:b1:1.0", "project :buildB:b1", "org.test:b1:1.0") {}
+                        edge("org.test:b1:1.0", ":buildB:b1", "org.test:b1:1.0") {}
                     }
                 }
             }
         }
 
         when:
-        resolveFails(":resolveArtifacts")
+        resolveFails(":checkRuntimeClasspath")
 
         then:
-        failure
-            .assertHasDescription("Failed to build artifacts for build 'buildB'")
-            .assertHasCause("Circular dependency between the following tasks:")
+        failure.assertHasDescription("""Circular dependency between the following tasks:
+:buildB:b1:compileJava
+\\--- :buildB:b2:compileJava
+     \\--- :buildB:b1:compileJava (*)""")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/6229")
+    def "cross-build dependencies without task cycle"() {
+        given:
+        def buildD = multiProjectBuild("buildD", ['buildD-api', 'buildD-impl']) {
+            [delegate, project("buildD-api"), project("buildD-impl")].each { p ->
+                p.buildFile << common
+            }
+            project("buildD-impl").buildFile << """
+                dependencies {
+                    api(project(":buildD-api"))
+                    implementation("org.test:buildE-api:1.0")
+                }
+            """
+        }
+        includedBuilds << buildD
+
+        def buildE = multiProjectBuild("buildE", ['buildE-api', 'buildE-impl']) {
+            [delegate, project("buildE-api"), project("buildE-impl")].each { p ->
+                p.buildFile << common
+            }
+            project("buildE-impl").buildFile << """
+                dependencies {
+                    api(project(":buildE-api"))
+                    implementation("org.test:buildD-api:1.0")
+                }
+            """
+        }
+        includedBuilds << buildE
+
+        when:
+        dependency(buildA, "org.test:buildD-impl:1.0")
+        dependency(buildA, "org.test:buildE-impl:1.0")
+
+        then:
+        resolveSucceeds(":build")
+
+        assertTaskExecuted(":buildD", ":buildD-api:jar")
+        assertTaskExecuted(":buildE", ":buildE-api:jar")
+        assertTaskExecuted(":buildD", ":buildD-impl:jar")
+        assertTaskExecuted(":buildE", ":buildE-impl:jar")
+        assertTaskExecuted(":", ":jar")
+    }
+
+    def "cross-build resolve jars without task cycle"() {
+        given:
+        buildA.buildFile << """
+            task resolveJars {
+                dependsOn gradle.includedBuild('buildB').task(':b1:resolveJars')
+            }
+        """
+        buildB.project("b1").buildFile << """
+            dependencies {
+                implementation "org.test:buildC:1.0"
+            }
+            task resolveJars(type: Copy) {
+                from configurations.runtimeClasspath
+                into "\$buildDir/jars"
+            }
+        """
+        dependency buildC, "org.test:b2:1.0"
+
+        when:
+        resolveSucceeds(':resolveJars')
+
+        then:
+        assertTaskExecuted(':buildB', ":b2:jar")
+        assertTaskExecuted(':buildC', ":jar")
+        assertTaskExecuted(':buildB', ":b1:resolveJars")
+        assertTaskExecuted(':', ":resolveJars")
+    }
+
+    def "direct dependsOn cycle between builds including one another"() {
+        given:
+        buildA.buildFile << """
+            task a {
+                dependsOn gradle.includedBuild('buildB').task(':b')
+            }
+        """
+        buildB.buildFile << """
+            task b {
+                dependsOn gradle.includedBuild('buildC').task(':c')
+            }
+        """
+        buildB.settingsFile << """
+            includeBuild('../buildC')
+        """
+        buildC.buildFile << """
+            task c {
+                dependsOn gradle.includedBuild('buildB').task(':b')
+            }
+        """
+        buildC.settingsFile << """
+            includeBuild('../buildB')
+        """
+
+        when:
+        resolveFails(":a")
+
+        then:
+        failure.assertHasDescription("""Circular dependency between the following tasks:
+:buildB:b
+\\--- :buildC:c
+     \\--- :buildB:b (*)""")
+    }
+
+    def "declaring a dependency on the resolving project's module coordinates without a substitution is deprecated"() {
+        given:
+        dependency(buildA, "org.test:buildB:1.0")
+        dependency(buildB, "org.test:buildA:1.0")
+
+        buildA.buildFile << """
+            ${mavenTestRepository()}
+        """
+
+        when:
+        executer.expectDocumentedDeprecationWarning("Depending on the resolving project's module coordinates has been deprecated. This will fail with an error in Gradle 10. Use a project dependency instead. Consult the upgrading guide for further information: https://docs.gradle.org/current/userguide/upgrading_version_9.html#module_identity_for_root_component")
+        resolveSucceeds(":checkGraph")
+
+        then:
+        checkGraph {
+            edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                compositeSubstitute()
+                edge("org.test:buildA:1.0", ":buildA", "org.test:buildA:1.0")
+            }
+        }
+    }
+
+    def "declaring a dependency on the resolving project's module coordinates with a substitution succeeds"() {
+        given:
+        dependency(buildA, "org.test:buildB:1.0")
+        dependency(buildB, "org.test:buildA:1.0")
+
+        buildA.buildFile << """
+            ${mavenTestRepository()}
+
+            configurations.configureEach {
+                resolutionStrategy.dependencySubstitution {
+                    substitute(module('org.test:buildA:1.0')).using(project(':'))
+                }
+            }
+        """
+
+        when:
+        resolveSucceeds(":checkGraph")
+
+        then:
+        checkGraph {
+            edge("org.test:buildB:1.0", ":buildB", "org.test:buildB:1.0") {
+                compositeSubstitute()
+                edge("org.test:buildA:1.0", ":buildA", "org.test:buildA:1.0")
+            }
+        }
     }
 
     protected void resolveSucceeds(String task) {
-        resolve.prepare()
-        super.execute(buildA, task, arguments)
+        execute(buildA, task)
     }
 
     protected void resolveFails(String task) {
-        resolve.prepare()
-        super.fails(buildA, task, arguments)
+        fails(buildA, task)
     }
 
 
     void checkGraph(@DelegatesTo(ResolveTestFixture.NodeBuilder) Closure closure) {
-        resolve.expectGraph {
+        resolve.expectGraph(":") {
             root(":", "org.test:buildA:1.0", closure)
         }
     }

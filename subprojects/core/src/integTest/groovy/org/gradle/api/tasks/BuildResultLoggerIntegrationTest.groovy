@@ -16,25 +16,29 @@
 
 package org.gradle.api.tasks
 
+import org.gradle.api.Plugin
+import org.gradle.api.Project
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.DirectoryBuildCacheFixture
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
 
-class BuildResultLoggerIntegrationTest extends AbstractIntegrationSpec {
+class BuildResultLoggerIntegrationTest extends AbstractIntegrationSpec implements DirectoryBuildCacheFixture, ValidationMessageChecker {
     def setup() {
-        // Force a forking executer
-        // This is necessary since for the embedded executer
-        // the Task statistics are not part of the output
-        // returned by "this.output"
-        executer.requireGradleDistribution()
 
         file("input.txt") << "data"
-        buildFile << """
+        buildFile """
             task adHocTask {
-                def outputFile = file("\$buildDir/output.txt")
-                inputs.file(file("input.txt"))
+                outputs.cacheIf { true }
+                def inputFile = file("input.txt")
+                def outputFile = layout.buildDirectory.file("output.txt")
+                inputs.file(inputFile)
                 outputs.file(outputFile)
                 doLast {
-                    project.mkdir outputFile.parentFile
-                    outputFile.text = file("input.txt").text
+                    outputFile.get().asFile.parentFile.mkdirs()
+                    outputFile.get().asFile.text = inputFile.text
                 }
             }
 
@@ -53,13 +57,34 @@ class BuildResultLoggerIntegrationTest extends AbstractIntegrationSpec {
         run "adHocTask", "executedTask"
 
         then:
-        output.contains "2 actionable tasks: 2 executed, 0 avoided (0%)"
+        result.assertTasksExecuted(":adHocTask", ":executedTask")
+        result.assertHasPostBuildOutput "2 actionable tasks: 2 executed"
 
         when:
         run "adHocTask", "executedTask"
 
         then:
-        output.contains "2 actionable tasks: 1 executed, 1 avoided (50%)"
+        result.assertTaskSkipped(":adHocTask")
+        result.assertTasksExecuted(":executedTask")
+        result.assertHasPostBuildOutput "2 actionable tasks: 1 executed, 1 up-to-date"
+    }
+
+    def "cached task outcome statistics are reported"() {
+        when:
+        withBuildCache().run "adHocTask", "executedTask"
+
+        then:
+        result.assertTasksExecuted(":adHocTask", ":executedTask")
+        result.assertHasPostBuildOutput "2 actionable tasks: 2 executed"
+
+        when:
+        file("build").deleteDir()
+        withBuildCache().run "adHocTask", "executedTask"
+
+        then:
+        result.assertTasksSkipped(":adHocTask")
+        result.assertTasksExecuted(":executedTask")
+        result.assertHasPostBuildOutput "2 actionable tasks: 1 executed, 1 from cache"
     }
 
     def "tasks with no actions are not counted in stats"() {
@@ -67,9 +92,11 @@ class BuildResultLoggerIntegrationTest extends AbstractIntegrationSpec {
         run "noActions"
 
         then:
-        output.contains "1 actionable task: 1 executed, 0 avoided (0%)"
+        result.assertTasksExecuted(":noActions", ":executedTask")
+        result.assertHasPostBuildOutput "1 actionable task: 1 executed"
     }
 
+    @ToBeFixedForConfigurationCache(because = "CC doesn't save/load excluded tasks, causing noActions task to appear skipped")
     def "skipped tasks are not counted"() {
         given:
         executer.withArguments "-x", "executedTask"
@@ -79,6 +106,130 @@ class BuildResultLoggerIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         // No stats are reported because no tasks had any actions
-        !output.contains("actionable tasks")
+        result.assertTasksExecuted(":noActions")
+        result.assertNotOutput("actionable tasks")
+    }
+
+    @ToBeFixedForConfigurationCache(because = "buildSrc tasks are not executed when loaded from cache")
+    def "reports tasks from buildSrc"() {
+        file("buildSrc/src/main/java/Thing.java") << """
+            public class Thing {
+            }
+        """
+
+        when:
+        run "adHocTask"
+
+        then:
+        result.assertTasksExecuted(":buildSrc:compileJava", ":buildSrc:jar", ":buildSrc:classes", ":adHocTask")
+        result.assertHasPostBuildOutput("3 actionable tasks: 3 executed")
+
+        when:
+        run "adHocTask"
+
+        then:
+        result.assertHasPostBuildOutput("3 actionable tasks: 3 up-to-date")
+    }
+
+    def "reports tasks from included builds"() {
+        settingsFile << """
+            includeBuild "child"
+        """
+        file("child/build.gradle") << """
+            task executedTask {
+                doLast {
+                    // Do something
+                }
+            }
+        """
+        buildFile << """
+            executedTask.dependsOn(gradle.includedBuild("child").task(":executedTask"))
+        """
+
+        when:
+        run("executedTask")
+
+        then:
+        result.assertTasksExecuted(":child:executedTask", ":executedTask")
+        result.assertHasPostBuildOutput "2 actionable tasks: 2 executed"
+    }
+
+    @ToBeFixedForConfigurationCache(because = "build logic tasks are not executed when loaded from cache")
+    def "reports tasks from included builds that provide project plugins"() {
+        settingsFile << """
+            includeBuild("plugins")
+        """
+        file("plugins/src/main/java/PluginImpl.java") << """
+            import ${Project.name};
+            import ${Plugin.name};
+
+            public class PluginImpl implements Plugin<Project> {
+                public void apply(Project project) {
+                    project.getTasks().register("executedTask", t -> {
+                        t.doLast(t2 -> {
+                            // Do something
+                        });
+                    });
+                }
+            }
+        """
+        file("plugins/build.gradle") << """
+            plugins {
+                id("java-gradle-plugin")
+            }
+            gradlePlugin {
+                plugins {
+                    plugin {
+                        id = "test.plugin"
+                        implementationClass = "PluginImpl"
+                    }
+                }
+            }
+        """
+        buildFile.text = """
+            plugins {
+                id("test.plugin")
+            }
+        """
+
+        when:
+        run("executedTask")
+
+        then:
+        result.assertTasksExecuted(":plugins:compileJava", ":plugins:pluginDescriptors", ":plugins:processResources", ":plugins:classes", ":plugins:jar", ":executedTask")
+        result.assertHasPostBuildOutput "5 actionable tasks: 5 executed"
+
+        when:
+        run("executedTask")
+
+        then:
+        result.assertHasPostBuildOutput "5 actionable tasks: 1 executed, 4 up-to-date"
+    }
+
+    @Requires(IntegTestPreconditions.IsEmbeddedExecutor)
+    // this test only works in embedded mode because of the use of validation test fixtures
+    def "work validation warnings are mentioned in summary"() {
+        buildFile << """
+            import org.gradle.integtests.fixtures.validation.ValidationProblem
+
+            class InvalidTask extends DefaultTask {
+                @ValidationProblem String dummy
+
+                @TaskAction void execute() {
+                    // Do nothing
+                }
+            }
+
+            tasks.register("invalid", InvalidTask)
+        """
+
+        expectThatExecutionOptimizationDisabledWarningIsDisplayed(executer, dummyValidationProblem(), 'id', 'section')
+
+        when:
+        run "invalid"
+
+        then:
+        outputContains "Execution optimizations have been disabled for 1 invalid unit(s) of work during this build to ensure correctness."
+        outputContains "Please consult deprecation warnings for more details."
     }
 }

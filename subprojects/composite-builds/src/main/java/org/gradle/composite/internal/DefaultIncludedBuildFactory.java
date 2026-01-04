@@ -16,40 +16,29 @@
 
 package org.gradle.composite.internal;
 
-import com.google.common.collect.Sets;
-import org.gradle.StartParameter;
 import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.initialization.ConfigurableIncludedBuild;
-import org.gradle.api.initialization.IncludedBuild;
-import org.gradle.api.initialization.Settings;
-import org.gradle.api.internal.SettingsInternal;
-import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
-import org.gradle.initialization.GradleLauncher;
-import org.gradle.initialization.IncludedBuildFactory;
-import org.gradle.initialization.NestedBuildFactory;
-import org.gradle.internal.Factory;
-import org.gradle.internal.concurrent.CompositeStoppable;
-import org.gradle.internal.concurrent.Stoppable;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.api.internal.BuildDefinition;
+import org.gradle.internal.build.BuildState;
+import org.gradle.internal.build.IncludedBuildFactory;
+import org.gradle.internal.build.IncludedBuildState;
+import org.gradle.internal.buildtree.BuildTreeState;
+import org.gradle.util.Path;
 
+import javax.inject.Inject;
 import java.io.File;
-import java.util.Set;
 
-public class DefaultIncludedBuildFactory implements IncludedBuildFactory, Stoppable {
-    private final Instantiator instantiator;
-    private final StartParameter startParameter;
-    private final NestedBuildFactory nestedBuildFactory;
-    private final Set<GradleLauncher> launchers = Sets.newHashSet();
-    private final ImmutableModuleIdentifierFactory moduleIdentifierFactory;
+public class DefaultIncludedBuildFactory implements IncludedBuildFactory {
 
-    public DefaultIncludedBuildFactory(Instantiator instantiator, StartParameter startParameter, NestedBuildFactory nestedBuildFactory, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
-        this.instantiator = instantiator;
-        this.startParameter = startParameter;
-        this.nestedBuildFactory = nestedBuildFactory;
-        this.moduleIdentifierFactory = moduleIdentifierFactory;
+    private final BuildTreeState buildTree;
+
+    @Inject
+    public DefaultIncludedBuildFactory(
+        BuildTreeState buildTree
+    ) {
+        this.buildTree = buildTree;
     }
 
-    private void validateBuildDirectory(File dir) {
+    private static void validateBuildDirectory(File dir) {
         if (!dir.exists()) {
             throw new InvalidUserDataException(String.format("Included build '%s' does not exist.", dir));
         }
@@ -58,58 +47,16 @@ public class DefaultIncludedBuildFactory implements IncludedBuildFactory, Stoppa
         }
     }
 
-    private void validateIncludedBuild(IncludedBuild includedBuild, SettingsInternal settings) {
-        if (!new File(settings.getSettingsDir(), Settings.DEFAULT_SETTINGS_FILE).exists()) {
-            throw new InvalidUserDataException(String.format("Included build '%s' must have a '%s' file.", includedBuild.getName(), Settings.DEFAULT_SETTINGS_FILE));
-        }
-        if (!settings.getIncludedBuilds().isEmpty()) {
-            throw new InvalidUserDataException(String.format("Included build '%s' cannot have included builds.", includedBuild.getName()));
-        }
-    }
-
     @Override
-    public ConfigurableIncludedBuild createBuild(File buildDirectory) {
-        validateBuildDirectory(buildDirectory);
-        Factory<GradleLauncher> factory = new ContextualGradleLauncherFactory(buildDirectory, nestedBuildFactory, startParameter);
-        DefaultIncludedBuild includedBuild = instantiator.newInstance(DefaultIncludedBuild.class, buildDirectory, factory, moduleIdentifierFactory);
-
-        SettingsInternal settingsInternal = includedBuild.getLoadedSettings();
-        validateIncludedBuild(includedBuild, settingsInternal);
-        return includedBuild;
+    public IncludedBuildState createBuild(Path identityPath, BuildDefinition buildDefinition, boolean isImplicit, BuildState owner) {
+        validateBuildDirectory(buildDefinition.getBuildRootDir());
+        return new DefaultIncludedBuild(
+            identityPath,
+            buildDefinition,
+            isImplicit,
+            owner,
+            buildTree
+        );
     }
 
-    @Override
-    public void stop() {
-        CompositeStoppable.stoppable(launchers).stop();
-    }
-
-    private class ContextualGradleLauncherFactory implements Factory<GradleLauncher> {
-        private final File buildDirectory;
-        private final NestedBuildFactory nestedBuildFactory;
-        private final StartParameter buildStartParam;
-
-        public ContextualGradleLauncherFactory(File buildDirectory, NestedBuildFactory nestedBuildFactory, StartParameter buildStartParam) {
-            this.buildDirectory = buildDirectory;
-            this.nestedBuildFactory = nestedBuildFactory;
-            this.buildStartParam = buildStartParam;
-        }
-
-        @Override
-        public GradleLauncher create() {
-            StartParameter participantStartParam = createStartParameter(buildDirectory);
-
-            GradleLauncher gradleLauncher = nestedBuildFactory.nestedInstance(participantStartParam);
-            launchers.add(gradleLauncher);
-            return gradleLauncher;
-        }
-
-        private StartParameter createStartParameter(File buildDirectory) {
-            StartParameter includedBuildStartParam = buildStartParam.newBuild();
-            includedBuildStartParam.setProjectDir(buildDirectory);
-            includedBuildStartParam.setSearchUpwards(false);
-            includedBuildStartParam.setConfigureOnDemand(false);
-            includedBuildStartParam.setInitScripts(buildStartParam.getInitScripts());
-            return includedBuildStartParam;
-        }
-    }
 }

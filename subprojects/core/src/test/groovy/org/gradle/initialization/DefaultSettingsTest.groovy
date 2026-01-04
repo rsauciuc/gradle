@@ -16,210 +16,187 @@
 
 package org.gradle.initialization
 
-import org.gradle.StartParameter
+import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Project
 import org.gradle.api.UnknownProjectException
-import org.gradle.api.initialization.ProjectDescriptor
 import org.gradle.api.initialization.Settings
-import org.gradle.api.internal.AsmBackedClassGenerator
-import org.gradle.api.internal.GradleInternal
-import org.gradle.api.internal.file.FileResolver
-import org.gradle.api.internal.initialization.ClassLoaderScope
-import org.gradle.api.internal.initialization.ScriptHandlerFactory
-import org.gradle.api.internal.plugins.DefaultPluginManager
-import org.gradle.configuration.ScriptPluginFactory
-import org.gradle.groovy.scripts.ScriptSource
-import org.gradle.internal.service.ServiceRegistry
-import org.gradle.internal.service.scopes.ServiceRegistryFactory
-import org.gradle.util.JUnit4GroovyMockery
-import org.jmock.integration.junit4.JMock
-import org.jmock.lib.legacy.ClassImposteriser
-import org.junit.Before
-import org.junit.Test
-import org.junit.runner.RunWith
+import org.gradle.api.internal.FeaturePreviewsActivationFixture
 
-import java.lang.reflect.Type
+class DefaultSettingsTest extends DefaultSettingsCommonTest {
 
-import static org.junit.Assert.*
-
-@RunWith(JMock)
-class DefaultSettingsTest {
-    File settingsDir
-    StartParameter startParameter
-    ClassLoaderScope rootClassLoaderScope
-    ClassLoaderScope classLoaderScope
-    Map gradleProperties
-    ScriptSource scriptSourceMock
-    GradleInternal gradleMock
-    DefaultSettings settings
-    JUnit4GroovyMockery context = new JUnit4GroovyMockery()
-    ProjectDescriptorRegistry projectDescriptorRegistry
-    ServiceRegistryFactory serviceRegistryFactory
-    FileResolver fileResolver
-    ScriptPluginFactory scriptPluginFactory
-    ScriptHandlerFactory scriptHandlerFactory
-    DefaultPluginManager pluginManager
-
-    @Before
-    public void setUp() {
-        context.setImposteriser(ClassImposteriser.INSTANCE)
-        settingsDir = new File('/somepath/root').absoluteFile
-        gradleProperties = [someGradleProp: 'someValue']
-        startParameter = new StartParameter(currentDir: new File(settingsDir, 'current'), gradleUserHomeDir: new File('gradleUserHomeDir'))
-        rootClassLoaderScope = context.mock(ClassLoaderScope)
-        classLoaderScope = context.mock(ClassLoaderScope)
-        pluginManager = context.mock(DefaultPluginManager)
-
-        scriptSourceMock = context.mock(ScriptSource)
-        gradleMock = context.mock(GradleInternal)
-        serviceRegistryFactory = context.mock(ServiceRegistryFactory.class)
-        scriptPluginFactory = context.mock(ScriptPluginFactory.class)
-        scriptHandlerFactory = context.mock(ScriptHandlerFactory.class)
-        fileResolver = context.mock(FileResolver.class)
-        projectDescriptorRegistry = new DefaultProjectDescriptorRegistry()
-
-        def settingsServices = context.mock(ServiceRegistry.class)
-        context.checking {
-            one(serviceRegistryFactory).createFor(with(any(Settings.class)));
-            will(returnValue(settingsServices));
-            allowing(settingsServices).get((Type)FileResolver.class);
-            will(returnValue(fileResolver));
-            allowing(settingsServices).get((Type)ScriptPluginFactory.class);
-            will(returnValue(scriptPluginFactory));
-            allowing(settingsServices).get((Type)ScriptHandlerFactory.class);
-            will(returnValue(scriptHandlerFactory));
-            allowing(settingsServices).get((Type)ProjectDescriptorRegistry.class);
-            will(returnValue(projectDescriptorRegistry));
-            allowing(settingsServices).get((Type)DefaultPluginManager.class);
-            will(returnValue(pluginManager));
-        }
-
-        AsmBackedClassGenerator classGenerator = new AsmBackedClassGenerator()
-        settings = classGenerator.newInstance(DefaultSettings, serviceRegistryFactory,
-                gradleMock, classLoaderScope, rootClassLoaderScope, settingsDir, scriptSourceMock, startParameter);
+    def setup() {
+        createSettings()
     }
 
-    @Test
-    public void testSettings() {
-        assert settings.startParameter.is(startParameter)
-        assertSame(settings, settings.getSettings())
-        assertEquals(settingsDir, settings.getSettingsDir())
+    def 'is wired properly'() {
+        expect:
+        settings.startParameter == startParameter
+        settings.is(settings.settings)
 
-        assertNull(settings.getRootProject().getParent())
-        assertEquals(settingsDir, settings.getRootProject().getProjectDir())
-        assertEquals(settings.getRootProject().getProjectDir().getName(), settings.getRootProject().getName())
-        assertEquals(settings.rootProject.buildFileName, Project.DEFAULT_BUILD_FILE);
-        assertSame(gradleMock, settings.gradle)
+        settings.settingsDir == settingsDir
+        settings.rootProject.projectDir == settingsDir
+        settings.rootDir == settingsDir
+
+        settings.rootProject.parent == null
+        settings.rootProject.projectDir.name == settings.rootProject.name
+        settings.rootProject.buildFileName == Project.DEFAULT_BUILD_FILE
+        settings.gradle.is(gradleMock)
+        settings.buildscript.is(settingsScriptHandler)
+        settings.classLoaderScope.is(classLoaderScope)
     }
 
-    @Test
-    public void testInclude() {
-        ProjectDescriptor rootProjectDescriptor = settings.getRootProject();
+    def 'can include projects'() {
         String projectA = "a"
         String projectB = "b"
         String projectC = "c"
-        String projectD = "d"
+
+        when:
         settings.include([projectA, "$projectB:$projectC"] as String[])
 
-        assertEquals(2, rootProjectDescriptor.getChildren().size())
+        then:
+        settings.rootProject.children.size() == 2
         testDescriptor(settings.project(":$projectA"), projectA, new File(settingsDir, projectA))
         testDescriptor(settings.project(":$projectB"), projectB, new File(settingsDir, projectB))
 
-        assertEquals(1, settings.project(":$projectB").getChildren().size())
+        settings.project(":$projectB").getChildren().size() == 1
         testDescriptor(settings.project(":$projectB:$projectC"), projectC, new File(settingsDir, "$projectB/$projectC"))
     }
 
-    @Test
-    public void testIncludeFlat() {
-        ProjectDescriptor rootProjectDescriptor = settings.getRootProject();
+    def 'can include projects flat'() {
         String projectA = "a"
         String projectB = "b"
-        String[] paths = [projectA, projectB]
-        settings.includeFlat(paths)
-        assertEquals(2, rootProjectDescriptor.getChildren().size())
+
+        when:
+        includeFlat(settings, projectA, projectB)
+
+        then:
+        settings.rootProject.children.size() == 2
         testDescriptor(settings.project(":" + projectA), projectA, new File(settingsDir.parentFile, projectA))
         testDescriptor(settings.project(":" + projectB), projectB, new File(settingsDir.parentFile, projectB))
+
+        where:
+        includeFlat << [{ Settings settings, String p1, String p2 -> settings.includeFlat([p1, p2] as String[]) }, { Settings settings, String p1, String p2 -> settings.includeFlat([p1, p2]) }]
     }
 
-    private void testDescriptor(DefaultProjectDescriptor descriptor, String name, File projectDir) {
-        assertEquals(name, descriptor.getName(), descriptor.getName())
-        assertEquals(projectDir, descriptor.getProjectDir())
+    void testDescriptor(ProjectDescriptorInternal descriptor, String name, File projectDir) {
+        assert name == descriptor.getName()
+        assert projectDir == descriptor.getProjectDir()
     }
 
-    @Test
-    public void testCreateProjectDescriptor() {
+    def 'can create project descriptor'() {
         String testName = "testname"
         File testDir = new File("testDir")
-        DefaultProjectDescriptor projectDescriptor = settings.createProjectDescriptor(settings.getRootProject(), testName, testDir)
-        assertSame(settings.getRootProject(), projectDescriptor.getParent())
-        assertSame(settings.getProjectDescriptorRegistry(), projectDescriptor.getProjectDescriptorRegistry())
-        assertEquals(testName, projectDescriptor.getName())
-        assertEquals(testDir.canonicalFile, projectDescriptor.getProjectDir())
+
+        when:
+        ProjectDescriptorInternal projectDescriptor = settings.createProjectDescriptor(settings.getRootProject(), testName, testDir)
+
+        then:
+        settings.rootProject.is(projectDescriptor.parent)
+        settings.projectDescriptorRegistry.is(projectDescriptor.projectDescriptorRegistry)
+        testName == projectDescriptor.name
+        testDir.canonicalFile == projectDescriptor.projectDir
     }
 
-    @Test
-    public void testFindDescriptorByPath() {
-        DefaultProjectDescriptor projectDescriptor = createTestDescriptor();
-        DefaultProjectDescriptor foundProjectDescriptor = settings.project(projectDescriptor.getPath())
-        assertSame(foundProjectDescriptor, projectDescriptor)
+    def 'can find project by path'() {
+        ProjectDescriptorInternal projectDescriptor = createTestDescriptor()
+
+        when:
+        ProjectDescriptorInternal foundProjectDescriptor = settings.project(projectDescriptor.path)
+
+        then:
+        foundProjectDescriptor.is(projectDescriptor)
     }
 
-    @Test
-    public void testFindDescriptorByProjectDir() {
-        DefaultProjectDescriptor projectDescriptor = createTestDescriptor()
-        DefaultProjectDescriptor foundProjectDescriptor = settings.project(projectDescriptor.getProjectDir())
-        assertSame(foundProjectDescriptor, projectDescriptor)
+    def 'can find project by directory'() {
+        ProjectDescriptorInternal projectDescriptor = createTestDescriptor()
+
+        when:
+        ProjectDescriptorInternal foundProjectDescriptor = settings.project(projectDescriptor.projectDir)
+
+        then:
+        foundProjectDescriptor.is(projectDescriptor)
     }
 
-    @Test(expected = UnknownProjectException)
-    public void testDescriptorByPath() {
-        DefaultProjectDescriptor projectDescriptor = createTestDescriptor()
-        DefaultProjectDescriptor foundProjectDescriptor = settings.project(projectDescriptor.getPath())
-        assertSame(foundProjectDescriptor, projectDescriptor)
+    def 'fails on unknown project path'() {
+        when:
         settings.project("unknownPath")
+
+        then:
+        thrown(UnknownProjectException)
     }
 
 
-    @Test(expected = UnknownProjectException)
-    public void testDescriptorByProjectDir() {
-        DefaultProjectDescriptor projectDescriptor = createTestDescriptor()
-        DefaultProjectDescriptor foundProjectDescriptor = settings.project(projectDescriptor.getProjectDir())
-        assertSame(foundProjectDescriptor, projectDescriptor)
+    def 'fails on unknown project directory'() {
+        when:
         settings.project(new File("unknownPath"))
+
+        then:
+        thrown(UnknownProjectException)
     }
 
-    private DefaultProjectDescriptor createTestDescriptor() {
+    private ProjectDescriptorInternal createTestDescriptor() {
         String testName = "testname"
         File testDir = new File("testDir")
-        return settings.createProjectDescriptor(settings.getRootProject(), testName, testDir)
+        return settings.createProjectDescriptor(settings.rootProject, testName, testDir)
     }
 
-    @Test
-    public void testCreateClassLoader() {
-        StartParameter expectedStartParameter = settings.startParameter.newInstance()
-        expectedStartParameter.setCurrentDir(new File(settingsDir, DefaultSettings.DEFAULT_BUILD_SRC_DIR))
-        def createdClassLoaderScope = settings.getClassLoaderScope()
-        assertSame(createdClassLoaderScope, classLoaderScope)
-    }
-
-    @Test
-    public void testCanGetAndSetDynamicProperties() {
+    def 'can get and set dynamic properties'() {
+        when:
         settings.ext.dynamicProp = 'value'
-        assertEquals('value', settings.dynamicProp)
+
+        then:
+        settings.dynamicProp == 'value'
     }
 
-    @Test(expected = MissingPropertyException)
-    public void testPropertyMissing() {
+    def 'can get and set dynamic properties on extension'() {
+        when:
+        settings.extensions.dynamicProperty = 'valued'
+
+        then:
+        settings.dynamicProperty == 'valued'
+    }
+
+    def 'fails on missing property'() {
+        when:
         settings.unknownProp
+
+        then:
+        thrown(MissingPropertyException)
     }
 
-    @Test
-    public void testGetRootDir() {
-        assertEquals(settingsDir, settings.rootDir);
+    def 'has useful toString'() {
+        expect:
+        settings.toString() == 'settings \'root\''
     }
 
-    @Test
-    public void testHasUsefulToString() {
-        assertEquals('settings \'root\'', settings.toString())
+    def "can enable feature preview for #feature"() {
+        when:
+        settings.enableFeaturePreview(feature.name())
+        then:
+        1 * previews.enable(feature)
+        where:
+        feature << FeaturePreviewsActivationFixture.activeFeatures()
     }
+
+    def 'fails when enabling an unknown feature'() {
+        when:
+        settings.enableFeaturePreview('UNKNOWN_FEATURE')
+        then:
+        IllegalArgumentException exception = thrown()
+        exception.getMessage() == 'There is no feature named UNKNOWN_FEATURE'
+    }
+
+    def cannotLocateProjectsWithAmbiguousProjectDir() {
+        settings.include(":foo")
+        settings.include(":bar")
+        settings.project(":bar").projectDir = settings.project(":foo").projectDir
+
+        when:
+        settings.project(settings.project(":foo").projectDir)
+
+        then:
+        def e = thrown(InvalidUserDataException)
+        e.message.startsWith("Found multiple projects with project directory ")
+    }
+
 }

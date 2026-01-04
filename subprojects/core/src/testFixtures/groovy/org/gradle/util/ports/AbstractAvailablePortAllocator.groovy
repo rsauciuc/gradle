@@ -45,7 +45,7 @@ abstract class AbstractAvailablePortAllocator implements PortAllocator {
 
     @Override
     public void releasePort(int port) {
-        if (port == null) {
+        if (port == null || port < MIN_PRIVATE_PORT || port > MAX_PRIVATE_PORT) {
             return
         }
 
@@ -89,8 +89,8 @@ abstract class AbstractAvailablePortAllocator implements PortAllocator {
     protected abstract Pair<Integer, Integer> getNextPortRange(int rangeNumber)
 
     private void releaseRange(ReservedPortRange range) {
+        lock.lock();
         try {
-            lock.lock();
             reservations.remove(range)
         } finally {
             lock.unlock();

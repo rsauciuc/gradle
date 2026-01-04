@@ -18,10 +18,10 @@ package org.gradle.api.internal.file.copy
 import org.gradle.api.file.FileCopyDetails
 import org.gradle.api.internal.file.CopyActionProcessingStreamAction
 import org.gradle.api.internal.file.TestFiles
-import org.gradle.api.internal.tasks.SimpleWorkResult
 import org.gradle.api.tasks.WorkResult
-import org.gradle.internal.reflect.DirectInstantiator
+import org.gradle.api.tasks.WorkResults
 import org.gradle.test.fixtures.file.WorkspaceTest
+import org.gradle.util.TestUtil
 
 class CopyActionExecuterTest extends WorkspaceTest {
 
@@ -36,7 +36,8 @@ class CopyActionExecuterTest extends WorkspaceTest {
         }
 
         def resolver = TestFiles.resolver(testDirectory)
-        def copySpec = new DestinationRootCopySpec(resolver, new DefaultCopySpec(resolver, DirectInstantiator.INSTANCE))
+        def fileCollectionFactory = TestFiles.fileCollectionFactory(testDirectory)
+        def copySpec = new DestinationRootCopySpec(resolver, new DefaultCopySpec(fileCollectionFactory, TestUtil.propertyFactory(), TestUtil.instantiatorFactory().decorateLenient(), TestFiles.patternSetFactory))
         copySpec.with {
             into "out"
             from "a", {
@@ -53,10 +54,11 @@ class CopyActionExecuterTest extends WorkspaceTest {
         def copyAction = new CopyAction() {
             WorkResult execute(CopyActionProcessingStream stream) {
                 stream.process(action)
-                new SimpleWorkResult(workResult)
+                WorkResults.didWork(workResult)
             }
         }
-        def executer = new CopyActionExecuter(DirectInstantiator.INSTANCE, TestFiles.fileSystem(), false)
+        def executer = new CopyActionExecuter(TestUtil.instantiatorFactory().decorateLenient(), TestUtil.propertyFactory(), TestFiles.fileSystem(), false,
+                TestFiles.documentationRegistry())
 
         when:
         executer.execute(copySpec, copyAction)

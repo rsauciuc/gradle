@@ -17,14 +17,25 @@
 package org.gradle.execution.taskgraph
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
+import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 import org.gradle.model.internal.core.ModelNode
+
+import static org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache.Skip.INVESTIGATE
 
 class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implements WithRuleBasedTasks {
 
     def setup() {
         buildFile << """
-            gradle.buildFinished {
-                file("tasks.txt").text = allprojects*.tasks.flatten()*.path.join("\\n")
+            def tasksFile = file("tasks.txt")
+            tasksFile.text = ''
+            gradle.taskGraph.whenReady {
+                allprojects {
+                    tasks.matching { it.group == "mygroup" }.all {
+                        tasksFile << path + '\\n'
+                    }
+                }
             }
         """
     }
@@ -38,14 +49,18 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
         createdTasks
     }
 
+    @ToBeFixedForIsolatedProjects(because = "allprojects")
     def "does not create rule based tasks in projects without required tasks"() {
         when:
+        createDirs("a", "b", "c")
         settingsFile << "include 'a', 'b', 'c'"
         buildFile << """
             allprojects {
                 model {
                     tasks {
-                        create("t1")
+                        create("t1") {
+                            group = "mygroup"
+                        }
                     }
                 }
             }
@@ -64,8 +79,12 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
             ${ruleBasedTasks()}
             model {
                 tasks {
-                    create("t1")
-                    create("t2", BrokenTask)
+                    create("t1") {
+                        group = "mygroup"
+                    }
+                    create("t2", BrokenTask) {
+                        group = "mygroup"
+                    }
                 }
             }
         """
@@ -74,6 +93,7 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
         createdTasksFor("t1") == [":t1"]
     }
 
+    @UnsupportedWithConfigurationCache
     def "task container is self closed by task selection and can be later graph closed"() {
         when:
         buildFile << '''
@@ -106,7 +126,7 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
 
     def "tasks added via task container and not explicitly required but executed are self closed"() {
         given:
-        buildScript """
+        buildFile """
             ${ruleBasedTasks()}
 
             class Rules extends RuleSource {
@@ -143,10 +163,12 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
         output.contains "finalizer: configured"
     }
 
+    @ToBeFixedForIsolatedProjects(because = "allprojects, configuring projects from root")
     def "task container is self closed for projects of which any tasks are being executed"() {
+        createDirs("a", "b")
         settingsFile << "include 'a', 'b'"
 
-        buildScript """
+        buildFile """
             project(':a') {
                 apply type: ProjectARules
             }
@@ -176,12 +198,13 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
         succeeds ":a:executed"
 
         then:
-        ":b:dependency" in executedTasks
+        executed(":b:dependency")
     }
 
-    def "can get name of task defined in rules only script plugin after configuration"() {
+    @ToBeFixedForConfigurationCache(skip = INVESTIGATE)
+    def "can use getTasksByName() to get task defined in rules only script plugin after configuration"() {
         when:
-        buildScript """
+        buildFile """
             apply from: "fooTask.gradle"
             task check {
                 doLast {
@@ -200,16 +223,14 @@ class RuleTaskExecutionIntegrationTest extends AbstractIntegrationSpec implement
         succeeds "check", "foo"
     }
 
-    def "cant get name of task defined in rules only script plugin during configuration"() {
-        // Not really a test, more of a documentation of the current behaviour
-        // getTasksByName() doesn't exhaustively check for rule based tasks
+    def "can use getTasksByName() to get task defined in rules only script plugin during configuration"() {
         when:
-        buildScript """
+        buildFile """
             apply from: "fooTask.gradle"
             task check {
-              def fooTasks = getTasksByName("foo", false).toList()
+              def fooTasks = getTasksByName("foo", false).size()
               doFirst {
-                assert fooTasks.isEmpty()
+                assert fooTasks == 1
               }
             }
         """

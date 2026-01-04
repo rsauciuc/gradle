@@ -15,24 +15,27 @@
  */
 package org.gradle.initialization
 
-import org.gradle.StartParameter
+
 import org.gradle.api.internal.GradleInternal
+import org.gradle.api.internal.StartParameterInternal
 import org.gradle.configuration.InitScriptProcessor
-import org.gradle.groovy.scripts.UriScriptSource
-import org.gradle.internal.progress.TestBuildOperationExecutor
+import org.gradle.groovy.scripts.TextResourceScriptSource
+import org.gradle.internal.operations.TestBuildOperationRunner
+import org.gradle.internal.resource.TextFileResourceLoader
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
 class InitScriptHandlerTest extends Specification {
 
-    @Rule TestNameTestDirectoryProvider testDirectoryProvider
+    @Rule TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
 
     def processor = Mock(InitScriptProcessor)
-    def executor = new TestBuildOperationExecutor()
+    def executor = new TestBuildOperationRunner()
     def gradle = Mock(GradleInternal)
-    def startParameter = Stub(StartParameter)
-    def handler = new InitScriptHandler(processor, executor)
+    def startParameter = Stub(StartParameterInternal)
+    def resourceLoader = Stub(TextFileResourceLoader)
+    def handler = new InitScriptHandler(processor, executor, resourceLoader)
 
     def setup() {
         _ * gradle.startParameter >> startParameter
@@ -61,8 +64,8 @@ class InitScriptHandlerTest extends Specification {
         handler.executeScripts(gradle)
 
         then:
-        1 * processor.process({ UriScriptSource source -> source.resource.file == script1 }, gradle)
-        1 * processor.process({ UriScriptSource source -> source.resource.file == script2 }, gradle)
+        1 * processor.process({ TextResourceScriptSource source -> source.resource.file == script1 }, gradle)
+        1 * processor.process({ TextResourceScriptSource source -> source.resource.file == script2 }, gradle)
         0 * executor._
         0 * processor._
     }

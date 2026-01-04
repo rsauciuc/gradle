@@ -16,11 +16,16 @@
 
 package org.gradle.api.internal.plugins;
 
-import net.jcip.annotations.ThreadSafe;
-import org.gradle.api.Nullable;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.gradle.plugin.use.PluginId;
+import org.jspecify.annotations.Nullable;
 
+import javax.annotation.concurrent.ThreadSafe;
+import java.util.Optional;
+
+@ServiceScope({Scope.Build.class, Scope.Settings.class, Scope.Project.class})
 @ThreadSafe
 public interface PluginRegistry {
     <T> PluginImplementation<T> inspect(Class<T> clazz);
@@ -38,5 +43,12 @@ public interface PluginRegistry {
     PluginImplementation<?> lookup(PluginId pluginId);
 
     PluginRegistry createChild(ClassLoaderScope lookupScope);
+
+    /**
+     * Finds the plugin id which corresponds to the supplied class name.
+     * @param clazz the class to look for
+     * @return the plugin id for this class.
+     */
+    Optional<PluginId> findPluginForClass(Class<?> clazz);
 
 }

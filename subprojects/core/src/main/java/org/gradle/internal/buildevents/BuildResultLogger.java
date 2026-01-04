@@ -15,41 +15,64 @@
  */
 package org.gradle.internal.buildevents;
 
-import org.gradle.BuildAdapter;
 import org.gradle.BuildResult;
 import org.gradle.api.logging.LogLevel;
+import org.gradle.execution.WorkValidationWarningReporter;
+import org.gradle.internal.deprecation.DeprecationLogger;
 import org.gradle.internal.logging.format.DurationFormatter;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
 import org.gradle.internal.time.Clock;
 
-import static org.gradle.internal.logging.text.StyledTextOutput.Style.Failure;
-import static org.gradle.internal.logging.text.StyledTextOutput.Style.Success;
+import java.util.Locale;
+
+import static org.gradle.internal.logging.text.StyledTextOutput.Style.FailureHeader;
+import static org.gradle.internal.logging.text.StyledTextOutput.Style.SuccessHeader;
 
 /**
  * A {@link org.gradle.BuildListener} which logs the final result of the build.
  */
-public class BuildResultLogger extends BuildAdapter {
-    private final StyledTextOutputFactory textOutputFactory;
-    private final Clock buildTimeClock;
-    private final DurationFormatter durationFormatter;
+public class BuildResultLogger {
 
-    public BuildResultLogger(StyledTextOutputFactory textOutputFactory, Clock buildTimeClock, DurationFormatter durationFormatter) {
+    private final StyledTextOutputFactory textOutputFactory;
+    private final BuildStartedTime buildStartedTime;
+    private final DurationFormatter durationFormatter;
+    private final WorkValidationWarningReporter workValidationWarningReporter;
+    private final Clock clock;
+
+    public BuildResultLogger(
+        StyledTextOutputFactory textOutputFactory,
+        BuildStartedTime buildStartedTime,
+        Clock clock,
+        DurationFormatter durationFormatter,
+        WorkValidationWarningReporter workValidationWarningReporter
+    ) {
         this.textOutputFactory = textOutputFactory;
-        this.buildTimeClock = buildTimeClock;
+        this.buildStartedTime = buildStartedTime;
+        this.clock = clock;
         this.durationFormatter = durationFormatter;
+        this.workValidationWarningReporter = workValidationWarningReporter;
     }
 
     public void buildFinished(BuildResult result) {
-        StyledTextOutput textOutput = textOutputFactory.create(BuildResultLogger.class, LogLevel.LIFECYCLE);
+        // Summary of deprecations is considered a part of the build summary
+        DeprecationLogger.reportSuppressedDeprecations();
+
+        // Summary of validation warnings during the build
+        workValidationWarningReporter.reportWorkValidationWarningsAtEndOfBuild();
+
+        boolean buildSucceeded = result.getFailure() == null;
+
+        StyledTextOutput textOutput = textOutputFactory.create(BuildResultLogger.class, buildSucceeded ? LogLevel.LIFECYCLE : LogLevel.ERROR);
         textOutput.println();
-        String action = result.getAction().toUpperCase();
-        if (result.getFailure() == null) {
-            textOutput.withStyle(Success).text(action + " SUCCESSFUL");
+        String action = result.getAction().toUpperCase(Locale.ROOT);
+        if (buildSucceeded) {
+            textOutput.withStyle(SuccessHeader).text(action + " SUCCESSFUL");
         } else {
-            textOutput.withStyle(Failure).text(action + " FAILED");
+            textOutput.withStyle(FailureHeader).text(action + " FAILED");
         }
 
-        textOutput.formatln(" in %s", durationFormatter.format(buildTimeClock.getElapsedMillis()));
+        long buildDurationMillis = clock.getCurrentTime() - buildStartedTime.getStartTime();
+        textOutput.formatln(" in %s", durationFormatter.format(buildDurationMillis));
     }
 }

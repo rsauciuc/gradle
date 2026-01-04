@@ -16,23 +16,19 @@
 package org.gradle.initialization
 
 import org.gradle.api.InvalidUserDataException
-import org.gradle.api.internal.project.ProjectIdentifier
-import org.gradle.api.internal.project.ProjectRegistry
 import org.gradle.test.fixtures.file.CleanupTestDirectory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.GFileUtils
 import org.junit.Rule
 import spock.lang.Specification
 
-import static org.gradle.util.WrapUtil.toSet
+import static org.gradle.util.internal.WrapUtil.toSet
 
 @CleanupTestDirectory
-public class ProjectDirectoryProjectSpecTest extends Specification {
+class ProjectDirectoryProjectSpecTest extends Specification {
     @Rule
-    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
+    public TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass());
     private final File dir = temporaryFolder.createDir("build");
     private final ProjectDirectoryProjectSpec spec = new ProjectDirectoryProjectSpec(dir);
-    private int counter;
 
     def "contains match when at least one project has specified project dir"() {
         expect:
@@ -46,27 +42,27 @@ public class ProjectDirectoryProjectSpecTest extends Specification {
 
     def "selects single project which has specified project dir"() {
         when:
-        ProjectIdentifier project1 = project(dir);
+        ProjectDescriptorInternal project1 = project(dir);
 
         then:
-        spec.selectProject(registry(project1, project(new File("other")))) == project1;
+        spec.selectProject("settings 'foo'", registry(project1, project(new File("other")))) == project1;
     }
 
     def "select project fails when no project has specified project dir"() {
         when:
-        spec.selectProject(registry())
+        spec.selectProject("settings 'foo'", registry())
 
         then:
         def e = thrown(InvalidUserDataException)
-        e.message == "No projects in this build have project directory '" + dir + "'."
+        e.message == "Project directory '$dir' is not part of the build defined by settings 'foo'. If this is an unrelated build, it must have its own settings file."
     }
 
     def "select project fails when multiple projects have specified project dir"() {
-        ProjectIdentifier project1 = project(dir);
-        ProjectIdentifier project2 = project(dir);
+        ProjectDescriptorInternal project1 = project(dir);
+        ProjectDescriptorInternal project2 = project(dir);
 
         when:
-        spec.selectProject(registry(project1, project2));
+        spec.selectProject("settings 'foo'", registry(project1, project2));
 
         then:
         def e = thrown(InvalidUserDataException)
@@ -84,7 +80,7 @@ public class ProjectDirectoryProjectSpecTest extends Specification {
         e.message == "Project directory '" + dir + "' does not exist."
 
         when:
-        GFileUtils.writeStringToFile(dir, "file");
+        dir.text = "file"
         spec.containsProject(registry());
 
         then:
@@ -92,15 +88,15 @@ public class ProjectDirectoryProjectSpecTest extends Specification {
         e.message == "Project directory '" + dir + "' is not a directory."
     }
 
-    private ProjectRegistry<ProjectIdentifier> registry(final ProjectIdentifier... projects) {
-        final ProjectRegistry<ProjectIdentifier> registry = Stub(ProjectRegistry)
+    private ProjectDescriptorRegistry registry(final ProjectDescriptorInternal... projects) {
+        final ProjectDescriptorRegistry registry = Stub(ProjectDescriptorRegistry)
         registry.getAllProjects() >> toSet(projects)
         return registry
     }
 
-    private ProjectIdentifier project(final File projectDir) {
-        final ProjectIdentifier projectIdentifier = Mock(ProjectIdentifier)
-        projectIdentifier.projectDir >> projectDir
-        return projectIdentifier
+    private ProjectDescriptorInternal project(final File projectDir) {
+        return Mock(ProjectDescriptorInternal) {
+            getProjectDir() >> projectDir
+        }
     }
 }

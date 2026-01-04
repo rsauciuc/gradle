@@ -16,21 +16,32 @@
 
 package org.gradle.initialization;
 
+import org.gradle.internal.service.scopes.EventScope;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.StatefulListener;
+import org.jspecify.annotations.Nullable;
+
 /**
  * A listener that is notified when a root build is started and completed. No more than one root build may run at a given time.
  *
  * A root build may contain zero or more nested builds, such as `buildSrc` or included builds.
  *
- * This listener type is available to session services up to global services.
+ * This listener type is available to services from build tree up to global services.
  */
+@EventScope(Scope.BuildTree.class)
+@StatefulListener
 public interface RootBuildLifecycleListener {
     /**
      * Called at the start of the root build, immediately after the creation of the root build services.
      */
-    void afterStart();
+    default void afterStart() {}
 
     /**
      * Called at the completion of the root build, immediately before destruction of the root build services.
+     * If some infrastructural problem has been encountered, the {@code failure} will be non-{@code null}.
+     * Note that {@code failure == null} doesn't mean that the build has succeeded, but most build failures propagate through other means.
+     *
+     * @param failure the exception thrown while running the root build if any, or {@code null}
      */
-    void beforeComplete();
+    default void beforeComplete(@Nullable Throwable failure) {}
 }

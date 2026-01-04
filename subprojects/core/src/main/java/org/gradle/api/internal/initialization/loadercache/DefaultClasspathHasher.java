@@ -16,30 +16,31 @@
 
 package org.gradle.api.internal.initialization.loadercache;
 
-import com.google.common.hash.HashCode;
-import org.gradle.api.internal.changedetection.state.ClasspathSnapshotNormalizationStrategy;
-import org.gradle.api.internal.changedetection.state.ClasspathSnapshotter;
-import org.gradle.api.internal.changedetection.state.FileCollectionSnapshot;
-import org.gradle.api.internal.changedetection.state.TaskFilePropertyCompareStrategy;
-import org.gradle.api.internal.file.collections.SimpleFileCollection;
-import org.gradle.caching.internal.BuildCacheHasher;
-import org.gradle.caching.internal.DefaultBuildCacheHasher;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.internal.classloader.ClasspathHasher;
 import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.execution.FileCollectionFingerprinter;
+import org.gradle.internal.execution.FileCollectionSnapshotter;
+import org.gradle.internal.fingerprint.CurrentFileCollectionFingerprint;
+import org.gradle.internal.hash.HashCode;
+import org.gradle.internal.snapshot.FileSystemSnapshot;
 
 public class DefaultClasspathHasher implements ClasspathHasher {
 
-    private final ClasspathSnapshotter snapshotter;
+    private final FileCollectionSnapshotter snapshotter;
+    private final FileCollectionFingerprinter fingerprinter;
+    private final FileCollectionFactory fileCollectionFactory;
 
-    public DefaultClasspathHasher(ClasspathSnapshotter snapshotter) {
+    public DefaultClasspathHasher(FileCollectionSnapshotter snapshotter, FileCollectionFingerprinter fingerprinter, FileCollectionFactory fileCollectionFactory) {
         this.snapshotter = snapshotter;
+        this.fingerprinter = fingerprinter;
+        this.fileCollectionFactory = fileCollectionFactory;
     }
 
     @Override
     public HashCode hash(ClassPath classpath) {
-        FileCollectionSnapshot snapshot = snapshotter.snapshot(new SimpleFileCollection(classpath.getAsFiles()), TaskFilePropertyCompareStrategy.ORDERED, ClasspathSnapshotNormalizationStrategy.INSTANCE);
-        BuildCacheHasher hasher = new DefaultBuildCacheHasher();
-        snapshot.appendToHasher(hasher);
-        return hasher.hash();
+        FileSystemSnapshot snapshot = snapshotter.snapshot(fileCollectionFactory.fixed(classpath.getAsFiles()));
+        CurrentFileCollectionFingerprint fingerprint = fingerprinter.fingerprint(snapshot, null);
+        return fingerprint.getHash();
     }
 }

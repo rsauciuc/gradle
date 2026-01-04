@@ -15,20 +15,24 @@
  */
 package org.gradle.initialization;
 
-import org.gradle.util.Clock;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
- * A bunch of information about the request which launched a build.
+ * A bunch of information about the request that launched the current build.
  */
+@ServiceScope(Scope.BuildSession.class)
 public interface BuildRequestMetaData {
+
     /**
      * Returns the meta-data about the client used to launch this build.
      */
     BuildClientMetaData getClient();
 
     /**
-     * Returns a clock measuring the time since the request was made by the user of the client.
+     * The time that the request was made by the user of the client.
      */
-    @Deprecated
-    Clock getBuildTimeClock();
+    long getStartTime();
+
+    boolean isInteractive();
 }

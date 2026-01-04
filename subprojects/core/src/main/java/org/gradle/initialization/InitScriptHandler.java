@@ -15,13 +15,17 @@
  */
 package org.gradle.initialization;
 
-import org.gradle.api.Action;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.configuration.InitScriptProcessor;
-import org.gradle.groovy.scripts.UriScriptSource;
+import org.gradle.groovy.scripts.TextResourceScriptSource;
 import org.gradle.internal.operations.BuildOperationContext;
-import org.gradle.internal.progress.BuildOperationDetails;
-import org.gradle.internal.progress.BuildOperationExecutor;
+import org.gradle.internal.operations.BuildOperationDescriptor;
+import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.operations.RunnableBuildOperation;
+import org.gradle.internal.resource.TextFileResourceLoader;
+import org.gradle.internal.resource.TextResource;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 import java.io.File;
 import java.util.List;
@@ -29,13 +33,16 @@ import java.util.List;
 /**
  * Finds and executes all init scripts for a given build.
  */
+@ServiceScope(Scope.Build.class)
 public class InitScriptHandler {
     private final InitScriptProcessor processor;
-    private final BuildOperationExecutor buildOperationExecutor;
+    private final BuildOperationRunner buildOperationRunner;
+    private final TextFileResourceLoader resourceLoader;
 
-    public InitScriptHandler(InitScriptProcessor processor, BuildOperationExecutor buildOperationExecutor) {
+    public InitScriptHandler(InitScriptProcessor processor, BuildOperationRunner buildOperationRunner, TextFileResourceLoader resourceLoader) {
         this.processor = processor;
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.buildOperationRunner = buildOperationRunner;
+        this.resourceLoader = resourceLoader;
     }
 
     public void executeScripts(final GradleInternal gradle) {
@@ -44,13 +51,18 @@ public class InitScriptHandler {
             return;
         }
 
-        BuildOperationDetails operationDetails = BuildOperationDetails.displayName("Run init scripts").progressDisplayName("init scripts").build();
-        buildOperationExecutor.run(operationDetails, new Action<BuildOperationContext>() {
+        buildOperationRunner.run(new RunnableBuildOperation() {
             @Override
-            public void execute(BuildOperationContext buildOperationContext) {
+            public void run(BuildOperationContext context) {
                 for (File script : initScripts) {
-                    processor.process(new UriScriptSource("initialization script", script), gradle);
+                    TextResource resource = resourceLoader.loadFile("initialization script", script);
+                    processor.process(new TextResourceScriptSource(resource), gradle);
                 }
+            }
+
+            @Override
+            public BuildOperationDescriptor.Builder description() {
+                return BuildOperationDescriptor.displayName("Run init scripts").progressDisplayName("Running init scripts");
             }
         });
     }

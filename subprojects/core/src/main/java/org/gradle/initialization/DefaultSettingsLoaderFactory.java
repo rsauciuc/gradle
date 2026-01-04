@@ -16,48 +16,108 @@
 
 package org.gradle.initialization;
 
-import org.gradle.initialization.buildsrc.BuildSourceBuilder;
+import org.gradle.api.internal.cache.CacheConfigurationsInternal;
+import org.gradle.api.internal.initialization.CacheConfigurationsHandlingSettingsLoader;
+import org.gradle.api.internal.project.ProjectStateRegistry;
+import org.gradle.api.internal.properties.GradlePropertiesController;
+import org.gradle.api.problems.internal.InternalProblems;
+import org.gradle.configuration.project.BuiltInCommand;
+import org.gradle.initialization.layout.BuildLayoutFactory;
+import org.gradle.internal.build.BuildIncluder;
+import org.gradle.internal.build.BuildStateRegistry;
+import org.gradle.internal.composite.ChildBuildRegisteringSettingsLoader;
+import org.gradle.internal.composite.CommandLineIncludedBuildSettingsLoader;
 import org.gradle.internal.composite.CompositeBuildSettingsLoader;
-import org.gradle.internal.service.ServiceRegistry;
+
+import java.util.List;
 
 public class DefaultSettingsLoaderFactory implements SettingsLoaderFactory {
-    private final ISettingsFinder settingsFinder;
     private final SettingsProcessor settingsProcessor;
-    private final BuildSourceBuilder buildSourceBuilder;
-    private final BuildLoader buildLoader;
-    private final ServiceRegistry buildServices;
+    private final BuildStateRegistry buildRegistry;
+    private final ProjectStateRegistry projectRegistry;
+    private final BuildLayoutFactory buildLayoutFactory;
+    private final GradlePropertiesController gradlePropertiesController;
+    private final BuildIncluder buildIncluder;
+    private final InitScriptHandler initScriptHandler;
+    private final List<BuiltInCommand> builtInCommands;
+    private final CacheConfigurationsInternal cacheConfigurations;
+    private final InternalProblems problems;
+    private final JvmToolchainsConfigurationValidator jvmToolchainsConfigurationValidator;
 
-    public DefaultSettingsLoaderFactory(ISettingsFinder settingsFinder, SettingsProcessor settingsProcessor, BuildSourceBuilder buildSourceBuilder,
-                                        BuildLoader buildLoader, ServiceRegistry buildServices) {
-        this.settingsFinder = settingsFinder;
+    public DefaultSettingsLoaderFactory(
+        SettingsProcessor settingsProcessor,
+        BuildStateRegistry buildRegistry,
+        ProjectStateRegistry projectRegistry,
+        BuildLayoutFactory buildLayoutFactory,
+        GradlePropertiesController gradlePropertiesController,
+        BuildIncluder buildIncluder,
+        InitScriptHandler initScriptHandler,
+        List<BuiltInCommand> builtInCommands,
+        CacheConfigurationsInternal cacheConfigurations,
+        InternalProblems problems,
+        JvmToolchainsConfigurationValidator jvmToolchainsConfigurationValidator
+    ) {
         this.settingsProcessor = settingsProcessor;
-        this.buildSourceBuilder = buildSourceBuilder;
-        this.buildLoader = buildLoader;
-        this.buildServices = buildServices;
+        this.buildRegistry = buildRegistry;
+        this.projectRegistry = projectRegistry;
+        this.buildLayoutFactory = buildLayoutFactory;
+        this.gradlePropertiesController = gradlePropertiesController;
+        this.buildIncluder = buildIncluder;
+        this.initScriptHandler = initScriptHandler;
+        this.builtInCommands = builtInCommands;
+        this.cacheConfigurations = cacheConfigurations;
+        this.problems = problems;
+        this.jvmToolchainsConfigurationValidator = jvmToolchainsConfigurationValidator;
     }
 
     @Override
     public SettingsLoader forTopLevelBuild() {
-        return new NotifyingSettingsLoader(
-            new CompositeBuildSettingsLoader(
-                new DefaultSettingsLoader(
-                    settingsFinder,
-                    settingsProcessor,
-                    buildSourceBuilder
+        return new GradlePropertiesHandlingSettingsLoader(
+            new DaemonJvmToolchainsValidatingSettingsLoader(
+                new CacheConfigurationsHandlingSettingsLoader(
+                    new InitScriptHandlingSettingsLoader(
+                        new CompositeBuildSettingsLoader(
+                            new ChildBuildRegisteringSettingsLoader(
+                                new CommandLineIncludedBuildSettingsLoader(
+                                    defaultSettingsLoader()
+                                ),
+                                buildIncluder
+                            ),
+                            buildRegistry
+                        ),
+                        initScriptHandler
+                    ),
+                    cacheConfigurations
                 ),
-                buildServices
+                jvmToolchainsConfigurationValidator
             ),
-            buildLoader);
+            buildLayoutFactory,
+            gradlePropertiesController
+        );
     }
 
     @Override
     public SettingsLoader forNestedBuild() {
-        return new NotifyingSettingsLoader(
+        return new GradlePropertiesHandlingSettingsLoader(
+            new InitScriptHandlingSettingsLoader(
+                new ChildBuildRegisteringSettingsLoader(
+                    defaultSettingsLoader(),
+                    buildIncluder),
+                initScriptHandler),
+            buildLayoutFactory,
+            gradlePropertiesController
+        );
+    }
+
+    private SettingsLoader defaultSettingsLoader() {
+        return new SettingsAttachingSettingsLoader(
             new DefaultSettingsLoader(
-                settingsFinder,
                 settingsProcessor,
-                buildSourceBuilder
+                buildLayoutFactory,
+                builtInCommands,
+                problems
             ),
-            buildLoader);
+            projectRegistry
+        );
     }
 }

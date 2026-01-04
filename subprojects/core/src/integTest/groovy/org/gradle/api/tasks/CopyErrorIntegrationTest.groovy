@@ -15,22 +15,20 @@
  */
 package org.gradle.api.tasks
 
+import org.gradle.api.internal.DocumentationRegistry
 import org.gradle.integtests.fixtures.AbstractIntegrationTest
 import org.gradle.integtests.fixtures.executer.ExecutionFailure
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.PreconditionVerifier
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
-import org.hamcrest.Matchers
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
 import org.junit.Assert
-import org.junit.Rule
 import org.junit.Test
 
 class CopyErrorIntegrationTest extends AbstractIntegrationTest {
-    @Rule public PreconditionVerifier verifier = new PreconditionVerifier()
 
     @Test
-    public void givesReasonableErrorMessageWhenPathCannotBeConverted() {
+    void givesReasonableErrorMessageWhenPathCannotBeConverted() {
+
         file('src/thing.txt').createFile()
 
         testFile('build.gradle') << '''
@@ -45,17 +43,18 @@ class CopyErrorIntegrationTest extends AbstractIntegrationTest {
         ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
         failure.assertHasCause("""Cannot convert the provided notation to a String: repository container.
 The following types/formats are supported:
-  - String or CharSequence instances, for example 'some/path'.
+  - String or CharSequence instances, for example "some/path".
   - Boolean values, for example true, Boolean.TRUE.
   - Number values, for example 42, 3.14.
   - A File instance
   - A Closure that returns any supported value.
-  - A Callable that returns any supported value.""")
+  - A Callable that returns any supported value.
+  - A Provider that provides any supported value.""")
     }
 
     @Test
-    @Requires(TestPrecondition.SYMLINKS)
-    public void reportsSymLinkWhichPointsToNothing() {
+    @Requires(UnitTestPreconditions.Symlinks)
+    void reportsSymLinkWhichPointsToNothing() {
         TestFile link = testFile('src/file')
         link.createLink(testFile('missing'))
 
@@ -68,24 +67,25 @@ The following types/formats are supported:
                 from 'src'
                 into 'dest'
             }
-'''
+        '''
 
         ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
-        failure.assertHasDescription("Could not list contents of '${link}'.")
+        failure.assertHasDescription("Execution failed for task ':copy'.")
+        failure.assertHasCause("Couldn't follow symbolic link '${link}'.")
     }
 
     @Test
-    @Requires(TestPrecondition.FILE_PERMISSIONS)
-    public void reportsUnreadableSourceDir() {
+    @Requires(UnitTestPreconditions.FilePermissions)
+    void reportsUnreadableSourceDir() {
         TestFile dir = testFile('src').createDir()
         def oldPermissions = dir.permissions
         dir.permissions = '-w-r--r--'
 
         try {
-            Assert.assertTrue(dir.isDirectory())
-            Assert.assertTrue(dir.exists())
-            Assert.assertFalse(dir.canRead())
-            Assert.assertTrue(dir.canWrite())
+            Assert.assertTrue("$dir exists", dir.exists())
+            Assert.assertTrue("$dir is a directory", dir.isDirectory())
+            Assert.assertFalse("$dir is not readable", dir.canRead())
+            Assert.assertTrue("$dir is writable", dir.canWrite())
 
             testFile('build.gradle') << '''
                 task copy(type: Copy) {
@@ -95,10 +95,13 @@ The following types/formats are supported:
     '''
 
             ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
-            failure.assertThatDescription(Matchers.anyOf(
-                Matchers.startsWith("Could not list contents of directory '${dir}' as it is not readable."),
-                Matchers.startsWith("Could not read path '${dir}'.")
-            ))
+            failure.assertHasDescription("Execution failed for task ':copy'.")
+            failure.assertHasDocumentedCause("Cannot access input property 'rootSpec\$1' of task ':copy'. " +
+                "Accessing unreadable inputs or outputs is not supported. " +
+                "Declare the task as untracked by using Task.doNotTrackState(). " +
+                new DocumentationRegistry().getDocumentationRecommendationFor("information", "incremental_build", "sec:disable-state-tracking")
+            )
+            failure.assertHasCause("java.nio.file.AccessDeniedException: ${dir}")
         } finally {
             dir.permissions = oldPermissions
         }

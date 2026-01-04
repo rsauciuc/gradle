@@ -17,8 +17,12 @@
 package org.gradle.process.internal.worker;
 
 import org.gradle.api.Action;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+@ServiceScope(Scope.UserHome.class)
 public interface WorkerProcessFactory {
+
     /**
      * Creates a builder for workers that will run the given action. The worker action is serialized to the worker process and executed.
      *
@@ -29,26 +33,13 @@ public interface WorkerProcessFactory {
     WorkerProcessBuilder create(Action<? super WorkerProcessContext> workerAction);
 
     /**
-     * Creates a builder for workers that will handle requests using the given worker implementation, with each request executed in a separate worker process.
-     *
-     * <p>The worker process is not started until a method on the return value of {@link SingleRequestWorkerProcessBuilder#build()} is called.</p>
-     *
-     * @param protocolType An interface that represents the requests that can be handled by the worker.
-     * @param workerImplementation The implementation class to run in the worker process.
-     */
-    <P> SingleRequestWorkerProcessBuilder<P> singleRequestWorker(Class<P> protocolType, Class<? extends P> workerImplementation);
-
-    /**
      * Creates a builder for workers that will handle requests using the given worker implementation, with a worker process handling zero or more requests.
      * A worker process handles a single request at a time.
      *
      * <p>The worker process is not started until {@link WorkerControl#start()} is called.</p>
      *
-     * @param workerType An interface that clients use to dispatch requests to the worker. Should also extend {@link WorkerControl}, to allow the worker to be started and stopped.
-     * @param protocolType An interface that represents the requests that can be handled by the worker.
      * @param workerImplementation The implementation class to run in the worker process.
      */
-    <P, W extends P> MultiRequestWorkerProcessBuilder<W> multiRequestWorker(Class<W> workerType,
-                                                                            Class<P> protocolType,
-                                                                            Class<? extends P> workerImplementation);
+    <IN, OUT> MultiRequestWorkerProcessBuilder<IN, OUT> multiRequestWorker(Class<? extends RequestHandler<? super IN, ? extends OUT>> workerImplementation);
+
 }

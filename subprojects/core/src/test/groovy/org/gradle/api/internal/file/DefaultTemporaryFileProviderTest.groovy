@@ -15,13 +15,14 @@
  */
 package org.gradle.api.internal.file
 
+import org.gradle.api.internal.file.temp.DefaultTemporaryFileProvider
 import org.gradle.internal.Factory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
 class DefaultTemporaryFileProviderTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir
+    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     DefaultTemporaryFileProvider provider
 
     def setup() {

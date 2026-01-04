@@ -16,27 +16,68 @@
 
 package org.gradle.api.tasks
 
-import org.gradle.integtests.fixtures.LocalBuildCacheFixture
+import org.gradle.integtests.fixtures.DirectoryBuildCacheFixture
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
-class CachedPathSensitivityIntegrationTest extends AbstractPathSensitivityIntegrationSpec implements LocalBuildCacheFixture {
+import static org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache.Skip.INVESTIGATE
+
+class CachedPathSensitivityIntegrationTest extends AbstractPathSensitivityIntegrationSpec implements DirectoryBuildCacheFixture {
     def setup() {
         buildFile << """
-            task clean {
-                doLast {
-                    delete(tasks*.outputs*.files)
-                }
-            }
+            apply plugin: 'base'
         """
     }
 
     @Override
     void execute(String... tasks) {
-        withBuildCache().succeeds tasks
+        withBuildCache().run tasks
     }
 
     @Override
     void cleanWorkspace() {
-        executer.expectDeprecationWarning()
         run "clean"
+    }
+
+    @Override
+    String getStatusForReusedOutput() {
+        return "FROM-CACHE"
+    }
+
+    @ToBeFixedForConfigurationCache(skip = INVESTIGATE)
+    def "single #pathSensitivity input file loaded from cache can be used as input"() {
+        file("src/data/input.txt").text = "data"
+
+        buildFile << """
+            task producer {
+                outputs.cacheIf { true }
+                outputs.file("build/outputs/producer.txt")
+                doLast {
+                    file("build/outputs/producer.txt").text = "alma"
+                }
+            }
+
+            task consumer {
+                dependsOn producer
+                outputs.cacheIf { true }
+                inputs.file("build/outputs/producer.txt")
+                    .withPropertyName("producer")
+                    .withPathSensitivity(PathSensitivity.$pathSensitivity)
+                outputs.file("build/outputs/consumer.txt")
+                    .withPropertyName("consumer")
+                doLast {
+                    file("build/outputs/consumer.txt").text = file("build/outputs/producer.txt").text
+                }
+            }
+        """
+
+        withBuildCache().run "consumer"
+        run "clean"
+
+        expect:
+        withBuildCache().run "consumer"
+        skipped ":producer", ":consumer"
+
+        where:
+        pathSensitivity << PathSensitivity.values()
     }
 }

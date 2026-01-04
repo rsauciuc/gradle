@@ -16,15 +16,32 @@
 package org.gradle.api.internal.collections;
 
 import org.gradle.api.Action;
+import org.gradle.api.internal.CollectionCallbackActionDecorator;
+import org.gradle.internal.ImmutableActionSet;
+import org.jspecify.annotations.Nullable;
 
-public interface CollectionEventRegister<T> {
-    Action<T> getAddAction();
+public interface CollectionEventRegister<T> extends EventSubscriptionVerifier<T> {
 
-    Action<T> getRemoveAction();
+    @Override
+    boolean isSubscribed(@Nullable Class<? extends T> type);
 
-    Action<? super T> registerAddAction(Action<? super T> addAction);
+    /**
+     * Returns a snapshot of the <em>current</em> set of actions to run when an element is added.
+     */
+    ImmutableActionSet<T> getAddActions();
 
-    Action<? super T> registerRemoveAction(Action<? super T> removeAction);
+    void fireObjectAdded(T element);
+
+    void fireObjectRemoved(T element);
+
+    Action<? super T> registerEagerAddAction(Class<? extends T> type, Action<? super T> addAction);
+
+    Action<? super T> registerLazyAddAction(Action<? super T> addAction);
+
+    void registerRemoveAction(Class<? extends T> type, Action<? super T> removeAction);
 
     <S extends T> CollectionEventRegister<S> filtered(CollectionFilter<S> filter);
+
+    // TODO: Migrate this away from here
+    CollectionCallbackActionDecorator getDecorator();
 }

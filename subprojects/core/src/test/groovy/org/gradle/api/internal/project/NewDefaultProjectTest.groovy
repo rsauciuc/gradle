@@ -17,53 +17,11 @@
 package org.gradle.api.internal.project
 
 import org.gradle.api.InvalidUserDataException
-import org.gradle.api.artifacts.ConfigurationContainer
-import org.gradle.api.artifacts.dsl.ArtifactHandler
-import org.gradle.api.artifacts.dsl.DependencyHandler
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 
 import static org.gradle.util.TestUtil.createChildProject
 
 class NewDefaultProjectTest extends AbstractProjectBuilderSpec {
-
-    void "delegates to artifacts handler"() {
-        def handler = Mock(ArtifactHandler)
-        project.artifactHandler = handler
-
-        when:
-        project.artifacts {
-            add('conf', 'art')
-        }
-
-        then:
-        1 * handler.add('conf', 'art')
-    }
-
-    void "delegates to dependency handler"() {
-        def handler = Mock(DependencyHandler)
-        project.dependencyHandler = handler
-
-        when:
-        project.dependencies {
-            add('conf', 'dep')
-        }
-
-        then:
-        1 * handler.add('conf', 'dep')
-    }
-
-    void "delegates to configuration container"() {
-        Closure cl = {}
-        def container = Mock(ConfigurationContainer)
-        project.configurationContainer = container
-
-        when:
-        project.configurations cl
-
-        then:
-        1 * container.configure(cl)
-    }
-
     def "provides all tasks recursively"() {
         def a = createChildProject(project, "a")
 
@@ -75,11 +33,11 @@ class NewDefaultProjectTest extends AbstractProjectBuilderSpec {
 
         then:
         rootTasks.size() == 2
-        rootTasks[project]*.path as Set == [":bar", ":foo"] as Set
-        rootTasks[a]*.path as Set == [":a:bar", ":a:foo"] as Set
+        rootTasks[project]*.path as Set == [":bar", ":artifactTransforms", ":buildEnvironment", ":dependencies", ":dependencyInsight", ":foo", ":help", ":init", ":javaToolchains", ":outgoingVariants", ":projects", ":properties", ":resolvableConfigurations", ":tasks", ":wrapper", ":updateDaemonJvm", ":foo"] as Set
+        rootTasks[a]*.path as Set == [":a:artifactTransforms", ":a:bar", ":a:buildEnvironment", ":a:dependencies", ":a:dependencyInsight", ":a:foo", ":a:help", ":a:javaToolchains", ":a:outgoingVariants", ":a:projects", ":a:properties", ":a:resolvableConfigurations", ":a:tasks", ":a:foo"] as Set
 
         aTasks.size() == 1
-        aTasks[a]*.path as Set == [":a:bar", ":a:foo"] as Set
+        aTasks[a]*.path as Set == [":a:artifactTransforms", ":a:bar", ":a:buildEnvironment", ":a:dependencies", ":a:dependencyInsight", ":a:foo", ":a:help", ":a:javaToolchains", ":a:outgoingVariants", ":a:projects", ":a:properties", ":a:resolvableConfigurations", ":a:tasks", ":a:foo"] as Set
     }
 
     def "provides all tasks non-recursively"() {
@@ -93,10 +51,10 @@ class NewDefaultProjectTest extends AbstractProjectBuilderSpec {
 
         then:
         rootTasks.size() == 1
-        rootTasks[project]*.path as Set == [":bar", ":foo"] as Set
+        rootTasks[project]*.path as Set == [":bar", ":artifactTransforms", ":buildEnvironment", ":dependencies", ":dependencyInsight", ":foo", ":help", ":init", ":javaToolchains", ":outgoingVariants", ":projects", ":properties", ":resolvableConfigurations", ":tasks", ":wrapper", ":updateDaemonJvm", ":foo"] as Set
 
         aTasks.size() == 1
-        aTasks[a]*.path as Set == [":a:bar", ":a:foo"] as Set
+        aTasks[a]*.path as Set == [":a:bar", ":a:artifactTransforms", ":a:buildEnvironment", ":a:dependencies", ":a:dependencyInsight", ":a:foo", ":a:help", ":a:javaToolchains", ":a:outgoingVariants", ":a:projects", ":a:properties", ":a:resolvableConfigurations", ":a:tasks", ":a:foo"] as Set
     }
 
     def "provides task by name recursively"() {

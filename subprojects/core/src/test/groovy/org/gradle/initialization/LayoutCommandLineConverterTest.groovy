@@ -18,7 +18,10 @@ package org.gradle.initialization
 
 import org.gradle.internal.SystemProperties
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
 import org.junit.Rule
+import spock.lang.Issue
 import spock.lang.Specification
 
 import static org.gradle.internal.FileUtils.canonicalize
@@ -26,25 +29,25 @@ import static org.gradle.internal.FileUtils.canonicalize
 class LayoutCommandLineConverterTest extends Specification {
 
     def converter = new LayoutCommandLineConverter()
-    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider()
+    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider(getClass())
 
     def convert(String... args) {
         converter.convert(Arrays.asList(args), new BuildLayoutParameters())
     }
 
+    @Requires(UnitTestPreconditions.NotEC2Agent)
+    @Issue('https://github.com/gradle/gradle-private/issues/2876')
     def "has reasonable defaults"() {
         expect:
         convert().currentDir == canonicalize(SystemProperties.instance.getCurrentDir())
         convert().projectDir == null
         convert().gradleUserHomeDir == canonicalize(BuildLayoutParameters.DEFAULT_GRADLE_USER_HOME)
-        convert().searchUpwards
     }
 
     def "converts"() {
         expect:
         convert("-p", "foo").projectDir.name == "foo"
         convert("-g", "bar").gradleUserHomeDir.name == "bar"
-        !convert("-u").searchUpwards
     }
 
     def "converts relatively to the target dir"() {

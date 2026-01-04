@@ -19,16 +19,20 @@ package org.gradle.integtests.composite
 import org.gradle.integtests.fixtures.build.BuildTestFile
 import org.gradle.integtests.fixtures.resolve.ResolveTestFixture
 import org.gradle.test.fixtures.maven.MavenModule
+
 /**
  * Tests for resolving dependency artifacts with substitution within a composite build.
  */
 class CompositeBuildCommandLineArgsIntegrationTest extends AbstractCompositeBuildIntegrationTest {
+
     BuildTestFile buildB
     MavenModule publishedModuleB
 
     def setup() {
         publishedModuleB = mavenRepo.module("org.test", "buildB", "1.0").publish()
-        new ResolveTestFixture(buildA.buildFile).prepare()
+        buildA.buildFile << """
+            ${ResolveTestFixture.configureProject("runtimeClasspath")}
+        """
 
         buildB = multiProjectBuild("buildB", ['b1', 'b2']) {
             buildFile << """
@@ -57,7 +61,7 @@ class CompositeBuildCommandLineArgsIntegrationTest extends AbstractCompositeBuil
         execute(buildA, ":checkDeps", ["-PpassedProperty=foo"])
 
         then:
-        executed ":buildB:jar"
+        assertTaskExecuted(":buildB", ":jar")
     }
 
     def "passes system property arguments to included build"() {
@@ -67,7 +71,7 @@ class CompositeBuildCommandLineArgsIntegrationTest extends AbstractCompositeBuil
 
         [buildA, buildB].each {
             it.buildFile << """
-    if (System.properties['passedProperty'] != "foo") {
+    if (providers.systemProperty('passedProperty').orNull != "foo") {
         throw new RuntimeException("property not passed to build")
     }
 """
@@ -77,7 +81,7 @@ class CompositeBuildCommandLineArgsIntegrationTest extends AbstractCompositeBuil
         execute(buildA, ":checkDeps", ["-DpassedProperty=foo"])
 
         then:
-        executed ":buildB:jar"
+        assertTaskExecuted(":buildB", ":jar")
     }
 
     def "can include same build multiple times using --include-build and settings.gradle"() {
@@ -96,40 +100,7 @@ includeBuild '${buildB.toURI()}'
         execute(buildA, ":checkDeps", args)
 
         then:
-        executed ":buildB:jar"
-    }
-
-    def "does not pass build-file argument when configuring included build"() {
-        given:
-        dependency 'org.test:buildB:1.0'
-
-        buildA.settingsFile << """
-rootProject.buildFileName='build-copy.gradle'
-"""
-
-        buildA.file("build-copy.gradle").copyFrom(buildA.buildFile)
-
-        when:
-        execute(buildA, ":checkDeps", ["--build-file", "build-copy.gradle"])
-
-        then:
-        executed ":buildB:jar"
-    }
-
-    def "does not pass settings-file argument when configuring included build"() {
-        given:
-        dependency 'org.test:buildB:1.0'
-
-        buildA.file("settings-copy.gradle") << """
-rootProject.name = 'buildA'
-includeBuild '../buildB'
-"""
-
-        when:
-        execute(buildA, ":checkDeps", ["--settings-file", "settings-copy.gradle"])
-
-        then:
-        executed ":buildB:jar"
+        assertTaskExecuted(":buildB", ":jar")
     }
 
     def "does not exclude tasks when building artifact for included build"() {
@@ -140,7 +111,140 @@ includeBuild '../buildB'
         execute(buildA, ":checkDeps", ["--exclude-task", "jar"])
 
         then:
-        executed ":buildB:jar"
+        assertTaskExecuted(":buildB", ":jar")
+    }
+
+    def "does not execute task actions when dry run specified on composite build"() {
+        given:
+        dependency 'org.test:buildB:1.0'
+
+        when:
+        execute(buildA, ":build", ["--dry-run"])
+
+        then:
+        skipped(
+            ":buildB:compileJava", ":buildB:processResources", ":buildB:classes", ":buildB:jar",
+            ":compileJava", ":processResources", ":classes", ":jar", ":assemble",
+            ":compileTestJava", ":processTestResources", ":testClasses", ":test", ":check", ":build"
+        )
+    }
+
+    def "dry-run can execute logic from included builds if it's required for configuration"() {
+        given:
+        settingsFile """
+            pluginManagement {
+                includeBuild 'build-logic-settings'
+            }
+
+            plugins {
+                id 'org.test.plugin.SettingsPlugin'
+            }
+
+            includeBuild 'build-logic-commons'
+            includeBuild "build-logic"
+        """
+        settingsFile "build-logic-settings/settings.gradle", """
+            println("I'm a build logic settings file")
+        """
+        buildFile "build-logic-settings/build.gradle", """
+            plugins {
+                id 'java-gradle-plugin'
+            }
+
+            gradlePlugin {
+                plugins {
+                    myPlugin {
+                        id = "org.test.plugin.SettingsPlugin"
+                        implementationClass = "org.test.SettingsPlugin"
+                    }
+                }
+            }
+
+            println "I'm settings plugin"
+            tasks.register("settingsTask") {
+                doLast {
+                    println "I'm settings task"
+                }
+            }
+            tasks.named("compileJava") {
+                dependsOn "settingsTask"
+            }
+        """
+        file("build-logic-settings/src/main/java/org/test/SettingsPlugin.java") << """
+            package org.test;
+
+            import org.gradle.api.Plugin;
+            import org.gradle.api.initialization.Settings;
+
+            public class SettingsPlugin implements Plugin<Settings> {
+                public void apply(Settings settings) {
+                    System.out.println("I'm SettingsPlugin");
+                }
+            }
+        """
+        settingsFile "build-logic-commons/settings.gradle", """
+            includeBuild('../build-logic-settings')
+            include("basics")
+        """
+        buildFile "build-logic-commons/build.gradle", """
+            plugins {
+                id "base"
+            }
+            tasks.register("commonsTask") {
+                dependsOn(":basics:commonsTask")
+            }
+        """
+        buildFile "build-logic-commons/basics/build.gradle", """
+            plugins {
+                id 'java'
+                id 'groovy-gradle-plugin'
+            }
+            tasks.register("commonsTask") {
+                doLast {
+                    println "I'm commons task"
+                }
+            }
+            tasks.named("compileJava") {
+                dependsOn "commonsTask"
+            }
+        """
+        file('build-logic-commons/basics/src/main/groovy/dummy.plugin.gradle') << ""
+        settingsFile "build-logic/settings.gradle", """
+            pluginManagement {
+                includeBuild '../build-logic-commons'
+            }
+        """
+        buildFile "build-logic/build.gradle", """
+            plugins {
+                id "base"
+                id 'dummy.plugin'
+            }
+        """
+        buildFile """
+            tasks.register("root") {
+                dependsOn(gradle.includedBuild("build-logic-commons").task(":commonsTask"))
+                dependsOn(gradle.includedBuild("build-logic").task(":check"))
+                doLast {
+                    println "I'm root task"
+                }
+            }
+        """
+
+        when:
+        succeeds("root", "--dry-run")
+
+        then:
+        executedAndNotSkipped(
+            ":build-logic-settings:settingsTask",
+            ":build-logic-commons:basics:commonsTask", ":build-logic-commons:basics:jar"
+        )
+        skipped(":root", ":build-logic:check", ":build-logic-commons:commonsTask")
+    }
+
+    void skipped(String... taskNames) {
+        for (String taskName : taskNames) {
+            outputContains(taskName + " SKIPPED\n")
+        }
     }
 
 }

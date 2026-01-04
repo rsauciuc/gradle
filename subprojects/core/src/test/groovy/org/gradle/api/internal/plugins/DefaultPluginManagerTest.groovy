@@ -18,13 +18,15 @@ package org.gradle.api.internal.plugins
 
 import org.gradle.api.Action
 import org.gradle.api.Plugin
+import org.gradle.api.internal.CollectionCallbackActionDecorator
 import org.gradle.api.internal.initialization.ClassLoaderScope
 import org.gradle.api.plugins.AppliedPlugin
-import org.gradle.internal.progress.TestBuildOperationExecutor
-import org.gradle.internal.reflect.DirectInstantiator
+import org.gradle.internal.code.DefaultUserCodeApplicationContext
+import org.gradle.internal.operations.TestBuildOperationRunner
 import org.gradle.model.internal.inspect.ModelRuleSourceDetector
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.TestUtil
 import org.junit.Rule
 import spock.lang.Specification
 
@@ -36,14 +38,14 @@ class DefaultPluginManagerTest extends Specification {
     }
     def registry = new DefaultPluginRegistry(new PluginInspector(new ModelRuleSourceDetector()), classLoaderScope)
     def target = Mock(PluginTarget)
-    def manager = new DefaultPluginManager(registry, DirectInstantiator.INSTANCE, target, new TestBuildOperationExecutor())
+    def manager = new DefaultPluginManager(registry, TestUtil.instantiatorFactory().inject(), target, new TestBuildOperationRunner(), new DefaultUserCodeApplicationContext(), CollectionCallbackActionDecorator.NOOP, TestUtil.domainObjectCollectionFactory())
 
     Class<?> rulesClass
     Class<? extends Plugin> hybridClass
     Class<? extends Plugin> imperativeClass
 
     @Rule
-    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
 
     def setup() {
         rulesClass = classLoader.parseClass("""
@@ -146,6 +148,7 @@ class DefaultPluginManagerTest extends Specification {
 
         then:
         1 * target.applyRules(null, rulesClass)
+        1 * target.getConfigurationTargetIdentifier()
         1 * action.execute(_)
         0 * target._
         0 * action._
@@ -208,7 +211,7 @@ class DefaultPluginManagerTest extends Specification {
         manager.apply(hybridClass)
 
         then:
-        1 * target.applyImperativeRulesHybrid(null, { hybridClass.isInstance(it) })
+        1 * target.applyImperativeRulesHybrid(null, { hybridClass.isInstance(it) }, hybridClass)
 
         and:
         manager.pluginContainer.size() == 1
@@ -222,7 +225,7 @@ class DefaultPluginManagerTest extends Specification {
         manager.apply(hybridClass)
 
         then:
-        1 * target.applyImperativeRulesHybrid(null, { hybridClass.isInstance(it) })
+        1 * target.applyImperativeRulesHybrid(null, { hybridClass.isInstance(it) }, hybridClass)
 
         and:
         manager.pluginContainer.size() == 1
@@ -245,7 +248,7 @@ class DefaultPluginManagerTest extends Specification {
         manager.apply("foo")
 
         then:
-        1 * target.applyImperativeRulesHybrid("foo", { hybridClass.isInstance(it) })
+        1 * target.applyImperativeRulesHybrid("foo", { hybridClass.isInstance(it) }, hybridClass)
 
         and:
         manager.pluginContainer.size() == 1
@@ -273,7 +276,8 @@ class DefaultPluginManagerTest extends Specification {
         manager.apply(hybridClass)
 
         then:
-        1 * target.applyImperativeRulesHybrid(null, { hybridClass.isInstance(it) })
+        1 * target.getConfigurationTargetIdentifier()
+        1 * target.applyImperativeRulesHybrid(null, { hybridClass.isInstance(it) }, hybridClass)
         0 * target._
         1 * action.execute(_)
         0 * action._
@@ -355,6 +359,7 @@ class DefaultPluginManagerTest extends Specification {
         manager.pluginContainer.apply(imperativeClass)
 
         then:
+        1 * target.getConfigurationTargetIdentifier()
         1 * target.applyImperative(null, { imperativeClass.isInstance(it) })
         0 * target._
 
@@ -378,6 +383,7 @@ class DefaultPluginManagerTest extends Specification {
         manager.apply(imperativeClass)
 
         then:
+        1 * target.getConfigurationTargetIdentifier()
         1 * target.applyImperative(null, { imperativeClass.isInstance(it) })
         0 * target._
         1 * action.execute(_)
@@ -523,6 +529,7 @@ class DefaultPluginManagerTest extends Specification {
         manager.apply(imperativeClass)
 
         then:
+        1 * target.getConfigurationTargetIdentifier()
         1 * target.applyImperative("bar", { imperativeClass.isInstance(it) })
         0 * target._
         1 * action.execute(_)

@@ -18,31 +18,20 @@ package org.gradle.api.tasks
 
 import org.gradle.caching.configuration.AbstractBuildCache
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.test.fixtures.plugin.PluginBuilder
 
 class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
+
     def "can use full Java build cache service implementation"() {
-        // No need for caching in `buildSrc`
-        file("buildSrc/settings.gradle") << """
-            buildCache {
-                local { enabled = false }
-            }
-        """
+        def pluginJar = file("plugin.jar")
+        def pluginBuilder = new PluginBuilder(file("plugin"))
+        pluginBuilder.packageName = null
 
-        file("buildSrc/build.gradle") << """
-            repositories {
-                mavenCentral()
-            }
-
-            dependencies {
-                compile "commons-codec:commons-codec:1.10"
-            }
-        """
-
-        file("buildSrc/src/main/java/InMemoryBuildCache.java") << """
+        pluginBuilder.java("InMemoryBuildCache.java") << """
             public class InMemoryBuildCache extends $AbstractBuildCache.name {}
         """
 
-        file("buildSrc/src/main/java/InMemoryBuildCacheService.java") << """
+        pluginBuilder.java("InMemoryBuildCacheService.java") << """
             import java.io.*;
             import java.util.*;
             import org.gradle.caching.*;
@@ -50,7 +39,8 @@ class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
 
             public class InMemoryBuildCacheService implements BuildCacheServiceFactory<InMemoryBuildCache> {
                 @Override
-                public BuildCacheService createBuildCacheService(InMemoryBuildCache configuration) {
+                public BuildCacheService createBuildCacheService(InMemoryBuildCache configuration, Describer describer) {
+                    describer.type("in-memory");
                     final Properties data = new Properties();
                     final File cacheFile = new File("cache.bin");
                     if (cacheFile.exists()) {
@@ -90,11 +80,6 @@ class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
                         }
 
                         @Override
-                        public String getDescription() {
-                            return "test cache backend";
-                        }
-        
-                        @Override
                         public void close() throws IOException {
                             try (OutputStream output = new FileOutputStream(cacheFile)) {
                                 data.store(output, null);
@@ -107,7 +92,7 @@ class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
             }
         """
 
-        file("buildSrc/src/main/java/InMemoryBuildCachePlugin.java") << """
+        pluginBuilder.java("InMemoryBuildCachePlugin.java") << """
             import org.gradle.api.*;
             import org.gradle.api.initialization.*;
             import org.gradle.caching.configuration.*;
@@ -132,6 +117,14 @@ class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
             }
         """
 
+        pluginBuilder.publishTo(executer, pluginJar, """
+            ${mavenCentralRepository()}
+
+            dependencies {
+                implementation "commons-codec:commons-codec:1.10"
+            }
+        """)
+
         file("build.gradle") << """
             apply plugin: "java"
         """
@@ -145,16 +138,25 @@ class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
         """
 
         settingsFile << """
+            buildscript {
+                repositories {
+                    ${mavenCentralRepository()}
+                }
+                dependencies {
+                    classpath "commons-codec:commons-codec:1.10"
+                    classpath files("$pluginJar.name")
+                }
+            }
+
             apply plugin: InMemoryBuildCachePlugin
         """
 
         when:
         executer.withBuildCacheEnabled()
-        succeeds "compileJava"
+        succeeds "compileJava", "--info"
+
         then:
-        executedTasks.contains ":compileJava"
-        output.contains "Build cache is an incubating feature."
-        output.contains "Using test cache backend as remote build cache, push is enabled."
+        executed ":compileJava"
 
         expect:
         succeeds "clean"
@@ -162,7 +164,8 @@ class CachedImplementationIntegrationTest extends AbstractIntegrationSpec {
         when:
         executer.withBuildCacheEnabled()
         succeeds "compileJava"
+
         then:
-        skippedTasks.contains ":compileJava"
+        skipped ":compileJava"
     }
 }

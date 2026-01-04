@@ -15,27 +15,45 @@
  */
 package org.gradle.api.internal.initialization
 
-import org.gradle.api.artifacts.Configuration
-import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.artifacts.dsl.DependencyHandler
 import org.gradle.api.artifacts.dsl.RepositoryHandler
+import org.gradle.api.initialization.dsl.ScriptHandler
+import org.gradle.api.internal.CollectionCallbackActionDecorator
 import org.gradle.api.internal.artifacts.DependencyResolutionServices
+import org.gradle.api.internal.artifacts.configurations.RoleBasedConfigurationContainerInternal
+import org.gradle.api.internal.artifacts.type.DefaultArtifactTypeContainer
+import org.gradle.api.internal.attributes.AttributeDescriberRegistry
+import org.gradle.api.internal.attributes.AttributesSchemaInternal
+import org.gradle.api.internal.provider.Providers
 import org.gradle.groovy.scripts.ScriptSource
-import org.gradle.util.ConfigureUtil
+import org.gradle.internal.classloader.ClasspathUtil
+import org.gradle.internal.classpath.ClassPath
+import org.gradle.util.AttributeTestUtil
+import org.gradle.util.TestUtil
+import org.gradle.util.internal.ConfigureUtil
 import spock.lang.Specification
 
 class DefaultScriptHandlerTest extends Specification {
     def repositoryHandler = Mock(RepositoryHandler)
-    def dependencyHandler = Mock(DependencyHandler)
-    def configurationContainer = Mock(ConfigurationContainer)
-    def configuration = Mock(Configuration)
+    def dependencyHandler = Mock(DependencyHandler) {
+        getArtifactTypes() >> new DefaultArtifactTypeContainer(TestUtil.instantiatorFactory().decorateLenient(), AttributeTestUtil.attributesFactory(), CollectionCallbackActionDecorator.NOOP)
+    }
+    def configurationContainer = Mock(RoleBasedConfigurationContainerInternal)
+    def configuration = Mock(ResettableConfiguration)
     def scriptSource = Stub(ScriptSource)
-    def depMgmtServices = Mock(DependencyResolutionServices)
+
+    def depMgmtServices = Mock(DependencyResolutionServices) {
+        getAttributesSchema() >> Stub(AttributesSchemaInternal)
+        getObjectFactory() >> TestUtil.objectFactory()
+        getAttributeDescribers() >> Stub(AttributeDescriberRegistry)
+    }
+    def resolutionContext = new ScriptClassPathResolutionContext(0L, Providers.notDefined(), dependencyHandler)
     def baseClassLoader = new ClassLoader() {}
     def classLoaderScope = Stub(ClassLoaderScope) {
         getLocalClassLoader() >> baseClassLoader
     }
-    def handler = new DefaultScriptHandler(scriptSource, depMgmtServices, classLoaderScope)
+    def buildLogicBuilder = Mock(BuildLogicBuilder)
+    ScriptHandler handler = new DefaultScriptHandler(scriptSource, depMgmtServices, classLoaderScope, buildLogicBuilder)
 
     def "adds classpath configuration when configuration container is queried"() {
         when:
@@ -44,7 +62,11 @@ class DefaultScriptHandlerTest extends Specification {
 
         then:
         1 * depMgmtServices.configurationContainer >> configurationContainer
-        1 * configurationContainer.create('classpath') >> configuration
+        1 * depMgmtServices.dependencyHandler >> dependencyHandler
+        1 * buildLogicBuilder.prepareDependencyHandler(dependencyHandler) >> resolutionContext
+        1 * configurationContainer.resolvableDependencyScopeLocked('classpath') >> configuration
+        1 * configurationContainer.beforeCollectionChanges(_)
+        1 * buildLogicBuilder.prepareClassPath(configuration, resolutionContext)
         0 * configurationContainer._
         0 * depMgmtServices._
     }
@@ -56,38 +78,53 @@ class DefaultScriptHandlerTest extends Specification {
 
         then:
         1 * depMgmtServices.configurationContainer >> configurationContainer
-        1 * configurationContainer.create('classpath') >> configuration
         1 * depMgmtServices.dependencyHandler >> dependencyHandler
+        1 * buildLogicBuilder.prepareDependencyHandler(dependencyHandler) >> resolutionContext
+        1 * configurationContainer.resolvableDependencyScopeLocked('classpath') >> configuration
+        1 * configurationContainer.beforeCollectionChanges(_)
+        1 * buildLogicBuilder.prepareClassPath(configuration, resolutionContext)
         0 * configurationContainer._
         0 * depMgmtServices._
     }
 
     def "does not resolve classpath configuration when configuration container has not been queried"() {
         when:
-        def classpath = handler.scriptClassPath
+        def classpath = handler.instrumentedScriptClassPath
 
         then:
         0 * configuration._
+        0 * buildLogicBuilder.resolveClassPath(_, _)
 
         and:
-        classpath.empty
+        classpath == ClassPath.EMPTY
     }
 
     def "resolves classpath configuration when configuration container has been queried"() {
-        def file = new File("thing.jar")
-        def uri = file.toURI()
+        def classpath = Mock(ClassPath)
 
         when:
         handler.configurations
-        def classpath = handler.scriptClassPath
+        def result = handler.instrumentedScriptClassPath
 
         then:
-        1 * depMgmtServices.configurationContainer >> configurationContainer
-        1 * configurationContainer.create('classpath') >> configuration
-        1 * configuration.files >> [file]
+        result == classpath
 
         and:
-        classpath.asURIs == [uri]
+        1 * depMgmtServices.configurationContainer >> configurationContainer
+        1 * depMgmtServices.dependencyHandler >> dependencyHandler
+        1 * buildLogicBuilder.prepareDependencyHandler(dependencyHandler) >> resolutionContext
+        1 * configurationContainer.resolvableDependencyScopeLocked('classpath') >> configuration
+        1 * configuration.callAndResetResolutionState(_) >> { args -> args[0].create() }
+        1 * buildLogicBuilder.prepareClassPath(configuration, resolutionContext)
+        1 * buildLogicBuilder.resolveClassPath(configuration, resolutionContext) >> classpath
+    }
+
+    def "script classpath queries runtime classpath"() {
+        when:
+        def result = handler.scriptClassPath
+
+        then:
+        result == ClasspathUtil.getClasspath(classLoaderScope.localClassLoader)
     }
 
     def "can configure repositories"() {
@@ -113,6 +150,9 @@ class DefaultScriptHandlerTest extends Specification {
         then:
         1 * depMgmtServices.dependencyHandler >> dependencyHandler
         1 * depMgmtServices.configurationContainer >> configurationContainer
+        1 * buildLogicBuilder.prepareDependencyHandler(dependencyHandler) >> resolutionContext
+        1 * configurationContainer.resolvableDependencyScopeLocked('classpath') >> configuration
+        1 * buildLogicBuilder.prepareClassPath(configuration, resolutionContext)
         1 * dependencyHandler.add('config', 'dep')
     }
 }

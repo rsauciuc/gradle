@@ -17,7 +17,6 @@
 package org.gradle.api.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import spock.lang.Unroll
 
 class InputPropertyAnnotationOverrideIntegrationTest extends AbstractIntegrationSpec {
     def setup() {
@@ -36,7 +35,6 @@ class InputPropertyAnnotationOverrideIntegrationTest extends AbstractIntegration
         file("inputs/input").text = "initial"
     }
 
-    @Unroll
     def "can override @Internal with @#inputType.simpleName"() {
         buildFile << """
             class InternalBaseTask extends BaseTask {
@@ -46,6 +44,7 @@ class InputPropertyAnnotationOverrideIntegrationTest extends AbstractIntegration
                 @${inputType.name} def input
             }
             custom {
+                def layout = project.layout
                 input = ${inputValue}
             }
         """
@@ -53,23 +52,22 @@ class InputPropertyAnnotationOverrideIntegrationTest extends AbstractIntegration
         succeeds("custom")
         then:
         file("build/output").text == "done"
-        result.assertTasksExecuted(":custom")
+        result.assertTasksScheduled(":custom")
         when:
         file("inputs/input").text = "new"
         succeeds("custom")
         then:
-        result.assertTasksExecuted(":custom")
+        result.assertTasksScheduled(":custom")
 
         where:
         inputType      | inputValue
         InputFile      | 'file("inputs/input")'
         InputDirectory | 'file("inputs")'
         InputFiles     | 'files("inputs")'
-        Input          | '{ file("inputs/input").text }'
+        Input          | '{ layout.projectDirectory.file("inputs/input").asFile.text }'
     }
 
 
-    @Unroll
     def "can override @#inputType.simpleName with @Internal"() {
         buildFile << """
             class InputBaseTask extends BaseTask {
@@ -86,7 +84,8 @@ class InputPropertyAnnotationOverrideIntegrationTest extends AbstractIntegration
         succeeds("custom")
         then:
         file("build/output").text == "done"
-        result.assertTasksExecuted(":custom")
+        result.assertTasksScheduled(":custom")
+
         when:
         file("inputs/input").text = "new"
         succeeds("custom")

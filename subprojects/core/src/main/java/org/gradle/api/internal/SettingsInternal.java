@@ -17,37 +17,104 @@
 package org.gradle.api.internal;
 
 import org.gradle.StartParameter;
-import org.gradle.api.initialization.ProjectDescriptor;
+import org.gradle.api.Incubating;
 import org.gradle.api.initialization.Settings;
+import org.gradle.api.internal.cache.CacheConfigurationsInternal;
+import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
-import org.gradle.api.internal.project.ProjectRegistry;
+import org.gradle.api.internal.plugins.PluginAwareInternal;
+import org.gradle.caching.configuration.internal.BuildCacheConfigurationInternal;
+import org.gradle.declarative.dsl.model.annotations.Adding;
+import org.gradle.declarative.dsl.model.annotations.HiddenInDefinition;
 import org.gradle.groovy.scripts.ScriptSource;
-import org.gradle.initialization.DefaultProjectDescriptor;
-import org.gradle.api.initialization.IncludedBuild;
+import org.gradle.initialization.IncludedBuildSpec;
+import org.gradle.initialization.ProjectDescriptorInternal;
+import org.gradle.initialization.ProjectDescriptorRegistry;
+import org.gradle.internal.FinalizableValue;
+import org.gradle.internal.initialization.BuildLogicFiles;
+import org.gradle.internal.management.DependencyResolutionManagementInternal;
+import org.gradle.internal.service.ServiceRegistry;
 
-import java.io.File;
-import java.util.Map;
+import java.net.URI;
+import java.util.List;
 
-public interface SettingsInternal extends Settings {
-    /**
-     * Returns the scope containing classes that should be visible to all settings scripts and build scripts invoked by this build.
-     */
-    ClassLoaderScope getRootClassLoaderScope();
+public interface SettingsInternal extends Settings, PluginAwareInternal, FinalizableValue {
 
-    /**
-     * Returns the scope into which the main settings script should define classes, and from which plugins applied to this settings object should be resolved.
-     */
-    ClassLoaderScope getClassLoaderScope();
+    String BUILD_SRC = BuildLogicFiles.BUILD_SOURCE_DIRECTORY;
 
+    @Override
+    @HiddenInDefinition
     StartParameter getStartParameter();
 
+    @HiddenInDefinition
     ScriptSource getSettingsScript();
 
-    ProjectRegistry<DefaultProjectDescriptor> getProjectRegistry();
+    @HiddenInDefinition
+    ProjectDescriptorRegistry getProjectRegistry();
 
-    ProjectDescriptor getDefaultProject();
+    @HiddenInDefinition
+    ProjectDescriptorInternal getDefaultProject();
 
-    void setDefaultProject(ProjectDescriptor defaultProject);
+    @HiddenInDefinition
+    void setDefaultProject(ProjectDescriptorInternal defaultProject);
 
-    Map<File, IncludedBuild> getIncludedBuilds();
+    @Override
+    @HiddenInDefinition
+    GradleInternal getGradle();
+
+    @HiddenInDefinition
+    List<IncludedBuildSpec> getIncludedBuilds();
+
+    /**
+     * The parent scope for this and all settings objects.
+     *
+     * Gradle runtime.
+     */
+    @HiddenInDefinition
+    ClassLoaderScope getBaseClassLoaderScope();
+
+    /**
+     * The scope for this settings object.
+     *
+     * Gradle runtime + this object's script's additions.
+     */
+    @HiddenInDefinition
+    ClassLoaderScope getClassLoaderScope();
+
+    @HiddenInDefinition
+    ServiceRegistry getServices();
+
+    @Override
+    @HiddenInDefinition
+    BuildCacheConfigurationInternal getBuildCache();
+
+    @Override
+    @HiddenInDefinition
+    DependencyResolutionManagementInternal getDependencyResolutionManagement();
+
+    @Override
+    @HiddenInDefinition
+    CacheConfigurationsInternal getCaches();
+
+    /**
+     * This is a version of {@link Settings#include(String...)} for just one argument.
+     * If varargs get supoprted in Declarative DSL this overload will no longer be needed.
+     */
+    @Adding
+    @Incubating
+    default void include(String projectPath) {
+        include(new String[]{projectPath});
+    }
+
+    /**
+     * A {@link URI} factory function exposed to DCL.
+     * Mimics {@code SettingsScriptApi.uri} available in Kotlin DSL.
+     * Primarily for use in {@link org.gradle.api.artifacts.repositories.MavenArtifactRepository#setUrl}
+     *
+     * @see FileOperations#uri
+     */
+    @Incubating
+    default URI uri(String path) {
+        return getServices().get(FileOperations.class).uri(path);
+    }
 }

@@ -17,9 +17,9 @@
 package org.gradle.plugin.use.internal;
 
 import com.google.common.base.CharMatcher;
-import org.gradle.api.Nullable;
 import org.gradle.plugin.internal.InvalidPluginIdException;
 import org.gradle.plugin.use.PluginId;
+import org.jspecify.annotations.Nullable;
 
 import static com.google.common.base.CharMatcher.anyOf;
 import static com.google.common.base.CharMatcher.inRange;

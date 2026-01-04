@@ -23,30 +23,25 @@ import org.gradle.api.internal.file.archive.compression.GzipArchiver;
 import org.gradle.api.internal.file.archive.compression.SimpleCompressor;
 import org.gradle.api.internal.file.copy.CopyAction;
 import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.Internal;
-
-import java.util.concurrent.Callable;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.gradle.work.DisableCachingByDefault;
 
 /**
  * Assembles a TAR archive.
  */
-public class Tar extends AbstractArchiveTask {
+@DisableCachingByDefault(because = "Not worth caching")
+public abstract class Tar extends AbstractArchiveTask {
     private Compression compression = Compression.NONE;
 
     public Tar() {
-        getConventionMapping().map("extension", new Callable<Object>(){
-            public Object call() throws Exception {
-                return getCompression().getDefaultExtension();
-            }
-        });
+        getArchiveExtension().set(getProject().provider(() -> getCompression().getDefaultExtension()));
     }
 
     @Override
     protected CopyAction createCopyAction() {
-        return new TarCopyAction(getArchivePath(), getCompressor(), isPreserveFileTimestamps());
+        return new TarCopyAction(getArchiveFile().get().getAsFile(), getCompressor(), isPreserveFileTimestamps());
     }
 
-    @Internal
     private ArchiveOutputStreamFactory getCompressor() {
         switch(compression) {
             case BZIP2: return Bzip2Archiver.getCompressor();
@@ -61,6 +56,7 @@ public class Tar extends AbstractArchiveTask {
      * @return The compression. Never returns null.
      */
     @Input
+    @ToBeReplacedByLazyProperty
     public Compression getCompression() {
         return compression;
     }

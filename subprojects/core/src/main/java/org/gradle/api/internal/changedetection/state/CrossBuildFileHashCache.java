@@ -16,43 +16,59 @@
 
 package org.gradle.api.internal.changedetection.state;
 
-import org.gradle.api.Nullable;
-import org.gradle.cache.CacheBuilder;
-import org.gradle.cache.CacheRepository;
+import org.gradle.cache.FileLockManager;
+import org.gradle.cache.IndexedCache;
+import org.gradle.cache.IndexedCacheParameters;
 import org.gradle.cache.PersistentCache;
-import org.gradle.cache.PersistentIndexedCache;
-import org.gradle.cache.PersistentIndexedCacheParameters;
-import org.gradle.cache.internal.FileLockManager;
-import org.gradle.internal.serialize.Serializer;
+import org.gradle.cache.internal.InMemoryCacheDecoratorFactory;
+import org.gradle.cache.scopes.ScopedCacheBuilderFactory;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 import java.io.Closeable;
-import java.io.File;
-import java.io.IOException;
 
-import static org.gradle.cache.internal.filelock.LockOptionsBuilder.mode;
+@ServiceScope({Scope.UserHome.class, Scope.BuildSession.class})
+public class CrossBuildFileHashCache implements Closeable {
 
-public class CrossBuildFileHashCache implements Closeable, TaskHistoryStore {
     private final PersistentCache cache;
     private final InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory;
 
-    public CrossBuildFileHashCache(@Nullable File cacheDir, CacheRepository repository, InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory) {
+    public CrossBuildFileHashCache(ScopedCacheBuilderFactory cacheBuilderFactory, InMemoryCacheDecoratorFactory inMemoryCacheDecoratorFactory, Kind cacheKind) {
         this.inMemoryCacheDecoratorFactory = inMemoryCacheDecoratorFactory;
-        CacheBuilder cacheBuilder = cacheDir != null ? repository.cache(cacheDir) : repository.cache("fileHashes");
-        cache = cacheBuilder
-            .withDisplayName("file hash cache")
-            .withLockOptions(mode(FileLockManager.LockMode.None)) // Lock on demand
+        cache = cacheBuilderFactory.createCacheBuilder(cacheKind.cacheId)
+            .withDisplayName(cacheKind.description)
+            .withInitialLockMode(FileLockManager.LockMode.OnDemand)
             .open();
     }
 
-    @Override
-    public <K, V> PersistentIndexedCache<K, V> createCache(String cacheName, Class<K> keyType, Serializer<V> valueSerializer, int maxEntriesToKeepInMemory, boolean cacheInMemoryForShortLivedProcesses) {
-        PersistentIndexedCacheParameters<K, V> parameters = new PersistentIndexedCacheParameters<K, V>(cacheName, keyType, valueSerializer)
-                .cacheDecorator(inMemoryCacheDecoratorFactory.decorator(maxEntriesToKeepInMemory, cacheInMemoryForShortLivedProcesses));
-        return cache.createCache(parameters);
+    public <K, V> IndexedCache<K, V> createIndexedCache(IndexedCacheParameters<K, V> parameters, int maxEntriesToKeepInMemory, boolean cacheInMemoryForShortLivedProcesses) {
+        return cache.createIndexedCache(parameters
+            .withCacheDecorator(inMemoryCacheDecoratorFactory.decorator(maxEntriesToKeepInMemory, cacheInMemoryForShortLivedProcesses))
+        );
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() {
         cache.close();
+    }
+
+    public enum Kind {
+        FILE_HASHES("fileHashes", "file hash cache"),
+        CHECKSUMS("checksums", "checksums cache");
+        private final String cacheId;
+        private final String description;
+
+        Kind(String cacheId, String description) {
+            this.cacheId = cacheId;
+            this.description = description;
+        }
+
+        public String getCacheId() {
+            return cacheId;
+        }
+
+        public String getDescription() {
+            return description;
+        }
     }
 }

@@ -17,12 +17,17 @@
 package org.gradle.api.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.LocalBuildCacheFixture
+import org.gradle.integtests.fixtures.DirectoryBuildCacheFixture
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
-class CachedRelocationIntegrationTest extends AbstractIntegrationSpec implements LocalBuildCacheFixture {
+import static org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache.Skip.INVESTIGATE
 
+class CachedRelocationIntegrationTest extends AbstractIntegrationSpec implements DirectoryBuildCacheFixture {
+
+    @ToBeFixedForConfigurationCache(skip = INVESTIGATE)
     def "relocating the project doesn't invalidate custom tasks declared in build script"() {
         def originalLocation = file("original-location").createDir()
+        def originalHome = file("original-home").createDir()
 
         originalLocation.file("external.gradle").text = externalTaskDef()
         originalLocation.file("input.txt") << "input"
@@ -36,35 +41,51 @@ class CachedRelocationIntegrationTest extends AbstractIntegrationSpec implements
         """
         originalLocation.file("build.gradle") << """
             println "Running build from: \$projectDir"
+            println "Running in Gradle home: \${gradle.gradleUserHomeDir}"
+
             apply plugin: "java"
             apply from: "external.gradle"
         """
+        originalLocation.file('settings.gradle') << localCacheConfiguration()
 
         when:
         executer.usingProjectDirectory(originalLocation)
-        withBuildCache().succeeds "jar", "customTask"
+        executer.withGradleUserHomeDir(originalHome)
+        withBuildCache().run "jar", "customTask"
 
         then:
-        nonSkippedTasks.containsAll ":compileJava", ":jar", ":customTask"
+        executedAndNotSkipped ":compileJava", ":jar", ":customTask"
 
         when:
         executer.usingProjectDirectory(originalLocation)
         originalLocation.file("external.gradle").text = externalTaskDef("modified")
-        withBuildCache().succeeds "jar", "customTask"
+        withBuildCache().run "jar", "customTask"
 
         then:
-        skippedTasks.containsAll ":compileJava"
-        nonSkippedTasks.contains ":customTask"
+        skipped ":compileJava"
+        executedAndNotSkipped ":customTask"
+
+        when:
+        executer.usingProjectDirectory(originalLocation)
+        run "clean"
+
+        def movedHome = temporaryFolder.file("moved-home")
+        executer.withGradleUserHomeDir(movedHome)
+        executer.usingProjectDirectory(originalLocation)
+        withBuildCache().run "jar", "customTask"
+
+        then:
+        skipped ":compileJava", ":customTask"
 
         when:
         executer.usingProjectDirectory(originalLocation)
         run "clean"
 
         executer.usingProjectDirectory(originalLocation)
-        withBuildCache().succeeds "jar", "customTask"
+        withBuildCache().run "jar", "customTask"
 
         then:
-        skippedTasks.containsAll ":compileJava", ":customTask"
+        skipped ":compileJava", ":customTask"
 
         when:
         def movedLocation = temporaryFolder.file("moved-location")
@@ -73,13 +94,13 @@ class CachedRelocationIntegrationTest extends AbstractIntegrationSpec implements
         movedLocation.file(".gradle").deleteDir()
 
         executer.usingProjectDirectory(movedLocation)
-        withBuildCache().succeeds "jar", "customTask"
+        withBuildCache().run "jar", "customTask"
 
         then:
         // Built-in tasks are loaded from cache
-        skippedTasks.containsAll ":compileJava"
+        skipped ":compileJava"
         // Custom tasks are also loaded from cache
-        skippedTasks.contains ":customTask"
+        skipped ":customTask"
     }
 
     static String externalTaskDef(String suffix = "") {
@@ -101,6 +122,18 @@ class CachedRelocationIntegrationTest extends AbstractIntegrationSpec implements
             task customTask(type: CustomTask) {
                 inputFile = file "input.txt"
                 outputFile = file "build/output.txt"
+                doFirst {
+                    printScriptOrigin("Action", owner)
+                }
+            }
+
+            def printScriptOrigin(def title, def o) {
+                // need to get through reflection to bypass the Groovy MOP on closures, which would cause calling the method on the owner instead of the closure itself
+                def type = o.getClass()
+                def originalClassName = type.getMethod('getOriginalClassName').invoke(o)
+                def contentHash = type.getMethod('getContentHash').invoke(o)
+                println "\${title} class name: \${originalClassName} (remapped: \${type.name})"
+                println "\${title} class hash: \${contentHash}"
             }
         """
     }

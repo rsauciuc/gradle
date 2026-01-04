@@ -16,32 +16,48 @@
 
 package org.gradle.api.internal.project
 
-import org.gradle.api.initialization.ProjectDescriptor
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.initialization.ClassLoaderScope
-import org.gradle.groovy.scripts.NonExistentFileScriptSource
-import org.gradle.groovy.scripts.UriScriptSource
+import org.gradle.groovy.scripts.TextResourceScriptSource
+import org.gradle.initialization.ProjectDescriptorInternal
+import org.gradle.internal.build.BuildState
+import org.gradle.internal.management.DependencyResolutionManagementInternal
 import org.gradle.internal.reflect.Instantiator
+import org.gradle.internal.resource.DefaultTextFileResourceLoader
+import org.gradle.internal.resource.EmptyFileTextResource
+import org.gradle.internal.scripts.ProjectScopedScriptResolution
+import org.gradle.internal.service.ServiceRegistry
 import org.gradle.internal.service.scopes.ServiceRegistryFactory
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.Path
 import org.junit.Rule
 import spock.lang.Specification
 
 class ProjectFactoryTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def instantiator = Mock(Instantiator)
-    def projectDescriptor = Stub(ProjectDescriptor)
+    def projectDescriptor = Stub(ProjectDescriptorInternal)
     def gradle = Stub(GradleInternal)
     def serviceRegistryFactory = Stub(ServiceRegistryFactory)
     def projectRegistry = Mock(ProjectRegistry)
     def project = Stub(DefaultProject)
-    def factory = new ProjectFactory(instantiator, projectRegistry)
+    def buildId = Path.ROOT
+    def owner = Stub(BuildState)
+    def projectState = Stub(ProjectState) {
+        getIdentity() >> { ProjectIdentity.forRootProject(buildId, projectDescriptor.name) }
+    }
+    def scriptResolution = Stub(ProjectScopedScriptResolution) {
+        resolveScriptsForProject(_, _) >> { project, action -> action.get() }
+    }
+    def factory = new ProjectFactory(instantiator, new DefaultTextFileResourceLoader(), scriptResolution)
     def rootProjectScope = Mock(ClassLoaderScope)
     def baseScope = Mock(ClassLoaderScope)
+    def serviceRegistry = Mock(ServiceRegistry)
+    def dependencyResolutionManagement = Mock(DependencyResolutionManagementInternal)
 
     def setup() {
-        gradle.serviceRegistryFactory >> serviceRegistryFactory
+        owner.identityPath >> buildId
     }
 
     def "creates a project with build script"() {
@@ -52,14 +68,18 @@ class ProjectFactoryTest extends Specification {
         projectDescriptor.name >> "name"
         projectDescriptor.projectDir >> projectDir
         projectDescriptor.buildFile >> buildFile
+        gradle.projectRegistry >> projectRegistry
+        gradle.services >> serviceRegistry
+        serviceRegistry.get(DependencyResolutionManagementInternal) >> dependencyResolutionManagement
 
         when:
-        def result = factory.createProject(projectDescriptor, null, gradle, rootProjectScope, baseScope)
+        def result = factory.createProject(gradle, projectDescriptor, projectState, null, serviceRegistryFactory, rootProjectScope, baseScope)
 
         then:
         result == project
-        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, { it instanceof UriScriptSource }, gradle, serviceRegistryFactory, rootProjectScope, baseScope) >> project
+        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, buildFile, { it instanceof TextResourceScriptSource }, gradle, projectState, serviceRegistryFactory, rootProjectScope, baseScope) >> project
         1 * projectRegistry.addProject(project)
+        1 * dependencyResolutionManagement.configureProject(project)
     }
 
     def "creates a project with missing build script"() {
@@ -70,14 +90,17 @@ class ProjectFactoryTest extends Specification {
         projectDescriptor.name >> "name"
         projectDescriptor.projectDir >> projectDir
         projectDescriptor.buildFile >> buildFile
-
+        gradle.projectRegistry >> projectRegistry
+        gradle.services >> serviceRegistry
+        serviceRegistry.get(DependencyResolutionManagementInternal) >> dependencyResolutionManagement
         when:
-        def result = factory.createProject(projectDescriptor, null, gradle, rootProjectScope, baseScope)
+        def result = factory.createProject(gradle, projectDescriptor, projectState, null, serviceRegistryFactory, rootProjectScope, baseScope)
 
         then:
         result == project
-        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, { it instanceof NonExistentFileScriptSource }, gradle, serviceRegistryFactory, rootProjectScope, baseScope) >> project
+        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, buildFile, { it.resource instanceof EmptyFileTextResource }, gradle, projectState, serviceRegistryFactory, rootProjectScope, baseScope) >> project
         1 * projectRegistry.addProject(project)
+        1 * dependencyResolutionManagement.configureProject(project)
     }
 
     def "creates a child project"() {
@@ -89,14 +112,16 @@ class ProjectFactoryTest extends Specification {
         projectDescriptor.name >> "name"
         projectDescriptor.projectDir >> projectDir
         projectDescriptor.buildFile >> buildFile
-
+        gradle.projectRegistry >> projectRegistry
+        gradle.services >> serviceRegistry
+        serviceRegistry.get(DependencyResolutionManagementInternal) >> dependencyResolutionManagement
         when:
-        def result = factory.createProject(projectDescriptor, parent, gradle, rootProjectScope, baseScope)
+        def result = factory.createProject(gradle, projectDescriptor, projectState, parent, serviceRegistryFactory, rootProjectScope, baseScope)
 
         then:
         result == project
-        1 * instantiator.newInstance(DefaultProject, "name", parent, projectDir, _, gradle, serviceRegistryFactory, rootProjectScope, baseScope) >> project
-        1 * parent.addChildProject(project)
+        1 * instantiator.newInstance(DefaultProject, "name", parent, projectDir, buildFile, _, gradle, projectState, serviceRegistryFactory, rootProjectScope, baseScope) >> project
         1 * projectRegistry.addProject(project)
+        1 * dependencyResolutionManagement.configureProject(project)
     }
 }

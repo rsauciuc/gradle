@@ -16,146 +16,53 @@
 
 package org.gradle.api.internal.artifacts.dependencies
 
-import org.gradle.api.artifacts.ExternalDependency
 import org.gradle.api.artifacts.ProjectDependency
-import org.gradle.api.internal.artifacts.DependencyResolveContext
+import org.gradle.api.internal.artifacts.dsl.CapabilityNotationParserFactory
+import org.gradle.api.internal.project.ProjectIdentity
 import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.api.internal.tasks.TaskDependencyResolveContext
-import org.gradle.initialization.ProjectAccessListener
-import org.gradle.internal.exceptions.ConfigurationNotConsumableException
-import org.gradle.test.fixtures.AbstractProjectBuilderSpec
+import org.gradle.api.internal.project.ProjectState
+import org.gradle.util.AttributeTestUtil
+import org.gradle.util.Path
+import org.gradle.util.TestUtil
+import spock.lang.Specification
 
 import static org.gradle.api.internal.artifacts.dependencies.AbstractModuleDependencySpec.assertDeepCopy
 import static org.gradle.util.Matchers.strictlyEqual
-import static org.junit.Assert.assertThat
+import static org.hamcrest.MatcherAssert.assertThat
 
-class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
+class DefaultProjectDependencyTest extends Specification {
 
-    ProjectAccessListener listener = Mock()
+    ProjectState projectState = Stub(ProjectState) {
+        getIdentity() >> ProjectIdentity.forRootProject(Path.ROOT, "test-project")
+    }
 
-    private projectDependency
+    private ProjectDependency projectDependency
 
     def setup() {
-        projectDependency = new DefaultProjectDependency(project, null, false)
-        project.version = "1.2"
-        project.group = "org.gradle"
+        def project = Mock(ProjectInternal) {
+            getGroup() >> "org.gradle"
+            getVersion() >> "1.2"
+            getOwner() >> projectState
+        }
+        projectState.getMutableModel() >> project
+
+        projectDependency = new DefaultProjectDependency(projectState)
+        projectDependency.setAttributesFactory(AttributeTestUtil.attributesFactory())
+        projectDependency.setCapabilityNotationParser(new CapabilityNotationParserFactory(false).create())
+        projectDependency.setObjectFactory(TestUtil.objectFactory())
+    }
+
+    def "exposes local project path"() {
+        expect:
+        projectDependency.path == projectState.identity.projectPath.asString()
     }
 
     void "provides dependency information"() {
         expect:
         projectDependency.transitive
-        projectDependency.name == project.name
+        projectDependency.name == projectState.identity.projectName
         projectDependency.group == "org.gradle"
         projectDependency.version == "1.2"
-    }
-
-    void "transitive resolution resolves all dependencies"() {
-        def context = Mock(DependencyResolveContext)
-
-        def superConf = project.configurations.create("superConf")
-        def conf = project.configurations.create("conf")
-        conf.extendsFrom(superConf)
-
-        def dep1 = Mock(ProjectDependency)
-        def dep2 = Mock(ExternalDependency)
-        conf.dependencies.add(dep1)
-        superConf.dependencies.add(dep2)
-
-        projectDependency = new DefaultProjectDependency(project, "conf", null, true)
-
-        when:
-        projectDependency.resolve(context)
-
-        then:
-        1 * context.transitive >> true
-        1 * context.add(dep1)
-        1 * context.add(dep2)
-        0 * _
-    }
-
-    void "if resolution context is not transitive it will not contain all dependencies"() {
-        def context = Mock(DependencyResolveContext)
-        projectDependency = new DefaultProjectDependency(project, null, true)
-
-        when:
-        projectDependency.resolve(context)
-
-        then:
-        1 * context.transitive >> false
-        0 * _
-    }
-
-    void "if dependency is not transitive the resolution context will not contain all dependencies"() {
-        def context = Mock(DependencyResolveContext)
-        projectDependency = new DefaultProjectDependency(project, null, true)
-        projectDependency.setTransitive(false)
-
-        when:
-        projectDependency.resolve(context)
-
-        then:
-        0 * _
-    }
-
-    void "is buildable"() {
-        def context = Mock(TaskDependencyResolveContext)
-
-        def conf = project.configurations.create('conf')
-        def listener = Mock(ProjectAccessListener)
-        projectDependency = new DefaultProjectDependency(project, 'conf', listener, true)
-
-        when:
-        projectDependency.buildDependencies.visitDependencies(context)
-
-        then:
-        1 * context.add(conf)
-        1 * context.add({it.is(conf.allArtifacts)})
-        1 * listener.beforeResolvingProjectDependency(project)
-        0 * _
-    }
-
-    void "doesn't allow selection of configuration is not consumable"() {
-        def context = Mock(TaskDependencyResolveContext)
-
-        def conf = project.configurations.create('conf') {
-            canBeConsumed = false
-        }
-        def listener = Mock(ProjectAccessListener)
-        projectDependency = new DefaultProjectDependency(project, 'conf', listener, true)
-
-        when:
-        projectDependency.buildDependencies.visitDependencies(context)
-
-        then:
-        def e = thrown(ConfigurationNotConsumableException)
-        e.message == "Selected configuration 'conf' on 'root project 'test'' but it can't be used as a project dependency because it isn't intended for consumption by other components."
-    }
-
-    void "does not build project dependencies if configured so"() {
-         def context = Mock(TaskDependencyResolveContext)
-         project.configurations.create('conf')
-         projectDependency = new DefaultProjectDependency(project, 'conf', listener, false)
-
-         when:
-         projectDependency.buildDependencies.visitDependencies(context)
-
-         then:
-         0 * _
-     }
-
-    void "is self resolving dependency"() {
-        def conf = project.configurations.create('conf')
-        def listener = Mock(ProjectAccessListener)
-        projectDependency = new DefaultProjectDependency(project, 'conf', listener, true)
-
-        when:
-        def files = projectDependency.resolve()
-
-        then:
-        0 * _
-
-        and:
-        files == conf.allArtifacts.files as Set
     }
 
     void "knows when content is equal"() {
@@ -163,16 +70,16 @@ class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
         def d2 = createProjectDependency()
 
         expect:
-        d1.contentEquals(d2)
+        d1 == d2
     }
 
-    void "knows when content is not euqal"() {
+    void "knows when content is not equal"() {
         def d1 = createProjectDependency()
         def d2 = createProjectDependency()
         d2.setTransitive(false)
 
         expect:
-        !d1.contentEquals(d2)
+        d1 != d2
     }
 
     void "can copy"() {
@@ -181,32 +88,61 @@ class DefaultProjectDependencyTest extends AbstractProjectBuilderSpec {
 
         expect:
         assertDeepCopy(d1, copy)
-        d1.dependencyProject == copy.dependencyProject
+        d1.path == copy.path
+    }
+
+    def "requested capabilities exposes all capability selector types"() {
+        when:
+        projectDependency.capabilities {
+            it.requireCapability('org:original:1')
+            it.requireFeature('foo')
+        }
+
+        then:
+        projectDependency.requestedCapabilities.size() == 2
+        projectDependency.requestedCapabilities[0].group == 'org'
+        projectDependency.requestedCapabilities[0].name == 'original'
+        projectDependency.requestedCapabilities[0].version == '1'
+        projectDependency.requestedCapabilities[1].group == 'org.gradle'
+        projectDependency.requestedCapabilities[1].name == 'test-project-foo'
+        projectDependency.requestedCapabilities[1].version == '1.2'
     }
 
     private createProjectDependency() {
-        def out = new DefaultProjectDependency(project, "conf", listener, true)
+        def out = new DefaultProjectDependency(projectState)
         out.addArtifact(new DefaultDependencyArtifact("name", "type", "ext", "classifier", "url"))
         out
     }
 
     void "knows if is equal"() {
-        expect:
-        assertThat(new DefaultProjectDependency(project, listener, true),
-                strictlyEqual(new DefaultProjectDependency(project, listener, true)))
+        def dep1 = new DefaultProjectDependency(projectState)
+        def dep2 = new DefaultProjectDependency(projectState)
 
-        assertThat(new DefaultProjectDependency(project, "conf1", listener, false),
-                strictlyEqual(new DefaultProjectDependency(project, "conf1", listener, false)))
+        def dep1WithConf = new DefaultProjectDependency(projectState)
+        dep1WithConf.setTargetConfiguration("conf1")
+
+        def dep2WithConf = new DefaultProjectDependency(projectState)
+        dep2WithConf.setTargetConfiguration("conf1")
+
+        expect:
+        assertThat(dep1, strictlyEqual(dep2))
+        assertThat(dep1WithConf, strictlyEqual(dep2WithConf))
 
         when:
-        def base = new DefaultProjectDependency(project, "conf1", listener, true)
-        def differentConf = new DefaultProjectDependency(project, "conf2", listener, true)
-        def differentBuildDeps = new DefaultProjectDependency(project, "conf1", listener, false)
-        def differentProject = new DefaultProjectDependency(Mock(ProjectInternal), "conf1", listener, true)
+        def base = new DefaultProjectDependency(projectState)
+        base.setTargetConfiguration("conf1")
+
+        def differentConf = new DefaultProjectDependency(projectState)
+        differentConf.setTargetConfiguration("conf2")
+
+        def otherProjectState = Mock(ProjectState) {
+            getIdentity() >> ProjectIdentity.forSubproject(Path.ROOT, Path.path(":bar"))
+        }
+        def differentProject = new DefaultProjectDependency(otherProjectState)
+        differentProject.setTargetConfiguration("conf1")
 
         then:
         base != differentConf
-        base != differentBuildDeps
         base != differentProject
     }
 }

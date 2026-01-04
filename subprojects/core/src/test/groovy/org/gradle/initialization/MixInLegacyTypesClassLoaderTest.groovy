@@ -18,7 +18,9 @@ package org.gradle.initialization
 
 import org.gradle.internal.classloader.FilteringClassLoader
 import org.gradle.internal.classloader.VisitableURLClassLoader
+import org.gradle.internal.classpath.ClassPath
 import org.gradle.internal.classpath.DefaultClassPath
+import org.gradle.internal.reflect.JavaReflectionUtil
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
@@ -27,62 +29,29 @@ import javax.tools.ToolProvider
 
 class MixInLegacyTypesClassLoaderTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def classesDir = tmpDir.file("classes")
     def srcDir = tmpDir.file("source")
 
-    def "mixes GroovyObject into JavaPluginConvention"() {
-        given:
-        def className = "org.gradle.api.plugins.JavaPluginConvention"
-
-        def original = compileJavaToDir(className, """
-            package org.gradle.api.plugins;
-            class JavaPluginConvention {
-                String _prop;
-                String getProp() { return _prop; }
-                void setProp(String value) { _prop = value; }
-                String doSomething(String arg) { return arg; }
-            }
-        """)
-        !GroovyObject.isAssignableFrom(original)
-
-        expect:
-        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, new DefaultClassPath(classesDir), new DefaultLegacyTypesSupport())
-
-        def cl = loader.loadClass(className)
-        cl.classLoader.is(loader)
-        cl.protectionDomain.codeSource.location == classesDir.toURI().toURL()
-        cl.package.name == "org.gradle.api.plugins"
-
-        def obj = cl.newInstance()
-        obj instanceof GroovyObject
-        obj.getMetaClass()
-        obj.metaClass
-        obj.setProperty("prop", "value")
-        obj.getProperty("prop") == "value"
-        obj.invokeMethod("doSomething", "arg") == "arg"
-
-        def newMetaClass = new MetaClassImpl(cl)
-        newMetaClass.initialize()
-        obj.setMetaClass(newMetaClass) == null
-    }
 
     def "add getters for String constants"() {
         given:
-        def className = "org.gradle.api.plugins.JavaPluginConvention"
+        def className = "org.gradle.api.plugins.JavaLibraryDistributionPlugin"
 
         def original = compileJavaToDir(className, """
             package org.gradle.api.plugins;
-            class JavaPluginConvention {
+            class JavaLibraryDistributionPlugin {
                 public static final String SOME_CONST = "Value";
                 public static final String SOME_CONST_WITH_GETTER = "Other Value";
-
+                public static final String SOME_CONST_WITH_RHS_EXPRESSION = doSomething("Derived Value");
+                public static final String SOME_CONST_WITH_RHS_EXPRESSION_AND_GETTER = doSomething("Other Derived Value");
                 public static String getSomeStuff() { return SOME_CONST; }
                 public static String getSOME_CONST_WITH_GETTER() { return SOME_CONST_WITH_GETTER; }
+                public static String getSOME_CONST_WITH_RHS_EXPRESSION_AND_GETTER() { return SOME_CONST_WITH_RHS_EXPRESSION_AND_GETTER; }
                 String _prop;
                 String getProp() { return _prop; }
                 void setProp(String value) { _prop = value; }
-                String doSomething(String arg) { return arg; }
+                private static String doSomething(String arg) { return arg; }
             }
         """)
 
@@ -92,8 +61,14 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
         then:
         thrown java.lang.NoSuchMethodException
 
+        when:
+        original.getMethod("getSOME_CONST_WITH_RHS_EXPRESSION")
+
+        then:
+        thrown java.lang.NoSuchMethodException
+
         expect:
-        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, new DefaultClassPath(classesDir), new DefaultLegacyTypesSupport())
+        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, DefaultClassPath.of(classesDir), new DefaultLegacyTypesSupport())
 
         def cl = loader.loadClass(className)
         cl.classLoader.is(loader)
@@ -103,26 +78,29 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
 
         cl.SOME_CONST_WITH_GETTER == "Other Value"
         cl.getSOME_CONST_WITH_GETTER() == "Other Value"
+
+        cl.SOME_CONST_WITH_RHS_EXPRESSION == "Derived Value"
+        cl.getSOME_CONST_WITH_RHS_EXPRESSION() == "Derived Value"
+
+        cl.SOME_CONST_WITH_RHS_EXPRESSION_AND_GETTER == "Other Derived Value"
+        cl.getSOME_CONST_WITH_RHS_EXPRESSION_AND_GETTER() == "Other Derived Value"
     }
 
     def "add getters for booleans"() {
         given:
-        def className = "org.gradle.api.plugins.JavaPluginConvention"
+        def className = "org.gradle.api.plugins.JavaLibraryDistributionPlugin"
 
         def original = compileJavaToDir(className, """
             package org.gradle.api.plugins;
-            class JavaPluginConvention {
+            class JavaLibraryDistributionPlugin {
                 private boolean someBoolean = true;
                 private boolean booleanWithGetter = false;
                 private static boolean staticBoolean = true;
-
                 public boolean publicBoolean = true;
-
                 public boolean isSomeBoolean() { return someBoolean; }
                 public boolean isBooleanWithGetter() { return booleanWithGetter; }
                 public boolean getBooleanWithGetter() { return booleanWithGetter; }
                 public boolean isWithoutField() { return true; }
-
                 public static boolean isStaticBoolean() { return true; }
             }
         """)
@@ -134,10 +112,10 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
         thrown java.lang.NoSuchMethodException
 
         expect:
-        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, new DefaultClassPath(classesDir), new DefaultLegacyTypesSupport())
+        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, DefaultClassPath.of(classesDir), new DefaultLegacyTypesSupport())
 
         def cl = loader.loadClass(className)
-        def obj = cl.newInstance()
+        def obj = JavaReflectionUtil.newInstance(cl)
         obj.getSomeBoolean() == true
         obj.someBoolean == true
 
@@ -165,7 +143,6 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
         then:
         thrown java.lang.NoSuchMethodException
     }
-
     def "does not mix GroovyObject into other types"() {
         given:
         def className = "org.gradle.api.plugins.Thing"
@@ -178,7 +155,7 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
         !GroovyObject.isAssignableFrom(original)
 
         expect:
-        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, new DefaultClassPath(classesDir), new DefaultLegacyTypesSupport())
+        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, DefaultClassPath.of(classesDir), new DefaultLegacyTypesSupport())
 
         def cl = loader.loadClass(className)
         cl.classLoader.is(loader)
@@ -189,7 +166,7 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
 
     def "mixes in empty interfaces for old types that were removed"() {
         expect:
-        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, new DefaultClassPath(), new DefaultLegacyTypesSupport())
+        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, ClassPath.EMPTY, new DefaultLegacyTypesSupport())
 
         def cl = loader.loadClass("org.gradle.messaging.actor.ActorFactory")
         cl.classLoader.is(loader)
@@ -199,7 +176,7 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
     }
 
     def "fails for unknown class"() {
-        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, new DefaultClassPath(), new DefaultLegacyTypesSupport())
+        def loader = new MixInLegacyTypesClassLoader(groovyClassLoader, ClassPath.EMPTY, new DefaultLegacyTypesSupport())
 
         when:
         loader.loadClass("org.gradle.Unknown")
@@ -225,7 +202,7 @@ class MixInLegacyTypesClassLoaderTest extends Specification {
         def fileManager = compiler.getStandardFileManager(null, null, null)
         def task = compiler.getTask(null, fileManager, null, ["-d", classesDir.path], null, fileManager.getJavaFileObjects(srcFile))
         task.call()
-        def cl = new VisitableURLClassLoader(groovyClassLoader, new DefaultClassPath(classesDir))
+        def cl = VisitableURLClassLoader.fromClassPath("groovy-loader", groovyClassLoader, DefaultClassPath.of(classesDir))
         cl.loadClass(className)
     }
 }

@@ -17,8 +17,11 @@
 package org.gradle.initialization
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
 import org.gradle.util.SetSystemProperties
 import org.junit.Rule
+import spock.lang.Issue
 
 class PropertiesLoaderIntegrationTest extends AbstractIntegrationSpec {
     @Rule SetSystemProperties systemProperties = new SetSystemProperties()
@@ -28,19 +31,20 @@ class PropertiesLoaderIntegrationTest extends AbstractIntegrationSpec {
         file('gradle.properties') << """
 org.gradle.configureondemand=true
 """
-        buildFile << """
-task assertCodEnabled {
-    doLast {
-        assert gradle.startParameter.configureOnDemand
-    }
-}
+        buildFile """
+            def codStatus = provider { gradle.startParameter.configureOnDemand }
+            task assertCodEnabled {
+                doLast {
+                    assert codStatus.get()
+                }
+            }
 
-task assertCodDisabled {
-    doLast {
-        assert !gradle.startParameter.configureOnDemand
-    }
-}
-"""
+            task assertCodDisabled {
+                doLast {
+                    assert !codStatus.get()
+                }
+            }
+        """
 
         then:
         succeeds ':assertCodEnabled'
@@ -65,36 +69,37 @@ task printSystemProp {
 }
 """
         when:
-        def result = run ':printSystemProp'
+        succeeds ':printSystemProp'
 
         then:
-        result.assertOutputContains('mySystemProp=properties file')
+        outputContains('mySystemProp=properties file')
 
         when:
         args '-DmySystemProp=commandline'
-        result = run ':printSystemProp'
+        succeeds ':printSystemProp'
 
         then:
-        result.assertOutputContains('mySystemProp=commandline')
+        outputContains('mySystemProp=commandline')
     }
 
+    @Requires(IntegTestPreconditions.NotEmbeddedExecutor) // needs to run Gradle from command line
     def "build property set on command line takes precedence over jvm args"() {
         when:
-        executer.requireGradleDistribution()
         executer.withEnvironmentVars 'GRADLE_OPTS': '-Dorg.gradle.configureondemand=true'
 
-        buildFile << """
-task assertCodEnabled {
-    doLast {
-        assert gradle.startParameter.configureOnDemand
-    }
-}
+        buildFile """
+            def codStatus = provider { gradle.startParameter.configureOnDemand }
+            task assertCodEnabled {
+                doLast {
+                    assert codStatus.get()
+                }
+            }
 
-task assertCodDisabled {
-    doLast {
-        assert !gradle.startParameter.configureOnDemand
-    }
-}
+            task assertCodDisabled {
+                doLast {
+                    assert !codStatus.get()
+                }
+            }
 """
 
         then:
@@ -107,9 +112,9 @@ task assertCodDisabled {
         succeeds ':assertCodDisabled'
     }
 
+    @Requires(IntegTestPreconditions.NotEmbeddedExecutor) // needs to run Gradle from command line
     def "system property set on command line takes precedence over jvm args"() {
         given:
-        executer.requireGradleDistribution()
         executer.withEnvironmentVars 'GRADLE_OPTS': '-DmySystemProp=jvmarg'
 
         buildFile << """
@@ -120,16 +125,92 @@ task printSystemProp {
 }
 """
         when:
-        def result = run ':printSystemProp'
+        succeeds ':printSystemProp'
 
         then:
-        result.assertOutputContains('mySystemProp=jvmarg')
+        outputContains('mySystemProp=jvmarg')
 
         when:
         args '-DmySystemProp=commandline'
-        result = run ':printSystemProp'
+        succeeds ':printSystemProp'
 
         then:
-        result.assertOutputContains('mySystemProp=commandline')
+        outputContains('mySystemProp=commandline')
+    }
+
+    def "can always change buildDir in properties file"() {
+        when:
+        file('gradle.properties') << """
+            buildDir=otherBuild
+        """
+        then:
+        succeeds ':help'
+    }
+
+    def "Gradle properties can be derived from environment variables"() {
+        given:
+        buildFile << """
+            task printProperty() {
+                def myProp = providers.gradleProperty('myProp')
+                doLast {
+                    println "myProp=\${myProp.get()}"
+                }
+            }
+        """
+
+        when:
+        executer.withEnvironmentVars(ORG_GRADLE_PROJECT_myProp: 'fromEnv')
+
+        then:
+        succeeds 'printProperty'
+
+        and:
+        outputContains("myProp=fromEnv")
+
+        when:
+        executer.withEnvironmentVars(ORG_GRADLE_PROJECT_myProp: 'fromEnv2')
+
+        then:
+        succeeds 'printProperty'
+
+        and:
+        outputContains("myProp=fromEnv2")
+    }
+
+    @Requires(IntegTestPreconditions.NotEmbeddedExecutor)
+    def "properties can be distributed as part of a custom Gradle installation"() {
+        given:
+        requireIsolatedGradleDistribution()
+
+        when:
+        distribution.gradleHomeDir.file('gradle.properties') << 'systemProp.mySystemProp=properties file'
+        buildFile << """
+            task printSystemProp {
+                doLast {
+                    println "mySystemProp=\${System.getProperty('mySystemProp')}"
+                }
+            }
+        """
+        succeeds ':printSystemProp'
+
+        then:
+        outputContains('mySystemProp=properties file')
+
+        cleanup:
+        executer.withArguments("--stop", "--info").run()
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/12122")
+    def "build property with invalid property name ('#property') does not fail the build"() {
+        given:
+        file('gradle.properties') << """
+${property}
+"""
+
+        expect:
+        succeeds 'help'
+
+        where:
+        property << ["=", "==", "===", ":", "::", ":::", ":=:", "=:="]
     }
 }

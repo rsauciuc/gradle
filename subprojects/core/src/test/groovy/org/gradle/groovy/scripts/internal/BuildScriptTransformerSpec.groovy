@@ -16,53 +16,70 @@
 
 package org.gradle.groovy.scripts.internal
 
-import com.google.common.base.Charsets
-import com.google.common.hash.Hashing
-import org.gradle.api.internal.initialization.loadercache.ClassLoaderId
-import org.gradle.api.internal.initialization.loadercache.DummyClassLoaderCache
+import org.gradle.api.internal.file.TestFiles
+import org.gradle.api.internal.initialization.ClassLoaderScope
 import org.gradle.api.internal.project.ProjectScript
+import org.gradle.api.problems.Problems
 import org.gradle.configuration.ImportsReader
 import org.gradle.configuration.ScriptTarget
-import org.gradle.groovy.scripts.StringScriptSource
+import org.gradle.groovy.scripts.TextResourceScriptSource
 import org.gradle.internal.Actions
+import org.gradle.internal.classpath.DefaultClassPath
+import org.gradle.internal.file.Deleter
+import org.gradle.internal.hash.Hashing
+import org.gradle.internal.resource.StringTextResource
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.TestUtil
 import org.junit.Rule
 import spock.lang.Specification
-import spock.lang.Unroll
 
 class BuildScriptTransformerSpec extends Specification {
 
     @Rule
-    public TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider();
+    public TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
 
     def importsReader = Mock(ImportsReader) {
         getImportPackages() >> ([] as String[])
         getSimpleNameToFullClassNamesMapping() >> [:]
     }
 
-    final DefaultScriptCompilationHandler scriptCompilationHandler = new DefaultScriptCompilationHandler(new DummyClassLoaderCache(), importsReader)
+    final DefaultScriptCompilationHandler scriptCompilationHandler = new DefaultScriptCompilationHandler(
+        importsReader
+    ) {
+        @Override
+        protected Deleter getDeleter() {
+            return TestFiles.deleter()
+        }
+
+        @Override
+        protected Problems getProblemsService() {
+            return TestUtil.problemsService()
+        }
+    }
 
     File scriptCacheDir
     File metadataCacheDir
-    private classLoaderId = Mock(ClassLoaderId)
 
     def setup() {
-        File testProjectDir = tmpDir.createDir("projectDir");
-        scriptCacheDir = new File(testProjectDir, "cache");
-        metadataCacheDir = new File(testProjectDir, "metadata");
+        File testProjectDir = tmpDir.createDir("projectDir")
+        scriptCacheDir = new File(testProjectDir, "cache")
+        metadataCacheDir = new File(testProjectDir, "metadata")
     }
 
     private CompiledScript<Script, BuildScriptData> parse(String script) {
-        def source = new StringScriptSource("test script", script)
-        def sourceHashCode = Hashing.md5().hashString(script, Charsets.UTF_8)
+        def source = new TextResourceScriptSource(new StringTextResource("test script", script))
+        def sourceHashCode = Hashing.hashString(script)
         def target = Mock(ScriptTarget) {
             getClasspathBlockName() >> "buildscript"
         }
+        def targetScope = Stub(ClassLoaderScope) {
+            createChild(_ as String) >> Stub(ClassLoaderScope)
+        }
         def loader = getClass().getClassLoader()
         def transformer = new BuildScriptTransformer(source, target)
-        def operation = new FactoryBackedCompileOperation<BuildScriptData>("id", transformer, transformer, new BuildScriptDataSerializer())
+        def operation = new FactoryBackedCompileOperation<BuildScriptData>("id", 'stage', transformer, transformer, new BuildScriptDataSerializer())
         scriptCompilationHandler.compileToDir(source, loader, scriptCacheDir, metadataCacheDir, operation, ProjectScript, Actions.doNothing())
-        return scriptCompilationHandler.loadFromDir(source, sourceHashCode, loader, scriptCacheDir, metadataCacheDir, operation, ProjectScript, classLoaderId)
+        return scriptCompilationHandler.loadFromDir(source, sourceHashCode, targetScope, DefaultClassPath.of(scriptCacheDir), metadataCacheDir, operation, ProjectScript)
     }
 
     def "empty script does not contain any code"() {
@@ -228,7 +245,6 @@ return 12
 """         | _
     }
 
-    @Unroll
     def "imperative code is detected in #script"() {
         expect:
         def scriptData = parse(script)
@@ -237,24 +253,24 @@ return 12
         !scriptData.hasMethods
 
         where:
-        script                                         | _
-        "foo = 'bar'"                                  | _
-        "foo"                                          | _
-        '"${foo}"'                                     | _
-        "println 'hi!'"                                | _
-        "return a + 1"                                 | _
-        "return foo"                                   | _
-        'return "${foo}"'                              | _
-        'String s = "a" + "b"'                         | _
-        "if (a) { return null }; foo"                  | _
+        script                        | _
+        "foo = 'bar'"                 | _
+        "foo"                         | _
+        '"${foo}"'                    | _
+        "println 'hi!'"               | _
+        "return a + 1"                | _
+        "return foo"                  | _
+        'return "${foo}"'             | _
+        'String s = "a" + "b"'        | _
+        "if (a) { return null }; foo" | _
         """
 plugins {
 }
 println "hi"
-"""                                         | _
+"""                        | _
         """
 foo
 return null
-"""                                         | _
+"""                        | _
     }
 }

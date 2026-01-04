@@ -15,147 +15,163 @@
  */
 package org.gradle.api.internal.tasks.execution;
 
-import com.google.common.collect.Lists;
-import org.gradle.api.Action;
-import org.gradle.api.GradleException;
-import org.gradle.api.execution.TaskActionListener;
 import org.gradle.api.internal.TaskInternal;
-import org.gradle.api.internal.tasks.ContextAwareTaskAction;
+import org.gradle.api.internal.file.FileCollectionFactory;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
 import org.gradle.api.internal.tasks.TaskExecuter;
+import org.gradle.api.internal.tasks.TaskExecuterResult;
 import org.gradle.api.internal.tasks.TaskExecutionContext;
 import org.gradle.api.internal.tasks.TaskExecutionOutcome;
 import org.gradle.api.internal.tasks.TaskStateInternal;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
-import org.gradle.api.tasks.StopActionException;
-import org.gradle.api.tasks.StopExecutionException;
 import org.gradle.api.tasks.TaskExecutionException;
-import org.gradle.internal.UncheckedException;
-import org.gradle.internal.exceptions.Contextual;
-import org.gradle.internal.exceptions.DefaultMultiCauseException;
-import org.gradle.internal.exceptions.MultiCauseException;
-import org.gradle.internal.operations.BuildOperationContext;
-import org.gradle.internal.progress.BuildOperationExecutor;
+import org.gradle.caching.internal.origin.OriginMetadata;
+import org.gradle.execution.plan.MissingTaskDependencyDetector;
+import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.execution.Execution.ExecutionOutcome;
+import org.gradle.internal.execution.ExecutionEngine;
+import org.gradle.internal.execution.ExecutionEngine.Result;
+import org.gradle.internal.execution.InputFingerprinter;
+import org.gradle.internal.execution.WorkValidationException;
+import org.gradle.internal.execution.caching.CachingState;
+import org.gradle.internal.execution.history.ExecutionHistoryStore;
+import org.gradle.internal.file.PathToFileResolver;
+import org.gradle.internal.file.ReservedFileSystemLocationRegistry;
+import org.gradle.internal.hash.ClassLoaderHierarchyHasher;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.work.AsyncWorkTracker;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+
+import static org.gradle.internal.execution.Execution.ExecutionOutcome.EXECUTED_INCREMENTALLY;
 
 /**
- * A {@link org.gradle.api.internal.tasks.TaskExecuter} which executes the actions of a task.
+ * A {@link TaskExecuter} which executes the actions of a task.
  */
+@SuppressWarnings("deprecation")
 public class ExecuteActionsTaskExecuter implements TaskExecuter {
-    private static final Logger LOGGER = Logging.getLogger(ExecuteActionsTaskExecuter.class);
-    private final TaskOutputsGenerationListener outputsGenerationListener;
-    private final TaskActionListener listener;
-    private final BuildOperationExecutor buildOperationExecutor;
+
+    private final ExecutionHistoryStore executionHistoryStore;
+    private final BuildOperationRunner buildOperationRunner;
     private final AsyncWorkTracker asyncWorkTracker;
+    private final org.gradle.api.execution.TaskActionListener actionListener;
+    private final TaskCacheabilityResolver taskCacheabilityResolver;
+    private final ClassLoaderHierarchyHasher classLoaderHierarchyHasher;
+    private final ExecutionEngine executionEngine;
+    private final InputFingerprinter inputFingerprinter;
+    private final ListenerManager listenerManager;
+    private final ReservedFileSystemLocationRegistry reservedFileSystemLocationRegistry;
+    private final FileCollectionFactory fileCollectionFactory;
+    private final TaskDependencyFactory taskDependencyFactory;
+    private final PathToFileResolver fileResolver;
+    private final MissingTaskDependencyDetector missingTaskDependencyDetector;
 
-    public ExecuteActionsTaskExecuter(TaskOutputsGenerationListener outputsGenerationListener, TaskActionListener taskActionListener, BuildOperationExecutor buildOperationExecutor, AsyncWorkTracker asyncWorkTracker) {
-        this.outputsGenerationListener = outputsGenerationListener;
-        this.listener = taskActionListener;
-        this.buildOperationExecutor = buildOperationExecutor;
+    public ExecuteActionsTaskExecuter(
+        ExecutionHistoryStore executionHistoryStore,
+        BuildOperationRunner buildOperationRunner,
+        AsyncWorkTracker asyncWorkTracker,
+        org.gradle.api.execution.TaskActionListener actionListener,
+        TaskCacheabilityResolver taskCacheabilityResolver,
+        ClassLoaderHierarchyHasher classLoaderHierarchyHasher,
+        ExecutionEngine executionEngine,
+        InputFingerprinter inputFingerprinter,
+        ListenerManager listenerManager,
+        ReservedFileSystemLocationRegistry reservedFileSystemLocationRegistry,
+        FileCollectionFactory fileCollectionFactory,
+        TaskDependencyFactory taskDependencyFactory,
+        PathToFileResolver fileResolver,
+        MissingTaskDependencyDetector missingTaskDependencyDetector
+    ) {
+        this.executionHistoryStore = executionHistoryStore;
+        this.buildOperationRunner = buildOperationRunner;
         this.asyncWorkTracker = asyncWorkTracker;
+        this.actionListener = actionListener;
+        this.taskCacheabilityResolver = taskCacheabilityResolver;
+        this.classLoaderHierarchyHasher = classLoaderHierarchyHasher;
+        this.executionEngine = executionEngine;
+        this.inputFingerprinter = inputFingerprinter;
+        this.listenerManager = listenerManager;
+        this.reservedFileSystemLocationRegistry = reservedFileSystemLocationRegistry;
+        this.fileCollectionFactory = fileCollectionFactory;
+        this.taskDependencyFactory = taskDependencyFactory;
+        this.fileResolver = fileResolver;
+        this.missingTaskDependencyDetector = missingTaskDependencyDetector;
     }
 
-    public void execute(TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
-        listener.beforeActions(task);
-        if (!task.getTaskActions().isEmpty()) {
-            outputsGenerationListener.beforeTaskOutputsGenerated();
-        }
-        state.setExecuting(true);
+    @Override
+    public TaskExecuterResult execute(TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
+        TaskExecution work = new TaskExecution(
+            task,
+            context,
+            actionListener,
+            asyncWorkTracker,
+            buildOperationRunner,
+            classLoaderHierarchyHasher,
+            executionHistoryStore,
+            fileCollectionFactory,
+            fileResolver,
+            inputFingerprinter,
+            listenerManager,
+            reservedFileSystemLocationRegistry,
+            taskCacheabilityResolver,
+            taskDependencyFactory,
+            missingTaskDependencyDetector
+        );
         try {
-            GradleException failure = executeActions(task, state, context);
-            if (failure != null) {
-                state.setOutcome(failure);
-            } else {
-                state.setOutcome(
-                    state.getDidWork() ? TaskExecutionOutcome.EXECUTED : TaskExecutionOutcome.UP_TO_DATE
-                );
-            }
-        } finally {
-            state.setExecuting(false);
-            listener.afterActions(task);
+            return executeIfValid(task, state, context, work);
+        } catch (WorkValidationException ex) {
+            state.setOutcome(ex);
+            return TaskExecuterResult.WITHOUT_OUTPUTS;
         }
     }
 
-    private GradleException executeActions(TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
-        LOGGER.debug("Executing actions for {}.", task);
-        final List<ContextAwareTaskAction> actions = new ArrayList<ContextAwareTaskAction>(task.getTaskActions());
-        int actionNumber = 1;
-        for (ContextAwareTaskAction action : actions) {
-            state.setDidWork(true);
-            task.getStandardOutputCapture().start();
-            try {
-                executeAction("Execute task action " + actionNumber + "/" + actions.size() + " for " + task.getPath(), task, action, context);
-            } catch (StopActionException e) {
-                // Ignore
-                LOGGER.debug("Action stopped by some action with message: {}", e.getMessage());
-            } catch (StopExecutionException e) {
-                LOGGER.info("Execution stopped by some action with message: {}", e.getMessage());
-                break;
-            } catch (Throwable t) {
-                return new TaskExecutionException(task, t);
-            } finally {
-                task.getStandardOutputCapture().stop();
-            }
-            actionNumber++;
-        }
-        return null;
-    }
-
-    private void executeAction(String displayName, final TaskInternal task, final ContextAwareTaskAction action, TaskExecutionContext context) {
-        action.contextualise(context);
-        buildOperationExecutor.run(displayName, new Action<BuildOperationContext>() {
+    private TaskExecuterResult executeIfValid(TaskInternal task, TaskStateInternal state, TaskExecutionContext context, TaskExecution work) {
+        ExecutionEngine.Request request = executionEngine.createRequest(work);
+        context.getTaskExecutionMode().getRebuildReason().ifPresent(request::forceNonIncremental);
+        request.withValidationContext(context.getValidationContext());
+        Result result = request.execute();
+        result.getExecution().ifSuccessfulOrElse(
+            success -> state.setOutcome(convertOutcome(success.getOutcome())),
+            failure -> state.setOutcome(new TaskExecutionException(task, failure))
+        );
+        return new TaskExecuterResult() {
             @Override
-            public void execute(BuildOperationContext buildOperationContext) {
-                BuildOperationExecutor.Operation currentOperation = buildOperationExecutor.getCurrentOperation();
-                Throwable actionFailure = null;
-                try {
-                    action.execute(task);
-                } catch (Throwable t) {
-                    actionFailure = t;
-                } finally {
-                    action.contextualise(null);
-                }
-
-                try {
-                    asyncWorkTracker.waitForCompletion(currentOperation);
-                } catch (Throwable t) {
-                    List<Throwable> failures = Lists.newArrayList();
-
-                    if (actionFailure != null) {
-                        failures.add(actionFailure);
-                    }
-
-                    if (t instanceof MultiCauseException) {
-                        failures.addAll(((MultiCauseException) t).getCauses());
-                    } else {
-                        failures.add(t);
-                    }
-
-                    if (failures.size() > 1) {
-                        throw new MultipleTaskActionFailures("Multiple task action failures occurred:", failures);
-                    } else {
-                        throw UncheckedException.throwAsUncheckedException(failures.get(0));
-                    }
-                }
-
-                if (actionFailure != null) {
-                    throw UncheckedException.throwAsUncheckedException(actionFailure);
-                }
+            public Optional<OriginMetadata> getReusedOutputOriginMetadata() {
+                return result.getReusedOutputOriginMetadata();
             }
-        });
+
+            @Override
+            public boolean executedIncrementally() {
+                return result.getExecution()
+                    .map(executionResult -> executionResult.getOutcome() == EXECUTED_INCREMENTALLY)
+                    .getOrMapFailure(throwable -> false);
+            }
+
+            @Override
+            public List<String> getExecutionReasons() {
+                return result.getExecutionReasons();
+            }
+
+            @Override
+            public CachingState getCachingState() {
+                return result.getCachingState();
+            }
+        };
     }
 
-    @Contextual
-    private static class MultipleTaskActionFailures extends DefaultMultiCauseException {
-        public MultipleTaskActionFailures(String message, Throwable... causes) {
-            super(message, causes);
-        }
-
-        public MultipleTaskActionFailures(String message, Iterable<? extends Throwable> causes) {
-            super(message, causes);
+    private static TaskExecutionOutcome convertOutcome(ExecutionOutcome model) {
+        switch (model) {
+            case FROM_CACHE:
+                return TaskExecutionOutcome.FROM_CACHE;
+            case UP_TO_DATE:
+                return TaskExecutionOutcome.UP_TO_DATE;
+            case SHORT_CIRCUITED:
+                return TaskExecutionOutcome.NO_SOURCE;
+            case EXECUTED_INCREMENTALLY:
+            case EXECUTED_NON_INCREMENTALLY:
+                return TaskExecutionOutcome.EXECUTED;
+            default:
+                throw new AssertionError();
         }
     }
 }

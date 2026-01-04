@@ -16,30 +16,37 @@
 
 package org.gradle.execution.commandline;
 
-import com.google.common.collect.Lists;
 import org.gradle.TaskExecutionRequest;
 import org.gradle.api.Task;
-import org.gradle.execution.TaskSelector;
+import org.gradle.execution.TaskSelection;
+import org.gradle.execution.selection.BuildTaskSelector;
+import org.gradle.internal.build.BuildState;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
+@ServiceScope(Scope.Build.class)
 public class CommandLineTaskParser {
     private final CommandLineTaskConfigurer taskConfigurer;
-    private final TaskSelector taskSelector;
+    private final BuildTaskSelector taskSelector;
+    private final BuildState targetBuild;
 
-    public CommandLineTaskParser(CommandLineTaskConfigurer commandLineTaskConfigurer, TaskSelector taskSelector) {
+    public CommandLineTaskParser(CommandLineTaskConfigurer commandLineTaskConfigurer, BuildTaskSelector taskSelector, BuildState targetBuild) {
         this.taskConfigurer = commandLineTaskConfigurer;
         this.taskSelector = taskSelector;
+        this.targetBuild = targetBuild;
     }
 
-    public List<TaskSelector.TaskSelection> parseTasks(TaskExecutionRequest taskExecutionRequest) {
-        List<TaskSelector.TaskSelection> out = Lists.newArrayList();
+    public List<TaskSelection> parseTasks(TaskExecutionRequest taskExecutionRequest) {
+        List<TaskSelection> out = new ArrayList<>();
         List<String> remainingPaths = new LinkedList<String>(taskExecutionRequest.getArgs());
         while (!remainingPaths.isEmpty()) {
             String path = remainingPaths.remove(0);
-            TaskSelector.TaskSelection selection = taskSelector.getSelection(taskExecutionRequest.getProjectPath(), taskExecutionRequest.getRootDir(), path);
+            TaskSelection selection = taskSelector.resolveTaskName(taskExecutionRequest.getRootDir(), taskExecutionRequest.getProjectPath(), targetBuild, path);
             Set<Task> tasks = selection.getTasks();
             remainingPaths = taskConfigurer.configureTasks(tasks, remainingPaths);
             out.add(selection);

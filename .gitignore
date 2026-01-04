@@ -2,25 +2,47 @@
 # ------
 .gradle
 /build
-/buildSrc/build
-/subprojects/*/build
-/subprojects/docs/src/samples/*/*/build
-/subprojects/internal-android-performance-testing/build-android-libs
+/*/build
+/*/*/build
+/*/*/*/build
+/*/*/*/*/*/build
+/**/docs/src/samples/**/build
+/**/docs/src/snippets/**/build
+/*/internal-android-performance-testing/build-android-libs
+test-splits/
+/gradle/verification-keyring.gpg
+
+# Kotlin
+# ------
+.kotlin
 
 # IDEA
 # ----
-.idea
+!/.idea
+/.idea/*
+# Needed to track entry points and nullability annotations (see https://youtrack.jetbrains.com/issue/IDEA-354114 and https://youtrack.jetbrains.com/issue/IDEA-354115)
+!/.idea/misc.xml
+!/.idea/codeStyles
+!/.idea/inspectionProfiles
+!/.idea/icon.png
+!/.idea/icon_dark.png
+!/.idea/gradle.xml
+*/**/.idea
+*/**/.shelf
 .shelf
 /*.iml
-/*.ipr
-/*.iws
-/buildSrc/*.iml
-/buildSrc/*.ipr
-/buildSrc/*.iws
-/buildSrc/out
+/*/*.iml
+/*/*/*.iml
+/*/*/*/*.iml
+/*/*/*/*/*.iml
 /out
-/subprojects/*/*.iml
-/subprojects/*/out
+/*/out
+/*/*/out
+/*/*/*/out
+/*/*/*/*/out
+/.teamcity/target
+/gradle.ipr
+/gradle.iws
 
 # Eclipse
 # -------
@@ -30,6 +52,7 @@
 /bin
 /subprojects/*/bin
 atlassian-ide-plugin.xml
+.metadata/
 
 # NetBeans
 # --------
@@ -38,7 +61,7 @@ atlassian-ide-plugin.xml
 
 # Vim
 # ---
-*.sw[op]
+*.sw[nop]
 
 # Emacs
 # -----
@@ -54,11 +77,16 @@ atlassian-ide-plugin.xml
 # ------------
 *.sublime-*
 
+# Draw.io
+# -------
+*.bkp
+*.dtmp
+
 # jEnv
 # ----
 .java-version
 
-# OS X
+# macOS
 # ----
 .DS_Store
 
@@ -75,5 +103,17 @@ atlassian-ide-plugin.xml
 # ----
 /*.log
 
+# Thread dumps for troubleshooting
+*.threaddump
+# ps output for cleaning up leaking Java processes
+*.psoutput
+
 # oh-my-zsh gradle plugin
 .gradletasknamecache
+
+# Added GE support maven support to the maven build in .teamcity, per the GE docs, this dir is NOT to be committed
+.teamcity/.mvn/.develocity/
+/discoclient.properties
+
+# Ignore local configuration files for asdf, allowing the JDK to be configured for project (https://asdf-vm.com)
+.tool-versions

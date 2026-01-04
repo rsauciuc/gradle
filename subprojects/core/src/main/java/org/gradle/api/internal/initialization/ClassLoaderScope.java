@@ -16,7 +16,13 @@
 
 package org.gradle.api.internal.initialization;
 
+import org.gradle.initialization.ClassLoaderScopeId;
+import org.gradle.initialization.ClassLoaderScopeOrigin;
 import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.hash.HashCode;
+import org.jspecify.annotations.Nullable;
+
+import java.util.function.Function;
 
 /**
  * Represents a particular node in the ClassLoader graph.
@@ -26,6 +32,10 @@ import org.gradle.internal.classpath.ClassPath;
  * Use of this class allows class loader creation to be lazy, and potentially optimised. It also provides a central location for class loader reuse.
  */
 public interface ClassLoaderScope {
+    ClassLoaderScopeId getId();
+
+    @Nullable
+    ClassLoaderScopeOrigin getOrigin();
 
     /**
      * The classloader for use at this node.
@@ -89,7 +99,12 @@ public interface ClassLoaderScope {
      *
      * @param id an identifier for the child loader
      */
-    ClassLoaderScope createChild(String id);
+    ClassLoaderScope createChild(String id, @Nullable ClassLoaderScopeOrigin origin);
+
+    /**
+     * Creates a child scope that is immutable and ready to use. Uses the given factory to create the local ClassLoader if not already cached. The factory takes a parent ClassLoader and produces a ClassLoader
+     */
+    ClassLoaderScope createLockedChild(String id, @Nullable ClassLoaderScopeOrigin origin, ClassPath localClasspath, @Nullable HashCode classpathImplementationHash, @Nullable Function<ClassLoader, ClassLoader> localClassLoaderFactory);
 
     /**
      * Signal that no more modifications are to come, allowing the structure to be optimised if possible.
@@ -99,5 +114,11 @@ public interface ClassLoaderScope {
     ClassLoaderScope lock();
 
     boolean isLocked();
+
+    /**
+     * Notifies this scope that it is about to be reused in a new build invocation, so that the scope can recreate or
+     * otherwise prepare its classloaders for this, as certain state may have been discarded to reduce memory pressure.
+     */
+    void onReuse();
 
 }

@@ -15,6 +15,8 @@
  */
 package org.gradle.util
 
+import org.gradle.util.internal.FailsWithMessage
+
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.spockframework.mock.TooManyInvocationsError
@@ -22,7 +24,7 @@ import spock.lang.FailsWith
 
 class ConcurrentSpecificationTest extends ConcurrentSpecification {
     def setup() {
-        shortTimeout = 1000
+        shortTimeout = 2000
     }
 
     def "can check that an action calls a mock method asynchronously"() {

@@ -17,10 +17,34 @@
 package org.gradle.api.internal.initialization;
 
 import org.gradle.api.internal.DomainObjectContext;
+import org.gradle.api.internal.file.FileCollectionFactory;
+import org.gradle.api.internal.file.FileResolver;
 import org.gradle.groovy.scripts.ScriptSource;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+@ServiceScope(Scope.Build.class)
 public interface ScriptHandlerFactory {
-    ScriptHandlerInternal create(ScriptSource scriptSource, ClassLoaderScope classLoaderScope);
 
-    ScriptHandlerInternal create(ScriptSource scriptSource, ClassLoaderScope classLoaderScope, DomainObjectContext context);
+    /**
+     * Create a script handler tied to the given domain object context.
+     */
+    ScriptHandlerInternal create(
+        ScriptSource scriptSource,
+        ClassLoaderScope classLoaderScope,
+        DomainObjectContext context
+    );
+
+    /**
+     * Create a script handler that resolves files using the given
+     * file resolver and file collection factory.
+     */
+    ScriptHandlerInternal create(
+        ScriptSource scriptSource,
+        ClassLoaderScope classLoaderScope,
+        FileResolver fileResolver,
+        FileCollectionFactory fileCollectionFactory,
+        DomainObjectContext owner
+    );
+
 }

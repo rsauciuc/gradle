@@ -15,7 +15,7 @@
  */
 package org.gradle.cache.internal;
 
-import org.gradle.internal.nativeintegration.*;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
 
 public class DefaultProcessMetaDataProvider implements ProcessMetaDataProvider {
     private final ProcessEnvironment environment;
@@ -24,11 +24,13 @@ public class DefaultProcessMetaDataProvider implements ProcessMetaDataProvider {
         this.environment = environment;
     }
 
+    @Override
     public String getProcessIdentifier() {
         Long pid = environment.maybeGetPid();
         return pid == null ? "gradle" : String.valueOf(pid);
     }
 
+    @Override
     public String getProcessDisplayName() {
         return "gradle";
     }

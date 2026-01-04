@@ -16,14 +16,21 @@
 
 package org.gradle.configuration;
 
-import org.gradle.api.Action;
 import org.gradle.groovy.scripts.ScriptSource;
+import org.gradle.internal.code.DefaultUserCodeSource;
+import org.gradle.internal.code.UserCodeApplicationContext;
+import org.gradle.internal.code.UserCodeApplicationId;
+import org.gradle.internal.code.UserCodeSource;
 import org.gradle.internal.operations.BuildOperationContext;
-import org.gradle.internal.progress.BuildOperationDetails;
-import org.gradle.internal.progress.BuildOperationExecutor;
+import org.gradle.internal.operations.BuildOperationDescriptor;
+import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.operations.RunnableBuildOperation;
+import org.gradle.internal.resource.ResourceLocation;
 import org.gradle.internal.resource.TextResource;
+import org.jspecify.annotations.Nullable;
 
 import java.io.File;
+import java.net.URI;
 
 /**
  * A decorating {@link ScriptPlugin} implementation that delegates to a given
@@ -32,12 +39,14 @@ import java.io.File;
  */
 public class BuildOperationScriptPlugin implements ScriptPlugin {
 
-    private ScriptPlugin decorated;
-    private BuildOperationExecutor buildOperationExecutor;
+    private final ScriptPlugin decorated;
+    private final BuildOperationRunner buildOperationRunner;
+    private final UserCodeApplicationContext userCodeApplicationContext;
 
-    public BuildOperationScriptPlugin(ScriptPlugin decorated, BuildOperationExecutor buildOperationExecutor) {
+    public BuildOperationScriptPlugin(ScriptPlugin decorated, BuildOperationRunner buildOperationRunner, UserCodeApplicationContext userCodeApplicationContext) {
         this.decorated = decorated;
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.buildOperationRunner = buildOperationRunner;
+        this.userCodeApplicationContext = userCodeApplicationContext;
     }
 
     @Override
@@ -52,20 +61,84 @@ public class BuildOperationScriptPlugin implements ScriptPlugin {
             //no operation, if there is no script code provided
             decorated.apply(target);
         } else {
-            buildOperationExecutor.run(computeBuildOperationDetails(target), new Action<BuildOperationContext>() {
+            UserCodeSource source = new DefaultUserCodeSource(getSource().getShortDisplayName(), null);
+            userCodeApplicationContext.apply(source, userCodeApplicationId -> buildOperationRunner.run(new RunnableBuildOperation() {
                 @Override
-                public void execute(BuildOperationContext buildOperationContext) {
+                public void run(BuildOperationContext context) {
                     decorated.apply(target);
+                    context.setResult(OPERATION_RESULT);
                 }
-            });
+
+                @Override
+                public BuildOperationDescriptor.Builder description() {
+                    final ScriptSource source = getSource();
+                    final ResourceLocation resourceLocation = source.getResource().getLocation();
+                    final File file = resourceLocation.getFile();
+                    String name = "Apply " + source.getShortDisplayName();
+                    final String displayName = name + " to " + target;
+
+                    return BuildOperationDescriptor.displayName(displayName)
+                        .name(name)
+                        .details(new OperationDetails(file, resourceLocation, ConfigurationTargetIdentifier.of(target), userCodeApplicationId));
+                }
+            }));
         }
     }
 
-    private BuildOperationDetails computeBuildOperationDetails(Object target) {
-        ScriptSource source = getSource();
-        File file = source.getResource().getFile();
-        String name = "Apply script " + (file != null ? file.getName() : source.getDisplayName());
-        String displayName = name + " to " + target;
-        return BuildOperationDetails.displayName(displayName).name(name).operationDescriptor(source).build();
+    private static class OperationDetails implements ApplyScriptPluginBuildOperationType.Details {
+
+        private final File file;
+        private final ResourceLocation resourceLocation;
+        private final ConfigurationTargetIdentifier identifier;
+        private final UserCodeApplicationId applicationId;
+
+        private OperationDetails(File file, ResourceLocation resourceLocation, @Nullable ConfigurationTargetIdentifier identifier, UserCodeApplicationId applicationId) {
+            this.file = file;
+            this.resourceLocation = resourceLocation;
+            this.identifier = identifier;
+            this.applicationId = applicationId;
+        }
+
+        @Override
+        @Nullable
+        public String getFile() {
+            return file == null ? null : file.getAbsolutePath();
+        }
+
+        @Nullable
+        @Override
+        public String getUri() {
+            if (file == null) {
+                URI uri = resourceLocation.getURI();
+                return uri == null ? null : uri.toASCIIString();
+            } else {
+                return null;
+            }
+        }
+
+        @Override
+        public String getTargetType() {
+            return identifier == null ? null : identifier.getTargetType().label;
+        }
+
+        @Nullable
+        @Override
+        public String getTargetPath() {
+            return identifier == null ? null : identifier.getTargetPath();
+        }
+
+        @Override
+        public String getBuildPath() {
+            return identifier == null ? null : identifier.getBuildPath();
+        }
+
+        @Override
+        public long getApplicationId() {
+            return applicationId.longValue();
+        }
     }
+
+
+    private static final ApplyScriptPluginBuildOperationType.Result OPERATION_RESULT = new ApplyScriptPluginBuildOperationType.Result() {
+    };
 }

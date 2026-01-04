@@ -15,14 +15,16 @@
  */
 package org.gradle.initialization;
 
-import org.gradle.api.initialization.ProjectDescriptor;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.initialization.ClassLoaderScope;
+import org.gradle.api.internal.SettingsInternal;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+@ServiceScope(Scope.Build.class)
 public interface BuildLoader {
     /**
-     * Creates the {@link org.gradle.api.internal.GradleInternal} and {@link org.gradle.api.internal.project.ProjectInternal} instances for the given root project,
-     * ready for the projects to be evaluated.
+     * Creates prepares the {@link org.gradle.api.internal.project.ProjectInternal} instances for the given settings,
+     * ready for the projects to be configured.
      */
-    void load(ProjectDescriptor rootProjectDescriptor, ProjectDescriptor defaultProject, GradleInternal gradle, ClassLoaderScope classLoaderScope);
+    void load(SettingsInternal settings, GradleInternal gradle);
 }

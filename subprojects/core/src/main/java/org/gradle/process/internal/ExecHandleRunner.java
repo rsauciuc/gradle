@@ -17,13 +17,19 @@
 package org.gradle.process.internal;
 
 import net.rubygrapefruit.platform.ProcessLauncher;
+import org.gradle.api.JavaVersion;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
-import org.gradle.internal.concurrent.ExecutorFactory;
-import org.gradle.process.internal.streams.StreamsHandler;
+import org.gradle.internal.operations.BuildOperationRef;
+import org.gradle.internal.operations.CurrentBuildOperationRef;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Iterator;
+import java.util.concurrent.Executor;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Stream;
 
 public class ExecHandleRunner implements Runnable {
     private static final Logger LOGGER = Logging.getLogger(ExecHandleRunner.class);
@@ -32,64 +38,119 @@ public class ExecHandleRunner implements Runnable {
     private final DefaultExecHandle execHandle;
     private final Lock lock = new ReentrantLock();
     private final ProcessLauncher processLauncher;
-    private final ExecutorFactory executorFactory;
+    private final Executor executor;
 
     private Process process;
     private boolean aborted;
     private final StreamsHandler streamsHandler;
+    private volatile BuildOperationRef associatedBuildOperation;
 
-    public ExecHandleRunner(DefaultExecHandle execHandle, StreamsHandler streamsHandler, ProcessLauncher processLauncher, ExecutorFactory executorFactory) {
-        this.processLauncher = processLauncher;
-        this.executorFactory = executorFactory;
+    public ExecHandleRunner(
+        DefaultExecHandle execHandle, StreamsHandler streamsHandler, ProcessLauncher processLauncher, Executor executor,
+        BuildOperationRef associatedBuildOperation
+    ) {
         if (execHandle == null) {
             throw new IllegalArgumentException("execHandle == null!");
         }
-        this.streamsHandler = streamsHandler;
-        this.processBuilderFactory = new ProcessBuilderFactory();
         this.execHandle = execHandle;
+        this.streamsHandler = streamsHandler;
+        this.processLauncher = processLauncher;
+        this.executor = executor;
+        this.associatedBuildOperation = associatedBuildOperation;
+        this.processBuilderFactory = new ProcessBuilderFactory();
     }
 
     public void abortProcess() {
         lock.lock();
         try {
+            if (aborted) {
+                return;
+            }
             aborted = true;
             if (process != null) {
+                streamsHandler.disconnect();
                 LOGGER.debug("Abort requested. Destroying process: {}.", execHandle.getDisplayName());
-                process.destroy();
+                destroyProcessTree();
             }
         } finally {
             lock.unlock();
         }
     }
 
-    public void run() {
+    /**
+     * Destroys the process of this runner and its known (grand)children.
+     * Falls back to only destroying the main process if the code runs on Java 8 or lower, which is the Gradle 8 or lower behavior.
+     */
+    private void destroyProcessTree() {
+        if (JavaVersion.current().isJava9Compatible()) {
+            destroyDescendants();
+        }
+        process.destroy();
+    }
+
+    private void destroyDescendants() {
         try {
-            ProcessBuilder processBuilder = processBuilderFactory.createProcessBuilder(execHandle);
-            Process process = processLauncher.start(processBuilder);
-            streamsHandler.connectStreams(process, execHandle.getDisplayName(), executorFactory);
-            setProcess(process);
-
-            execHandle.started();
-
-            LOGGER.debug("waiting until streams are handled...");
-            streamsHandler.start();
-
-            if (execHandle.isDaemon()) {
-                streamsHandler.stop();
-                detached();
-            } else {
-                int exitValue = process.waitFor();
-                streamsHandler.stop();
-                completed(exitValue);
+            @SuppressWarnings("unchecked")
+            Stream<Object> descendants = (Stream<Object>) Process.class.getMethod("descendants").invoke(process);
+            Method destroyMethod = Class.forName("java.lang.ProcessHandle").getMethod("destroy");
+            Iterator<Object> it = descendants.iterator();
+            while (it.hasNext()) {
+                destroyMethod.invoke(it.next());
             }
-        } catch (Throwable t) {
-            execHandle.failed(t);
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | ClassNotFoundException e) {
+            throw new RuntimeException("Failed to destroy descendants of process: " + execHandle.getDisplayName(), e);
         }
     }
 
-    private void setProcess(Process process) {
+    @Override
+    public void run() {
+        // Split the `with` operation so that the `associatedBuildOperation` can be discarded when we wait in `process.waitFor()`
+        try {
+            CurrentBuildOperationRef.instance().with(this.associatedBuildOperation, () -> {
+                startProcess();
+
+                execHandle.started();
+
+                LOGGER.debug("waiting until streams are handled...");
+                streamsHandler.start();
+            });
+
+            if (execHandle.isDaemon()) {
+                CurrentBuildOperationRef.instance().with(this.associatedBuildOperation, () -> {
+                    streamsHandler.stop();
+                    detached();
+                });
+            } else {
+                int exitValue = process.waitFor();
+                CurrentBuildOperationRef.instance().with(this.associatedBuildOperation, () -> {
+                    streamsHandler.stop();
+                    completed(exitValue);
+                });
+            }
+        } catch (Throwable t) {
+            CurrentBuildOperationRef.instance().with(this.associatedBuildOperation, () -> {
+                execHandle.failed(t);
+            });
+        }
+    }
+
+    /**
+     * Remove any context associated with tracking the startup of this process.
+     */
+    public void removeStartupContext() {
+        this.associatedBuildOperation = null;
+        streamsHandler.removeStartupContext();
+    }
+
+    private void startProcess() {
         lock.lock();
         try {
+            if (aborted) {
+                throw new IllegalStateException("Process has already been aborted");
+            }
+            ProcessBuilder processBuilder = processBuilderFactory.createProcessBuilder(execHandle);
+            Process process = processLauncher.start(processBuilder);
+            streamsHandler.connectStreams(process, execHandle.getDisplayName(), executor);
             this.process = process;
         } finally {
             lock.unlock();

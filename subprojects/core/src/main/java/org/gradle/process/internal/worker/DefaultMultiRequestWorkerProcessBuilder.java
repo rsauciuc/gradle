@@ -17,48 +17,57 @@
 package org.gradle.process.internal.worker;
 
 import org.gradle.api.logging.LogLevel;
-import org.gradle.internal.UncheckedException;
+import org.gradle.internal.Cast;
 import org.gradle.internal.classloader.ClasspathUtil;
+import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.logging.events.OutputEventListener;
+import org.gradle.internal.operations.CurrentBuildOperationRef;
+import org.gradle.internal.serialize.Serializer;
+import org.gradle.process.ExecResult;
 import org.gradle.process.internal.JavaExecHandleBuilder;
 import org.gradle.process.internal.worker.request.Receiver;
+import org.gradle.process.internal.worker.request.Request;
+import org.gradle.process.internal.worker.request.RequestArgumentSerializers;
 import org.gradle.process.internal.worker.request.RequestProtocol;
+import org.gradle.process.internal.worker.request.RequestSerializerRegistry;
 import org.gradle.process.internal.worker.request.ResponseProtocol;
 import org.gradle.process.internal.worker.request.WorkerAction;
 
 import java.io.File;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
+import java.util.Collections;
 import java.util.Set;
 
-class DefaultMultiRequestWorkerProcessBuilder<WORKER> implements MultiRequestWorkerProcessBuilder<WORKER> {
-    private static final Method START_METHOD;
-    private static final Method STOP_METHOD;
-    private final Class<WORKER> workerType;
+class DefaultMultiRequestWorkerProcessBuilder<IN, OUT> implements MultiRequestWorkerProcessBuilder<IN, OUT> {
+
     private final Class<?> workerImplementation;
+    private final OutputEventListener outputEventListener;
+
+    // Mutable state
     private final DefaultWorkerProcessBuilder workerProcessBuilder;
+    private final RequestArgumentSerializers argumentSerializers = new RequestArgumentSerializers();
+    private boolean useApplicationClassloaderOnly;
 
-    static {
-        try {
-            START_METHOD = WorkerControl.class.getMethod("start");
-            STOP_METHOD = WorkerControl.class.getMethod("stop");
-        } catch (NoSuchMethodException e) {
-            throw UncheckedException.throwAsUncheckedException(e);
-        }
-    }
-
-    public DefaultMultiRequestWorkerProcessBuilder(Class<WORKER> workerType, Class<?> workerImplementation, DefaultWorkerProcessBuilder workerProcessBuilder) {
-        this.workerType = workerType;
+    public DefaultMultiRequestWorkerProcessBuilder(Class<?> workerImplementation, DefaultWorkerProcessBuilder workerProcessBuilder, OutputEventListener outputEventListener) {
         this.workerImplementation = workerImplementation;
         this.workerProcessBuilder = workerProcessBuilder;
-        workerProcessBuilder.worker(new WorkerAction(workerImplementation));
-        workerProcessBuilder.setImplementationClasspath(ClasspathUtil.getClasspath(workerImplementation.getClassLoader()).getAsURLs());
+        this.outputEventListener = outputEventListener;
     }
 
     @Override
     public WorkerProcessSettings applicationClasspath(Iterable<File> files) {
         workerProcessBuilder.applicationClasspath(files);
         return this;
+    }
+
+    @Override
+    public WorkerProcessSettings applicationModulePath(Iterable<File> files) {
+        workerProcessBuilder.applicationModulePath(files);
+        return this;
+    }
+
+    @Override
+    public Set<File> getApplicationModulePath() {
+        return workerProcessBuilder.getApplicationModulePath();
     }
 
     @Override
@@ -87,6 +96,11 @@ class DefaultMultiRequestWorkerProcessBuilder<WORKER> implements MultiRequestWor
     }
 
     @Override
+    public <T> void registerArgumentSerializer(Class<T> type, Serializer<T> serializer) {
+        argumentSerializers.register(type, serializer);
+    }
+
+    @Override
     public WorkerProcessSettings setBaseName(String baseName) {
         workerProcessBuilder.setBaseName(baseName);
         return this;
@@ -111,41 +125,70 @@ class DefaultMultiRequestWorkerProcessBuilder<WORKER> implements MultiRequestWor
     }
 
     @Override
-    public WORKER build() {
+    public void withoutAutomaticImplementationClasspath() {
+        this.useApplicationClassloaderOnly = true;
+    }
+
+    @Override
+    public MultiRequestClient<IN, OUT> build() {
+        workerProcessBuilder.worker(new WorkerAction(this.workerImplementation));
+
+        if (useApplicationClassloaderOnly) {
+            workerProcessBuilder.setImplementationClasspath(Collections.emptyList());
+        } else {
+            ClassPath implementationClasspath = ClasspathUtil.getClasspath(this.workerImplementation.getClassLoader());
+            workerProcessBuilder.setImplementationClasspath(implementationClasspath.getAsURLs());
+        }
+
         // Always publish process info for multi-request workers
         workerProcessBuilder.enableJvmMemoryInfoPublishing(true);
         final WorkerProcess workerProcess = workerProcessBuilder.build();
 
-        return workerType.cast(Proxy.newProxyInstance(workerType.getClassLoader(), new Class[]{workerType}, new InvocationHandler() {
-            private Receiver receiver = new Receiver(getBaseName());
+        return new MultiRequestClient<IN, OUT>() {
+            private Receiver receiver = new Receiver(getBaseName(), outputEventListener);
             private RequestProtocol requestProtocol;
 
+            @Override
+            public WorkerProcess start() {
+                // Note -- leaks current build operation to worker thread, it will be cleared after the worker is started
+                try {
+                    workerProcess.start();
+                } catch (Exception e) {
+                    throw WorkerProcessException.runFailed(getBaseName(), e);
+                }
+                workerProcess.getConnection().addIncoming(ResponseProtocol.class, receiver);
+                workerProcess.getConnection().useJavaSerializationForParameters(workerImplementation.getClassLoader());
+                workerProcess.getConnection().useParameterSerializers(RequestSerializerRegistry.create(workerImplementation.getClassLoader(), argumentSerializers));
+
+                requestProtocol = workerProcess.getConnection().addOutgoing(RequestProtocol.class);
+                workerProcess.getConnection().connect();
+                return workerProcess;
+            }
 
             @Override
-            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                if (method.equals(START_METHOD)) {
-                    try {
-                        workerProcess.start();
-                    } catch (Exception e) {
-                        throw WorkerProcessException.runFailed(getBaseName(), e);
-                    }
-                    workerProcess.getConnection().addIncoming(ResponseProtocol.class, receiver);
-                    workerProcess.getConnection().useJavaSerializationForParameters(workerImplementation.getClassLoader());
-                    requestProtocol = workerProcess.getConnection().addOutgoing(RequestProtocol.class);
-                    workerProcess.getConnection().connect();
-                    return workerProcess;
+            public ExecResult stop() {
+                if (requestProtocol != null) {
+                    requestProtocol.stop();
                 }
-                if (method.equals(STOP_METHOD)) {
-                    if (requestProtocol != null) {
-                        requestProtocol.stop();
-                    }
-                    try {
-                        return workerProcess.waitForStop();
-                    } finally {
-                        requestProtocol = null;
-                    }
+                try {
+                    return workerProcess.waitForStop();
+                } finally {
+                    requestProtocol = null;
                 }
-                requestProtocol.run(method.getName(), method.getParameterTypes(), args);
+            }
+
+            @Override
+            public void stopNow() {
+                try {
+                    workerProcess.stopNow();
+                } finally {
+                    requestProtocol = null;
+                }
+            }
+
+            @Override
+            public OUT run(IN request) {
+                requestProtocol.run(new Request(request, CurrentBuildOperationRef.instance().get()));
                 boolean hasResult = receiver.awaitNextResult();
                 if (!hasResult) {
                     try {
@@ -158,8 +201,8 @@ class DefaultMultiRequestWorkerProcessBuilder<WORKER> implements MultiRequestWor
                         throw WorkerProcessException.runFailed(getBaseName(), e);
                     }
                 }
-                return receiver.getNextResult();
+                return Cast.uncheckedNonnullCast(receiver.getNextResult());
             }
-        }));
+        };
     }
 }

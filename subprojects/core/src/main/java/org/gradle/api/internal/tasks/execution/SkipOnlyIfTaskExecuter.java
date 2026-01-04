@@ -19,38 +19,58 @@ package org.gradle.api.internal.tasks.execution;
 import org.gradle.api.GradleException;
 import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.tasks.TaskExecuter;
+import org.gradle.api.internal.tasks.TaskExecuterResult;
 import org.gradle.api.internal.tasks.TaskExecutionContext;
 import org.gradle.api.internal.tasks.TaskExecutionOutcome;
 import org.gradle.api.internal.tasks.TaskStateInternal;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
+import org.gradle.api.specs.Spec;
+import org.gradle.internal.Cast;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A {@link org.gradle.api.internal.tasks.TaskExecuter} which skips tasks whose onlyIf predicate evaluates to false
  */
 public class SkipOnlyIfTaskExecuter implements TaskExecuter {
-    private static final Logger LOGGER = Logging.getLogger(SkipOnlyIfTaskExecuter.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(SkipOnlyIfTaskExecuter.class);
     private final TaskExecuter executer;
 
     public SkipOnlyIfTaskExecuter(TaskExecuter executer) {
         this.executer = executer;
     }
 
-    public void execute(TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
-        boolean skip;
+    @Override
+    public TaskExecuterResult execute(TaskInternal task, TaskStateInternal state, TaskExecutionContext context) {
+        Spec<? super TaskInternal> unsatisfiedSpec = null;
         try {
-            skip = !task.getOnlyIf().isSatisfiedBy(task);
+            Spec<? super TaskInternal> onlyIf = task.getOnlyIf();
+            // Some third-party plugins override getOnlyIf, returning a generic Spec
+            if (onlyIf instanceof DescribingAndSpec) {
+                DescribingAndSpec<? super TaskInternal> describingAndSpec = Cast.uncheckedCast(onlyIf);
+                unsatisfiedSpec = describingAndSpec.findUnsatisfiedSpec(task);
+            } else {
+                if (!onlyIf.isSatisfiedBy(task)) {
+                    unsatisfiedSpec = onlyIf;
+                }
+            }
         } catch (Throwable t) {
             state.setOutcome(new GradleException(String.format("Could not evaluate onlyIf predicate for %s.", task), t));
-            return;
+            return TaskExecuterResult.WITHOUT_OUTPUTS;
         }
 
-        if (skip) {
-            LOGGER.info("Skipping {} as task onlyIf is false.", task);
+        if (unsatisfiedSpec != null) {
+            if (unsatisfiedSpec instanceof SelfDescribingSpec) {
+                SelfDescribingSpec<? super TaskInternal> selfDescribingSpec = Cast.uncheckedCast(unsatisfiedSpec);
+                LOGGER.info("Skipping {} as task onlyIf '{}' is false.", task, selfDescribingSpec.getDisplayName());
+                state.setSkipReasonMessage("'" + selfDescribingSpec.getDisplayName() + "' not satisfied");
+            } else {
+                LOGGER.info("Skipping {} as task onlyIf is false.", task);
+                state.setSkipReasonMessage("onlyIf not satisfied");
+            }
             state.setOutcome(TaskExecutionOutcome.SKIPPED);
-            return;
+            return TaskExecuterResult.WITHOUT_OUTPUTS;
         }
 
-        executer.execute(task, state, context);
+        return executer.execute(task, state, context);
     }
 }

@@ -15,17 +15,18 @@
  */
 package org.gradle.execution;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
-import org.gradle.api.Nullable;
 import org.gradle.api.Project;
 import org.gradle.api.ProjectConfigurationException;
 import org.gradle.api.Task;
 import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.project.ProjectState;
 import org.gradle.api.tasks.TaskContainer;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -49,20 +50,21 @@ public class TaskNameResolver {
      * Finds tasks that will have exactly the given name, without necessarily creating or configuring the tasks. Returns null if no such match found.
      */
     @Nullable
-    public TaskSelectionResult selectWithName(final String taskName, final ProjectInternal project, boolean includeSubProjects) {
+    public TaskSelectionResult selectWithName(final String taskName, final ProjectState project, boolean includeSubProjects) {
         if (includeSubProjects) {
-            Set<Task> tasks = Sets.newLinkedHashSet();
+            Set<Task> tasks = new LinkedHashSet<>();
             new MultiProjectTaskSelectionResult(taskName, project, false).collectTasks(tasks);
             if (!tasks.isEmpty()) {
                 return new FixedTaskSelectionResult(tasks);
             }
         } else {
-            discoverTasks(project);
-            if (hasTask(taskName, project)) {
+            ProjectInternal mutableProject = project.getMutableModel();
+            discoverTasks(mutableProject);
+            if (hasTask(taskName, mutableProject)) {
                 return new TaskSelectionResult() {
                     @Override
                     public void collectTasks(Collection<? super Task> tasks) {
-                        tasks.add(getExistingTask(project, taskName));
+                        tasks.add(getExistingTask(mutableProject, taskName));
                     }
                 };
             }
@@ -74,19 +76,20 @@ public class TaskNameResolver {
     /**
      * Finds the names of all tasks, without necessarily creating or configuring the tasks. Returns an empty map when none are found.
      */
-    public Map<String, TaskSelectionResult> selectAll(ProjectInternal project, boolean includeSubProjects) {
-        Map<String, TaskSelectionResult> selected = Maps.newLinkedHashMap();
+    public Map<String, TaskSelectionResult> selectAll(ProjectState project, boolean includeSubProjects) {
+        Map<String, TaskSelectionResult> selected = new LinkedHashMap<>();
 
         if (includeSubProjects) {
-            Set<String> taskNames = Sets.newLinkedHashSet();
+            Set<String> taskNames = new LinkedHashSet<>();
             collectTaskNames(project, taskNames);
             for (String taskName : taskNames) {
                 selected.put(taskName, new MultiProjectTaskSelectionResult(taskName, project, true));
             }
         } else {
-            discoverTasks(project);
-            for (String taskName : getTaskNames(project)) {
-                selected.put(taskName, new SingleProjectTaskSelectionResult(taskName, project.getTasks()));
+            ProjectInternal mutableProject = project.getMutableModel();
+            discoverTasks(mutableProject);
+            for (String taskName : mutableProject.getTasks().getNames()) {
+                selected.put(taskName, new SingleProjectTaskSelectionResult(taskName, mutableProject.getTasks()));
             }
         }
 
@@ -97,12 +100,8 @@ public class TaskNameResolver {
         try {
             project.getTasks().discoverTasks();
         } catch (Throwable e) {
-            throw new ProjectConfigurationException(String.format("A problem occurred configuring %s.", project), e);
+            throw new ProjectConfigurationException(String.format("A problem occurred configuring %s.", project.getDisplayName()), e);
         }
-    }
-
-    private static Set<String> getTaskNames(ProjectInternal project) {
-        return project.getTasks().getNames();
     }
 
     private static boolean hasTask(String taskName, ProjectInternal project) {
@@ -113,15 +112,16 @@ public class TaskNameResolver {
         try {
             return (TaskInternal) project.getTasks().getByName(taskName);
         } catch (Throwable e) {
-            throw new ProjectConfigurationException(String.format("A problem occurred configuring %s.", project), e);
+            throw new ProjectConfigurationException(String.format("A problem occurred configuring %s.", project.getDisplayName()), e);
         }
     }
 
-    private void collectTaskNames(ProjectInternal project, Set<String> result) {
-        discoverTasks(project);
-        result.addAll(getTaskNames(project));
-        for (Project subProject : project.getChildProjects().values()) {
-            collectTaskNames((ProjectInternal) subProject, result);
+    private static void collectTaskNames(ProjectState project, Set<String> result) {
+        ProjectInternal mutableProject = project.getMutableModel();
+        discoverTasks(mutableProject);
+        result.addAll(mutableProject.getTasks().getNames());
+        for (ProjectState subProject : project.getChildProjects()) {
+            collectTaskNames(subProject, result);
         }
     }
 
@@ -132,6 +132,7 @@ public class TaskNameResolver {
             this.tasks = tasks;
         }
 
+        @Override
         public void collectTasks(Collection<? super Task> tasks) {
             tasks.addAll(this.tasks);
         }
@@ -146,39 +147,42 @@ public class TaskNameResolver {
             this.taskName = taskName;
         }
 
+        @Override
         public void collectTasks(Collection<? super Task> tasks) {
             tasks.add(taskContainer.getByName(taskName));
         }
     }
 
     private static class MultiProjectTaskSelectionResult implements TaskSelectionResult {
-        private final ProjectInternal project;
+        private final ProjectState project;
         private final String taskName;
         private final boolean discovered;
 
-        MultiProjectTaskSelectionResult(String taskName, ProjectInternal project, boolean discovered) {
+        MultiProjectTaskSelectionResult(String taskName, ProjectState project, boolean discovered) {
             this.project = project;
             this.taskName = taskName;
             this.discovered = discovered;
         }
 
+        @Override
         public void collectTasks(Collection<? super Task> tasks) {
             collect(project, tasks);
         }
 
-        private void collect(ProjectInternal project, Collection<? super Task> tasks) {
+        private void collect(ProjectState project, Collection<? super Task> tasks) {
+            ProjectInternal mutableProject = project.getMutableModel();
             if (!discovered) {
-                discoverTasks(project);
+                discoverTasks(mutableProject);
             }
-            if (hasTask(taskName, project)) {
-                TaskInternal task = getExistingTask(project, taskName);
+            if (hasTask(taskName, mutableProject)) {
+                TaskInternal task = getExistingTask(mutableProject, taskName);
                 tasks.add(task);
                 if (task.getImpliesSubProjects()) {
                     return;
                 }
             }
-            for (Project subProject : project.getChildProjects().values()) {
-                collect((ProjectInternal) subProject, tasks);
+            for (ProjectState subProject : project.getChildProjects()) {
+                collect(subProject, tasks);
             }
         }
     }

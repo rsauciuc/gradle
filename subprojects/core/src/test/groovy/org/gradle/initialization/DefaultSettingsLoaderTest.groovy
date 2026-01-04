@@ -15,48 +15,132 @@
  */
 package org.gradle.initialization
 
-import org.gradle.StartParameter
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.SettingsInternal
+import org.gradle.api.internal.StartParameterInternal
 import org.gradle.api.internal.initialization.ClassLoaderScope
-import org.gradle.api.internal.project.ProjectRegistry
-import org.gradle.initialization.buildsrc.BuildSourceBuilder
+import org.gradle.api.plugins.internal.HelpBuiltInCommand
+import org.gradle.buildinit.plugins.internal.action.InitBuiltInCommand
+import org.gradle.groovy.scripts.ScriptSource
+import org.gradle.initialization.layout.BuildLayout
+import org.gradle.initialization.layout.BuildLayoutFactory
 import org.gradle.internal.FileUtils
+import org.gradle.internal.logging.ToStringLogger
+import org.gradle.internal.scripts.ScriptFileResolver
 import org.gradle.internal.service.ServiceRegistry
-import org.gradle.util.WrapUtil
+import org.gradle.util.Path
+import org.gradle.util.TestUtil
 import spock.lang.Specification
 
+import java.nio.file.Files
+
 class DefaultSettingsLoaderTest extends Specification {
+    private projectRootDir = createTempProjectDir()
 
-    def gradle = Mock(GradleInternal)
-    def settings = Mock(SettingsInternal)
-    def settingsLocation = new SettingsLocation(FileUtils.canonicalize(new File("someDir")), null);
-    def startParameter = new StartParameter();
-    def classLoaderScope = Mock(ClassLoaderScope)
-    def settingsFinder = Mock(ISettingsFinder)
-    def settingsProcessor = Mock(SettingsProcessor)
-    def buildSourceBuilder = Mock(BuildSourceBuilder)
-    def settingsHandler = new DefaultSettingsLoader(settingsFinder, settingsProcessor, buildSourceBuilder);
+    File createTempProjectDir() {
+        def file = Files.createTempDirectory("DefaultSettingsLoaderTestTempProjectDir_").toFile()
+        file.deleteOnExit()
+        FileUtils.canonicalize(file)
+    }
+    private mockBuildLayout = new BuildLayout(projectRootDir, null, Stub(ScriptFileResolver))
+    @SuppressWarnings('GroovyAssignabilityCheck')
+    private mockBuildLayoutFactory = Mock(BuildLayoutFactory) {
+        getLayoutFor(_) >> mockBuildLayout
+    }
+    private mockProjectDescriptor = Mock(ProjectDescriptorInternal) {
+        getPath() >> ":"
+        getProjectDir() >> mockBuildLayout.settingsDir
+        getBuildFile() >> new File(mockBuildLayout.settingsDir, "build.gradle")
+    }
+    private mockProjectRegistry = Mock(ProjectDescriptorRegistry) {
+        getAllProjects() >> Collections.singleton(mockProjectDescriptor)
+    }
+    private startParameterInternal = new StartParameterInternal()
+    private mockClassLoaderScope = Mock(ClassLoaderScope)
+    private mockServiceRegistry = Mock(ServiceRegistry)
+    private mockGradle = Mock(GradleInternal) {
+        getStartParameter() >> startParameterInternal
+        getServices() >> mockServiceRegistry
+        getIdentityPath() >> Path.ROOT
+        getClassLoaderScope() >> mockClassLoaderScope
+    }
+    private mockSettingsProcessor = Mock(SettingsProcessor) {
+        // When we process, we're interested in retaining the start parameter in
+        // the resulting state, so we can test it, so create a new mock and configure it
+        //noinspection GroovyAssignabilityCheck
+        process(mockGradle, mockBuildLayout, mockClassLoaderScope, _) >> { gradle, settingsLocation, clasLoaderScope, startParameter ->
+            def mockResultSettingsScript = Mock(ScriptSource) {
+                getDisplayName() >> "foo"
+            }
 
-    public void findAndLoadSettingsWithExistingSettings() {
-        when:
-        def projectRegistry = Mock(ProjectRegistry)
-        def projectDescriptor = Mock(DefaultProjectDescriptor)
-        def services = Mock(ServiceRegistry)
-        startParameter.setCurrentDir(settingsLocation.getSettingsDir())
+            def mockResultSettings = Mock(SettingsInternal) {
+                getProjectRegistry() >> mockProjectRegistry
+                getSettingsScript() >> mockResultSettingsScript
+                getStartParameter() >> startParameter
+            }
 
-        settings.getProjectRegistry() >> projectRegistry
-        projectRegistry.getAllProjects() >> WrapUtil.toSet(projectDescriptor)
-        projectDescriptor.getProjectDir() >> settingsLocation.settingsDir
-        projectDescriptor.getBuildFile() >> new File(settingsLocation.getSettingsDir(), "build.gradle")
-        gradle.getStartParameter() >> startParameter
-        gradle.getServices() >> services
-        settingsFinder.find(startParameter) >> settingsLocation
-        1 * buildSourceBuilder.buildAndCreateClassLoader({ StartParameter sp -> sp.currentDir == new File(settingsLocation.getSettingsDir(), DefaultSettings.DEFAULT_BUILD_SRC_DIR) }) >> classLoaderScope
-        1 * settingsProcessor.process(gradle, settingsLocation, classLoaderScope, startParameter) >> settings
-
-        then:
-        settingsHandler.findAndLoadSettings(gradle).is(settings)
+            def mockResultState = Mock(SettingsState) {
+                getSettings() >> mockResultSettings
+            }
+            return mockResultState
+        }
     }
 
+    void setup() {
+        startParameterInternal.setCurrentDir( projectRootDir )
+    }
+
+    private logger = new ToStringLogger()
+    private builtInCommands = [new InitBuiltInCommand(), new HelpBuiltInCommand()]
+    private DefaultSettingsLoader settingsLoader = new DefaultSettingsLoader(mockSettingsProcessor, mockBuildLayoutFactory, builtInCommands, logger, TestUtil.problemsService())
+
+    def "running default task loads settings"() {
+        when:
+        def resultState = settingsLoader.findAndLoadSettings(mockGradle)
+
+        then:
+        resultState != null
+
+        and:
+        logger.toString().contains("Loading build definition for build: ':'")
+    }
+
+    def "running init uses new empty settings"() {
+        given:
+        startParameterInternal.setCurrentDir(mockBuildLayout.settingsDir)
+        startParameterInternal.setTaskNames(["init"])
+
+        when:
+        def resultState = settingsLoader.findAndLoadSettings(mockGradle)
+
+        then:
+        resultState != null
+
+        and:
+        def resultStartParam = ((StartParameterInternal) resultState.getSettings().getStartParameter())
+        resultStartParam.isUseEmptySettings()
+
+        and:
+        logger.toString().contains("Skipping loading of build definition for build: ':'")
+        !logger.toString().contains("Discarding loaded settings and replacing with empty settings for build: ':'")
+    }
+
+    def "running help only loads settings once"() {
+        given:
+        startParameterInternal.setTaskNames(["help"])
+
+        when:
+        def resultState = settingsLoader.findAndLoadSettings(mockGradle)
+
+        then:
+        resultState != null
+
+        and:
+        def resultStartParam = ((StartParameterInternal) resultState.getSettings().getStartParameter())
+        !resultStartParam.isUseEmptySettings()
+
+        and:
+        logger.toString().contains("Loading build definition for build: ':'")
+        !logger.toString().contains("Discarding loaded settings and replacing with empty settings for build: ':'")
+    }
 }

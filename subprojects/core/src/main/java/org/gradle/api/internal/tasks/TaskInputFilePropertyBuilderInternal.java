@@ -16,17 +16,18 @@
 
 package org.gradle.api.internal.tasks;
 
-import org.gradle.api.internal.changedetection.state.FileCollectionSnapshotter;
-import org.gradle.api.internal.changedetection.state.SnapshotNormalizationStrategy;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskInputFilePropertyBuilder;
+import org.gradle.internal.fingerprint.FileNormalizer;
+import org.jspecify.annotations.NullMarked;
 
+@NullMarked
 public interface TaskInputFilePropertyBuilderInternal extends TaskInputFilePropertyBuilder, TaskFilePropertyBuilderInternal {
-    @Override
-    TaskInputFilePropertyBuilderInternal withSnapshotNormalizationStrategy(SnapshotNormalizationStrategy snapshotNormalizationStrategy);
 
     @Override
-    TaskInputFilePropertyBuilderInternal withSnapshotter(Class<? extends FileCollectionSnapshotter> snapshotter);
+    TaskInputFilePropertyBuilderInternal withNormalizer(Class<? extends org.gradle.api.tasks.FileNormalizer> normalizer);
+
+    TaskInputFilePropertyBuilderInternal withInternalNormalizer(FileNormalizer normalizer);
 
     @Override
     TaskInputFilePropertyBuilderInternal withPropertyName(String propertyName);

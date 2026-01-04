@@ -1,6 +1,0 @@
-:compileMainJarMainJava
-:processMainJarMainResources
-:compileTestMainJarBinaryTestJava
-:testMainJarBinaryTest
-
-BUILD SUCCESSFUL

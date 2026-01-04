@@ -16,48 +16,23 @@
 
 package org.gradle.initialization.buildsrc;
 
-import org.gradle.api.UncheckedIOException;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
-import org.gradle.cache.PersistentCache;
-import org.gradle.initialization.GradleLauncher;
-import org.gradle.internal.Factory;
-import org.gradle.internal.classpath.DefaultClassPath;
+import org.gradle.internal.buildtree.BuildTreeLifecycleController;
+import org.gradle.internal.classpath.ClassPath;
+import org.jspecify.annotations.NonNull;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Collection;
+public class BuildSrcUpdateFactory {
+    private final BuildSrcBuildListenerFactory listenerFactory;
 
-public class BuildSrcUpdateFactory implements Factory<DefaultClassPath> {
-    private final PersistentCache cache;
-    private final GradleLauncher gradleLauncher;
-    private BuildSrcBuildListenerFactory listenerFactory;
-    private static final Logger LOGGER = Logging.getLogger(BuildSrcUpdateFactory.class);
-
-    public BuildSrcUpdateFactory(PersistentCache cache, GradleLauncher gradleLauncher, BuildSrcBuildListenerFactory listenerFactory) {
-        this.cache = cache;
-        this.gradleLauncher = gradleLauncher;
+    public BuildSrcUpdateFactory(BuildSrcBuildListenerFactory listenerFactory) {
         this.listenerFactory = listenerFactory;
     }
 
-    public DefaultClassPath create() {
-        File markerFile = new File(cache.getBaseDir(), "built.bin");
-        final boolean rebuild = !markerFile.exists();
+    @NonNull
+    public ClassPath create(BuildTreeLifecycleController buildController) {
+        BuildSrcBuildListenerFactory.Listener listener = listenerFactory.create();
+        buildController.beforeBuild(gradle -> gradle.addListener(listener));
 
-        Collection<File> classpath = build(rebuild);
-        LOGGER.debug("Gradle source classpath is: {}", classpath);
-        try {
-            markerFile.createNewFile();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return new DefaultClassPath(classpath);
-    }
-
-    private Collection<File> build(boolean rebuild) {
-        BuildSrcBuildListenerFactory.Listener listener = listenerFactory.create(rebuild);
-        gradleLauncher.addListener(listener);
-        gradleLauncher.run();
+        buildController.scheduleAndRunTasks(listener);
 
         return listener.getRuntimeClasspath();
     }

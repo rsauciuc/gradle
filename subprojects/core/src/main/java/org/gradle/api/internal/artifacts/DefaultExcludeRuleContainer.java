@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2008 the original author or authors.
+ * Copyright 2007 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,13 +32,19 @@ public class DefaultExcludeRuleContainer implements ExcludeRuleContainer {
         this.addedRules = new HashSet<ExcludeRule>(addedRules);
     }
 
+    @Override
     public void add(Map<String, String> args) {
+        maybeAdd(args);
+    }
+
+    public boolean maybeAdd(Map<String, String> args) {
         if (addedRules == null) {
             addedRules = new HashSet<ExcludeRule>();
         }
-        addedRules.add(ExcludeRuleNotationConverter.parser().parseNotation(args));
+        return addedRules.add(ExcludeRuleNotationConverter.parser().parseNotation(args));
     }
 
+    @Override
     public Set<ExcludeRule> getRules() {
         return addedRules == null ? Collections.<ExcludeRule>emptySet() : addedRules;
     }

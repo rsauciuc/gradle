@@ -18,6 +18,7 @@ package org.gradle.groovy.scripts.internal;
 
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.ImportNode;
+import org.codehaus.groovy.ast.InnerClassNode;
 import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.ModuleNode;
 import org.codehaus.groovy.control.CompilationFailedException;
@@ -28,7 +29,7 @@ import org.gradle.internal.UncheckedException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.Map;
+import java.util.List;
 
 /**
  * Excludes everything from a script except statements that are satisfied by a given predicate, and imports for accessible classes.
@@ -43,10 +44,13 @@ public class SubsetScriptTransformer extends AbstractScriptTransformer {
         this.transformer = transformer;
     }
 
+    @Override
     protected int getPhase() {
         return Phases.CONVERSION;
     }
 
+    @Override
+    @SuppressWarnings("ReferenceEquality") //TODO: evaluate errorprone suppression (https://github.com/gradle/gradle/issues/35864)
     public void call(SourceUnit source) throws CompilationFailedException {
         AstUtils.filterAndTransformStatements(source, transformer);
 
@@ -59,8 +63,8 @@ public class SubsetScriptTransformer extends AbstractScriptTransformer {
                 try {
                     Field field = ModuleNode.class.getDeclaredField("imports");
                     field.setAccessible(true);
-                    Map value = (Map) field.get(source.getAST());
-                    value.remove(importedClass.getAlias());
+                    @SuppressWarnings("unchecked") List<ImportNode> value = (List<ImportNode>) field.get(source.getAST());
+                    value.removeIf(i -> i.getAlias().equals(importedClass.getAlias()));
                 } catch (Exception e) {
                     throw UncheckedException.throwAsUncheckedException(e);
                 }
@@ -86,17 +90,17 @@ public class SubsetScriptTransformer extends AbstractScriptTransformer {
         ClassNode scriptClass = AstUtils.getScriptClass(source);
 
         // Remove all the classes other than the main class
-        Iterator<ClassNode> classes = source.getAST().getClasses().iterator();
-        while (classes.hasNext()) {
-            ClassNode classNode = classes.next();
-            if (classNode != scriptClass) {
-                classes.remove();
-            }
-        }
+        source.getAST().getClasses().removeIf(classNode -> classNode != scriptClass);
 
-        // Remove all the methods from the main class
+        // Remove all the inner classes and methods from the main class
         if (scriptClass != null) {
-            for (MethodNode methodNode : new ArrayList<MethodNode>(scriptClass.getMethods())) {
+            Iterator<InnerClassNode> innerClasses = scriptClass.getInnerClasses();
+            while (innerClasses.hasNext()) {
+                innerClasses.next();
+                innerClasses.remove();
+            }
+
+            for (MethodNode methodNode : new ArrayList<>(scriptClass.getMethods())) {
                 if (!methodNode.getName().equals("run")) {
                     AstUtils.removeMethod(scriptClass, methodNode);
                 }

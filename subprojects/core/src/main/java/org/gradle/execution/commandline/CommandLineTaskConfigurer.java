@@ -17,6 +17,8 @@
 package org.gradle.execution.commandline;
 
 import org.gradle.api.Task;
+import org.gradle.api.internal.tasks.TaskOptionsGenerator;
+import org.gradle.api.internal.tasks.TaskOptionsGenerator.TaskOptions;
 import org.gradle.api.internal.tasks.options.OptionDescriptor;
 import org.gradle.api.internal.tasks.options.OptionReader;
 import org.gradle.cli.CommandLineArgumentException;
@@ -29,7 +31,6 @@ import java.util.Collection;
 import java.util.List;
 
 public class CommandLineTaskConfigurer {
-
     private OptionReader optionReader;
 
     public CommandLineTaskConfigurer(OptionReader optionReader) {
@@ -48,13 +49,15 @@ public class CommandLineTaskConfigurer {
         List<String> remainingArguments = null;
         for (Task task : tasks) {
             CommandLineParser parser = new CommandLineParser();
-            final List<OptionDescriptor> commandLineOptions = optionReader.getOptions(task);
+            TaskOptions taskOptions = TaskOptionsGenerator.generate(task, optionReader);
+            List<OptionDescriptor> commandLineOptions = taskOptions.getAll();
             for (OptionDescriptor optionDescriptor : commandLineOptions) {
                 String optionName = optionDescriptor.getName();
                 org.gradle.cli.CommandLineOption option = parser.option(optionName);
                 option.hasDescription(optionDescriptor.getDescription());
                 option.hasArgument(optionDescriptor.getArgumentType());
             }
+            taskOptions.addMutualExclusions(parser);
 
             ParsedCommandLine parsed;
             try {

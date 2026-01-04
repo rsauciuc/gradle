@@ -17,20 +17,20 @@
 package org.gradle.api.tasks
 
 import org.gradle.api.internal.ConventionTask
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
-import org.gradle.util.WrapUtil
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
+import org.gradle.util.internal.WrapUtil
 
 import static org.gradle.api.internal.file.TestFiles.fileSystem
 
-public class DeleteTest extends AbstractConventionTaskTest {
+class DeleteTest extends AbstractConventionTaskTest {
     private Delete delete
 
     def setup() {
         delete = createTask(Delete)
     }
 
-    public ConventionTask getTask() {
+    ConventionTask getTask() {
         return delete
     }
 
@@ -45,7 +45,7 @@ public class DeleteTest extends AbstractConventionTaskTest {
 
         when:
         delete.delete(file)
-        delete.execute()
+        execute(delete)
 
         then:
         delete.getDidWork()
@@ -55,7 +55,7 @@ public class DeleteTest extends AbstractConventionTaskTest {
     def "did work is false when nothing gets deleted"() {
         when:
         delete.delete("does-not-exist")
-        delete.execute()
+        execute(delete)
 
         then:
         !delete.getDidWork()
@@ -72,7 +72,7 @@ public class DeleteTest extends AbstractConventionTaskTest {
         delete.getTargetFiles().getFiles() == getProject().files(delete.getDelete()).getFiles()
     }
 
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "can follow symlinks"() {
         given:
         def keepTxt = temporaryFolder.createFile("originalDir", "keep.txt")
@@ -83,7 +83,7 @@ public class DeleteTest extends AbstractConventionTaskTest {
         when:
         delete.delete(link)
         delete.setFollowSymlinks(true)
-        delete.execute()
+        execute(delete)
 
         then:
         delete.getDidWork()
@@ -91,7 +91,7 @@ public class DeleteTest extends AbstractConventionTaskTest {
         !keepTxt.exists()
     }
 
-    @Requires(TestPrecondition.SYMLINKS)
+    @Requires(UnitTestPreconditions.Symlinks)
     def "will not follow symlinks by default"() {
         given:
         def keepTxt = temporaryFolder.createFile("originalDir", "keep.txt")
@@ -101,7 +101,7 @@ public class DeleteTest extends AbstractConventionTaskTest {
 
         when:
         delete.delete(link)
-        delete.execute()
+        execute(delete)
 
         then:
         delete.getDidWork()

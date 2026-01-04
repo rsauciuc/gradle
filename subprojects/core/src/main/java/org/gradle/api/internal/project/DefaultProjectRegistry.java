@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2008 the original author or authors.
+ * Copyright 2007 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,39 +15,44 @@
  */
 package org.gradle.api.internal.project;
 
-import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.specs.Spec;
-import org.gradle.util.GUtil;
+import org.gradle.internal.scan.UsedByScanPlugin;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.jspecify.annotations.Nullable;
 
-import java.io.File;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-public class DefaultProjectRegistry<T extends ProjectIdentifier> implements ProjectRegistry<T> {
-    private Map<String, T> projects = new HashMap<String, T>();
-    private Map<String, Set<T>> subProjects = new HashMap<String, Set<T>>();
+// This default implementation is referenced by the Develocity plugin in ImportJUnitXmlReports.
+// We must leave this type in until we no longer support a Develocity plugin version that use this API.
+@Deprecated
+@ServiceScope(Scope.Build.class)
+@UsedByScanPlugin("ImportJUnitXmlReports")
+public class DefaultProjectRegistry implements ProjectRegistry, HoldsProjectState {
 
-    public void addProject(T project) {
-        projects.put(project.getPath(), project);
-        subProjects.put(project.getPath(), new HashSet<T>());
+    private final Map<String, ProjectInternal> projects = new HashMap<>();
+    private final Map<String, Set<ProjectInternal>> subProjects = new HashMap<>();
+
+    @Override
+    public void addProject(ProjectInternal project) {
+        ProjectInternal previous = projects.put(project.getPath(), project);
+        if (previous != null) {
+            throw new IllegalArgumentException(String.format("Multiple projects registered for path '%s'.", project.getPath()));
+        }
+        subProjects.put(project.getPath(), new HashSet<>());
         addProjectToParentSubProjects(project);
     }
 
-    public T removeProject(String path) {
-        T project = projects.remove(path);
-        assert project != null;
-        subProjects.remove(path);
-        ProjectIdentifier loopProject = project.getParentIdentifier();
-        while (loopProject != null) {
-            subProjects.get(loopProject.getPath()).remove(project);
-            loopProject = loopProject.getParentIdentifier();
-        }
-        return project;
+    @Override
+    public void discardAll() {
+        projects.clear();
+        subProjects.clear();
     }
-    
-    private void addProjectToParentSubProjects(T project) {
+
+    private void addProjectToParentSubProjects(ProjectInternal project) {
         ProjectIdentifier loopProject = project.getParentIdentifier();
         while (loopProject != null) {
             subProjects.get(loopProject.getPath()).add(project);
@@ -55,46 +60,29 @@ public class DefaultProjectRegistry<T extends ProjectIdentifier> implements Proj
         }
     }
 
-    public Set<T> getAllProjects() {
-        return new HashSet<T>(projects.values());
-    }
-
-    public T getProject(String path) {
+    @Override
+    public @Nullable ProjectIdentifier getProject(String path) {
         return projects.get(path);
     }
 
-    public T getProject(final File projectDir) {
-        Set<T> projects = findAll(new Spec<T>() {
-            public boolean isSatisfiedBy(T element) {
-                return element.getProjectDir().equals(projectDir);
-            }
-        });
-        if (projects.size() > 1) {
-            throw new InvalidUserDataException(String.format("Found multiple projects with project directory '%s': %s",
-                    projectDir, projects));
-        }
-        return projects.size() == 1 ? projects.iterator().next() : null;
+    @Override
+    public @Nullable ProjectInternal getProjectInternal(String path) {
+        return projects.get(path);
     }
 
-    public Set<T> getAllProjects(String path) {
-        Set<T> result = new HashSet<T>(getSubProjects(path));
+    @Override
+    public Set<ProjectInternal> getAllProjects(String path) {
+        Set<ProjectInternal> result = new HashSet<>(getSubProjects(path));
         if (projects.get(path) != null) {
             result.add(projects.get(path));
         }
-        return result;
+        return Collections.unmodifiableSet(result);
     }
 
-    public Set<T> getSubProjects(String path) {
-        return GUtil.elvis(subProjects.get(path), new HashSet<T>());
+    @Override
+    public Set<ProjectInternal> getSubProjects(String path) {
+        Set<ProjectInternal> subprojects = subProjects.get(path);
+        return subprojects != null && !subprojects.isEmpty() ? Collections.unmodifiableSet(subprojects) : Collections.emptySet();
     }
 
-    public Set<T> findAll(Spec<? super T> constraint) {
-        Set<T> matches = new HashSet<T>();
-        for (T project : projects.values()) {
-            if (constraint.isSatisfiedBy(project)) {
-                matches.add(project);
-            }
-        }
-        return matches;
-    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2008 the original author or authors.
+ * Copyright 2007 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
  */
 package org.gradle.api.internal.artifacts.dependencies;
 
+import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.artifacts.DependencyArtifact;
+import org.jspecify.annotations.Nullable;
 
 public class DefaultDependencyArtifact implements DependencyArtifact {
     private String name;
@@ -27,14 +29,22 @@ public class DefaultDependencyArtifact implements DependencyArtifact {
     public DefaultDependencyArtifact() {
     }
 
-    public DefaultDependencyArtifact(String name, String type, String extension, String classifier, String url) {
+    public DefaultDependencyArtifact(String name, String type, @Nullable String extension, @Nullable String classifier, @Nullable String url) {
         this.name = name;
         this.type = type;
         this.extension = extension;
         this.classifier = classifier;
         this.url = url;
+        validate();
     }
 
+    protected void validate() {
+        if (this.name == null) {
+            throw new InvalidUserDataException("Artifact name must not be null!");
+        }
+    }
+
+    @Override
     public String getName() {
         return name;
     }
@@ -44,6 +54,7 @@ public class DefaultDependencyArtifact implements DependencyArtifact {
         this.name = name;
     }
 
+    @Override
     public String getType() {
         return type;
     }
@@ -53,30 +64,36 @@ public class DefaultDependencyArtifact implements DependencyArtifact {
         this.type = type;
     }
 
+    @Nullable
+    @Override
     public String getExtension() {
         return extension;
     }
 
     @Override
-    public void setExtension(String extension) {
+    public void setExtension(@Nullable String extension) {
         this.extension = extension;
     }
 
+    @Nullable
+    @Override
     public String getClassifier() {
         return classifier;
     }
 
     @Override
-    public void setClassifier(String classifier) {
+    public void setClassifier(@Nullable String classifier) {
         this.classifier = classifier;
     }
 
+    @Nullable
+    @Override
     public String getUrl() {
         return url;
     }
 
     @Override
-    public void setUrl(String url) {
+    public void setUrl(@Nullable String url) {
         this.url = url;
     }
 

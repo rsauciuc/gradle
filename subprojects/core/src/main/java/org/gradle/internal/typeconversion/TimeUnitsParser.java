@@ -18,6 +18,7 @@ package org.gradle.internal.typeconversion;
 
 import org.gradle.api.InvalidUserDataException;
 
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import static org.gradle.internal.typeconversion.NormalizedTimeUnit.millis;
@@ -25,14 +26,15 @@ import static org.gradle.internal.typeconversion.NormalizedTimeUnit.millis;
 public class TimeUnitsParser {
 
     public NormalizedTimeUnit parseNotation(CharSequence notation, int value) {
-        String candidate = notation.toString().toUpperCase();
+        String candidate = notation.toString().toUpperCase(Locale.ROOT);
         //jdk5 does not have days, hours or minutes, normalizing to millis
-        if (candidate.equals("DAYS")) {
-            return millis(value * 24 * 60 * 60 * 1000);
-        } else if (candidate.equals("HOURS")) {
-            return millis(value * 60 * 60 * 1000);
-        } else if (candidate.equals("MINUTES")) {
-            return millis(value * 60 * 1000);
+        switch (candidate) {
+            case "DAYS":
+                return millis(value * 24 * 60 * 60 * 1000);
+            case "HOURS":
+                return millis(value * 60 * 60 * 1000);
+            case "MINUTES":
+                return millis(value * 60 * 1000);
         }
         try {
             return new NormalizedTimeUnit(value, TimeUnit.valueOf(candidate));

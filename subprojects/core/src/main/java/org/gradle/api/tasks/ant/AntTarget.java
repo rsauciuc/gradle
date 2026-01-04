@@ -19,16 +19,26 @@ import org.apache.tools.ant.Target;
 import org.gradle.api.internal.ConventionTask;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.gradle.work.DisableCachingByDefault;
+import org.jspecify.annotations.Nullable;
 
 import java.io.File;
+
+import static org.gradle.api.internal.ConfigurationCacheDegradation.requireDegradation;
 
 /**
  * A task which executes an Ant target.
  */
-public class AntTarget extends ConventionTask {
+@DisableCachingByDefault(because = "Gradle would require more information to cache this task")
+public abstract class AntTarget extends ConventionTask {
 
     private Target target;
     private File baseDir;
+
+    public AntTarget() {
+        requireDegradation(this, "Task is not compatible with the Configuration Cache");
+    }
 
     @TaskAction
     protected void executeAntTarget() {
@@ -45,6 +55,7 @@ public class AntTarget extends ConventionTask {
      * Returns the Ant target to execute.
      */
     @Internal
+    @ToBeReplacedByLazyProperty
     public Target getTarget() {
         return target;
     }
@@ -60,6 +71,7 @@ public class AntTarget extends ConventionTask {
      * Returns the Ant project base directory to use when executing the target.
      */
     @Internal
+    @ToBeReplacedByLazyProperty
     public File getBaseDir() {
         return baseDir;
     }
@@ -76,6 +88,8 @@ public class AntTarget extends ConventionTask {
      */
     @Internal
     @Override
+    @Nullable
+    @ToBeReplacedByLazyProperty
     public String getDescription() {
         return target == null ? null : target.getDescription();
     }
@@ -84,7 +98,7 @@ public class AntTarget extends ConventionTask {
      * {@inheritDoc}
      */
     @Override
-    public void setDescription(String description) {
+    public void setDescription(@Nullable String description) {
         if (target != null) {
             target.setDescription(description);
         }

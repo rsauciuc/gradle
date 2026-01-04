@@ -1,6 +1,0 @@
-:compileMainJarMainJava
-:processMainJarMainResources
-:mainApiJar
-:compileBrokenclientJarBrokenclientJava FAILED
-
-BUILD FAILED

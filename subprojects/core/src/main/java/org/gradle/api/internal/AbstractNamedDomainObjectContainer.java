@@ -20,25 +20,29 @@ import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.Named;
 import org.gradle.api.NamedDomainObjectContainer;
+import org.gradle.api.NamedDomainObjectProvider;
 import org.gradle.api.Namer;
 import org.gradle.api.reflect.HasPublicType;
 import org.gradle.api.reflect.TypeOf;
-import org.gradle.internal.Actions;
+import org.gradle.declarative.dsl.model.annotations.HiddenInDefinition;
+import org.gradle.internal.Cast;
 import org.gradle.internal.metaobject.ConfigureDelegate;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
+import org.jspecify.annotations.Nullable;
 
 import static org.gradle.api.reflect.TypeOf.parameterizedTypeOf;
 import static org.gradle.api.reflect.TypeOf.typeOf;
 
+@HiddenInDefinition
 public abstract class AbstractNamedDomainObjectContainer<T> extends DefaultNamedDomainObjectSet<T> implements NamedDomainObjectContainer<T>, HasPublicType {
 
-    protected AbstractNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer) {
-        super(type, instantiator, namer);
+    protected AbstractNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer, CollectionCallbackActionDecorator callbackDecorator) {
+        super(type, instantiator, namer, callbackDecorator);
     }
 
-    protected AbstractNamedDomainObjectContainer(Class<T> type, Instantiator instantiator) {
-        super(type, instantiator, Named.Namer.forType(type));
+    protected AbstractNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, CollectionCallbackActionDecorator callbackActionDecorator) {
+        super(type, instantiator, Named.Namer.forType(type), callbackActionDecorator);
     }
 
     /**
@@ -46,10 +50,16 @@ public abstract class AbstractNamedDomainObjectContainer<T> extends DefaultNamed
      */
     protected abstract T doCreate(String name);
 
+    @Override
     public T create(String name) {
-        return create(name, Actions.doNothing());
+        assertCanMutate("create(String)");
+        assertElementNotPresent(name);
+        T object = doCreate(name);
+        doAdd(object, getEventRegister().getAddActions());
+        return object;
     }
 
+    @Override
     public T maybeCreate(String name) {
         T item = findByName(name);
         if (item != null) {
@@ -58,14 +68,22 @@ public abstract class AbstractNamedDomainObjectContainer<T> extends DefaultNamed
         return create(name);
     }
 
+    @Override
     public T create(String name, Closure configureClosure) {
-        return create(name, ConfigureUtil.configureUsing(configureClosure));
+        assertCanMutate("create(String, Closure)");
+        assertElementNotPresent(name);
+        T object = doCreate(name);
+        doAdd(object, getEventRegister().getAddActions());
+        ConfigureUtil.configureUsing(configureClosure).execute(object);
+        return object;
     }
 
+    @Override
     public T create(String name, Action<? super T> configureAction) throws InvalidUserDataException {
-        assertCanAdd(name);
+        assertCanMutate("create(String, Action)");
+        assertElementNotPresent(name);
         T object = doCreate(name);
-        add(object);
+        doAdd(object, getEventRegister().getAddActions());
         configureAction.execute(object);
         return object;
     }
@@ -74,12 +92,14 @@ public abstract class AbstractNamedDomainObjectContainer<T> extends DefaultNamed
         return new NamedDomainObjectContainerConfigureDelegate(configureClosure, this);
     }
 
+    @Override
     public AbstractNamedDomainObjectContainer<T> configure(Closure configureClosure) {
         ConfigureDelegate delegate = createConfigureDelegate(configureClosure);
         ConfigureUtil.configureSelf(configureClosure, this, delegate);
         return this;
     }
 
+    @Override
     public String getDisplayName() {
         return getTypeDisplayName() + " container";
     }
@@ -87,5 +107,38 @@ public abstract class AbstractNamedDomainObjectContainer<T> extends DefaultNamed
     @Override
     public TypeOf<?> getPublicType() {
         return parameterizedTypeOf(new TypeOf<NamedDomainObjectContainer<?>>() {}, typeOf(getType()));
+    }
+
+    @Override
+    public NamedDomainObjectProvider<T> register(String name) throws InvalidUserDataException {
+        assertCanMutate("register(String)");
+        return createDomainObjectProvider(name, null);
+    }
+
+    @Override
+    public NamedDomainObjectProvider<T> register(String name, Action<? super T> configurationAction) throws InvalidUserDataException {
+        assertCanMutate("register(String, Action)");
+        return createDomainObjectProvider(name, configurationAction);
+    }
+
+    protected NamedDomainObjectProvider<T> createDomainObjectProvider(String name, @Nullable Action<? super T> configurationAction) {
+        assertElementNotPresent(name);
+        NamedDomainObjectProvider<T> provider = Cast.uncheckedCast(
+            getInstantiator().newInstance(NamedDomainObjectCreatingProvider.class, AbstractNamedDomainObjectContainer.this, name, getType(), configurationAction)
+        );
+        doAddLater(provider);
+        return provider;
+    }
+
+    // Cannot be private due to reflective instantiation
+    public class NamedDomainObjectCreatingProvider<I extends T> extends AbstractDomainObjectCreatingProvider<I> {
+        public NamedDomainObjectCreatingProvider(String name, Class<I> type, @Nullable Action<? super I> configureAction) {
+            super(name, type, configureAction);
+        }
+
+        @Override
+        protected I createDomainObject() {
+            return Cast.uncheckedCast(doCreate(getName()));
+        }
     }
 }

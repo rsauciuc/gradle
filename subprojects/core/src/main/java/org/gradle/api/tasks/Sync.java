@@ -17,9 +17,7 @@
 package org.gradle.api.tasks;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.file.copy.CopyAction;
 import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.file.copy.DestinationRootCopySpec;
@@ -27,8 +25,12 @@ import org.gradle.api.internal.file.copy.FileCopyAction;
 import org.gradle.api.internal.file.copy.SyncCopyActionDecorator;
 import org.gradle.api.tasks.util.PatternFilterable;
 import org.gradle.api.tasks.util.PatternSet;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.file.Deleter;
+import org.gradle.internal.instrumentation.api.annotations.NotToBeReplacedByLazyProperty;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
+import org.gradle.work.DisableCachingByDefault;
 
+import javax.inject.Inject;
 import java.io.File;
 
 /**
@@ -41,7 +43,7 @@ import java.io.File;
  *
  * <p>
  * Examples:
- * <pre autoTested=''>
+ * <pre class='autoTested'>
  *
  * // Sync can be used like a Copy task
  * // See the Copy documentation for more examples
@@ -64,7 +66,8 @@ import java.io.File;
  * }
  * </pre>
  */
-public class Sync extends AbstractCopyTask {
+@DisableCachingByDefault(because = "Not worth caching")
+public abstract class Sync extends AbstractCopyTask {
 
     private final PatternFilterable preserveInDestination = new PatternSet();
 
@@ -74,18 +77,22 @@ public class Sync extends AbstractCopyTask {
         if (destinationDir == null) {
             throw new InvalidUserDataException("No copy destination directory has been specified, use 'into' to specify a target directory.");
         }
-        return new SyncCopyActionDecorator(destinationDir, new FileCopyAction(getFileLookup().getFileResolver(destinationDir)), preserveInDestination, getDirectoryFileTreeFactory());
+        return new SyncCopyActionDecorator(
+            destinationDir,
+            new FileCopyAction(getFileLookup().getFileResolver(destinationDir)),
+            preserveInDestination,
+            getDeleter(),
+            getDirectoryFileTreeFactory()
+        );
     }
 
     @Override
     protected CopySpecInternal createRootSpec() {
-        Instantiator instantiator = getInstantiator();
-        FileResolver fileResolver = getFileResolver();
-
-        return instantiator.newInstance(DestinationRootCopySpec.class, fileResolver, super.createRootSpec());
+        return getObjectFactory().newInstance(DestinationRootCopySpec.class, super.createRootSpec());
     }
 
     @Override
+    @NotToBeReplacedByLazyProperty(because = "Read-only nested like property")
     public DestinationRootCopySpec getRootSpec() {
         return (DestinationRootCopySpec) super.getRootSpec();
     }
@@ -96,6 +103,7 @@ public class Sync extends AbstractCopyTask {
      * @return The destination dir.
      */
     @OutputDirectory
+    @ToBeReplacedByLazyProperty
     public File getDestinationDir() {
         return getRootSpec().getDestinationDir();
     }
@@ -113,11 +121,10 @@ public class Sync extends AbstractCopyTask {
      * Returns the filter that defines which files to preserve in the destination directory.
      *
      * @return the filter defining the files to preserve
-     *
      * @see #getDestinationDir()
      */
     @Internal
-    @Incubating
+    @NotToBeReplacedByLazyProperty(because = "Read-only nested like property")
     public PatternFilterable getPreserve() {
         return preserveInDestination;
     }
@@ -127,13 +134,13 @@ public class Sync extends AbstractCopyTask {
      *
      * @param action Action for configuring the preserve filter
      * @return this
-     *
      * @see #getDestinationDir()
      */
-    @Incubating
     public Sync preserve(Action<? super PatternFilterable> action) {
         action.execute(preserveInDestination);
         return this;
     }
 
+    @Inject
+    protected abstract Deleter getDeleter();
 }

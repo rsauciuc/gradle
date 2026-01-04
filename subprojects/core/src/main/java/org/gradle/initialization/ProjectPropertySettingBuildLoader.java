@@ -16,96 +16,126 @@
 
 package org.gradle.initialization;
 
-import com.google.common.collect.Maps;
-import org.gradle.api.Project;
-import org.gradle.api.initialization.ProjectDescriptor;
+import com.google.common.collect.ImmutableSet;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.initialization.ClassLoaderScope;
-import org.gradle.api.plugins.ExtraPropertiesExtension;
-import org.gradle.internal.reflect.JavaReflectionUtil;
-import org.gradle.internal.reflect.PropertyMutator;
-import org.gradle.util.GUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.gradle.api.internal.SettingsInternal;
+import org.gradle.api.internal.plugins.ExtraPropertiesExtensionInternal;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.internal.project.ProjectState;
+import org.gradle.api.internal.properties.GradleProperties;
+import org.gradle.api.internal.properties.GradlePropertiesController;
+import org.gradle.initialization.properties.FilteringGradleProperties;
 
-import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
+import java.util.Set;
 
 public class ProjectPropertySettingBuildLoader implements BuildLoader {
-    private static final Logger LOGGER = LoggerFactory.getLogger(ProjectPropertySettingBuildLoader.class);
 
-    private final IGradlePropertiesLoader propertiesLoader;
+    private final GradlePropertiesController gradlePropertiesController;
     private final BuildLoader buildLoader;
 
-    public ProjectPropertySettingBuildLoader(IGradlePropertiesLoader propertiesLoader, BuildLoader buildLoader) {
+    public ProjectPropertySettingBuildLoader(
+        GradlePropertiesController gradlePropertiesController,
+        BuildLoader buildLoader
+    ) {
+        this.gradlePropertiesController = gradlePropertiesController;
         this.buildLoader = buildLoader;
-        this.propertiesLoader = propertiesLoader;
     }
 
-    public void load(ProjectDescriptor rootProjectDescriptor, ProjectDescriptor defaultProject, GradleInternal gradle, ClassLoaderScope buildRootClassLoaderScope) {
-        buildLoader.load(rootProjectDescriptor, defaultProject, gradle, buildRootClassLoaderScope);
-        setProjectProperties(gradle.getRootProject(), new CachingPropertyApplicator());
+    @Override
+    public void load(SettingsInternal settings, GradleInternal gradle) {
+        buildLoader.load(settings, gradle);
+        setProjectProperties(gradle.getOwner().getProjects().getRootProject());
     }
 
-    private void setProjectProperties(Project project, CachingPropertyApplicator applicator) {
-        addPropertiesToProject(project, applicator);
-        for (Project childProject : project.getChildProjects().values()) {
-            setProjectProperties(childProject, applicator);
+    private void setProjectProperties(ProjectState project) {
+        addPropertiesToProject(project);
+        for (ProjectState childProject : project.getChildProjects()) {
+            setProjectProperties(childProject);
         }
     }
 
-    private void addPropertiesToProject(Project project, CachingPropertyApplicator applicator) {
-        Properties projectProperties = new Properties();
-        File projectPropertiesFile = new File(project.getProjectDir(), Project.GRADLE_PROPERTIES);
-        LOGGER.debug("Looking for project properties from: {}", projectPropertiesFile);
-        if (projectPropertiesFile.isFile()) {
-            projectProperties = GUtil.loadProperties(projectPropertiesFile);
-            LOGGER.debug("Adding project properties (if not overwritten by user properties): {}",
-                projectProperties.keySet());
-        } else {
-            LOGGER.debug("project property file does not exists. We continue!");
-        }
+    private void addPropertiesToProject(ProjectState project) {
+        gradlePropertiesController.loadGradleProperties(project.getIdentity(), project.getProjectDir());
+        GradleProperties projectGradleProperties = gradlePropertiesController.getGradleProperties(project.getIdentity());
 
-        // this should really be <String, Object>, however properties loader signature expects a <String, String>
-        // even if in practice it was never enforced (one can pass other property types, such as boolean) an
-        // fixing the method signature would be a binary breaking change in a public API.
-        Map<String, String> mergedProperties = propertiesLoader.mergeProperties(new HashMap(projectProperties));
-        for (Map.Entry<String, String> entry : mergedProperties.entrySet()) {
-            applicator.configureProperty(project, entry.getKey(), entry.getValue());
-        }
+        ProjectInternal mutableProject = project.getMutableModel();
+
+        Set<String> consumedProperties = assignSelectedPropertiesDirectly(mutableProject, projectGradleProperties);
+        installProjectExtraPropertiesDefaults(mutableProject, projectGradleProperties, consumedProperties);
     }
 
     /**
-     * Applies the given properties to the project and its subprojects, caching property mutators whenever possible
-     * to avoid too many searches.
+     * Assigns selected properties from the provided Gradle properties to the given project instance.
+     *
+     * @implNote The properties are looked up by known names to avoid eager access of all Gradle-properties.
      */
-    private static class CachingPropertyApplicator {
-        private final Map<String, PropertyMutator> mutators = Maps.newHashMap();
-        private Class<? extends Project> projectClazz;
+    @SuppressWarnings({"deprecation"})
+    private static Set<String> assignSelectedPropertiesDirectly(
+        ProjectInternal project,
+        GradleProperties projectGradleProperties
+    ) {
+        ImmutableSet.Builder<String> consumedProperties = ImmutableSet.builder();
+        // Historically, we filtered out properties with empty names here.
+        // They could appear in case the properties file has lines containing only '=' or ':'
+        consumedProperties.add("");
 
-        void configureProperty(Project project, String name, Object value) {
-            Class<? extends Project> clazz = project.getClass();
-            if (clazz != projectClazz) {
-                mutators.clear();
-                projectClazz = clazz;
-            }
-            PropertyMutator propertyMutator = mutators.get(name);
-            if (propertyMutator != null) {
-                propertyMutator.setValue(project, value);
-            } else {
-                if (!mutators.containsKey(name)) {
-                    propertyMutator = JavaReflectionUtil.writeablePropertyIfExists(clazz, name);
-                    mutators.put(name, propertyMutator);
-                    if (propertyMutator != null) {
-                        propertyMutator.setValue(project, value);
-                        return;
-                    }
-                }
-                ExtraPropertiesExtension extraProperties = project.getExtensions().getExtraProperties();
-                extraProperties.set(name, value);
-            }
+        // The `Object` type of variables below is intentional.
+        // This is a relaxation of the type to support an edge-case of GradleBuild task
+        // that allows passing non-String properties via `startParameter.projectProperties`.
+        // As they make their way into `GradleProperties`, the `find` method can return non-String values
+        // despite the declared String type
+        // TODO: Remove non-String project properties support in Gradle 10 - https://github.com/gradle/gradle/issues/34454
+
+        String versionName = "version";
+        Object versionValue = projectGradleProperties.findUnsafe(versionName);
+        if (versionValue != null) {
+            project.setVersion(versionValue);
+            consumedProperties.add(versionName);
         }
+
+        String groupName = "group";
+        Object groupValue = projectGradleProperties.findUnsafe(groupName);
+        if (groupValue != null) {
+            project.setGroup(groupValue);
+            consumedProperties.add(groupName);
+        }
+
+        String statusName = "status";
+        Object statusValue = projectGradleProperties.findUnsafe(statusName);
+        if (statusValue != null) {
+            project.setStatus(statusValue);
+            consumedProperties.add(statusName);
+        }
+
+        String buildDirName = "buildDir";
+        Object buildDirValue = projectGradleProperties.findUnsafe(buildDirName);
+        if (buildDirValue != null) {
+            project.setBuildDir(buildDirValue);
+            consumedProperties.add(buildDirName);
+        }
+
+        String descriptionName = "description";
+        Object descriptionValue = projectGradleProperties.findUnsafe(descriptionName);
+        // This intentionally differs from others for backward-compatibility.
+        // Other setters accept `Object` as an argument and therefore consume a property of any type.
+        // If it so happens that the description value is not a String, it would not match the
+        // `Project.setDescription(String)` setter and thus the property would end up in the map of extra-properties.
+        if (descriptionValue instanceof String) {
+            project.setDescription((String) descriptionValue);
+            consumedProperties.add(descriptionName);
+        }
+        return consumedProperties.build();
     }
+
+    private static void installProjectExtraPropertiesDefaults(ProjectInternal project, GradleProperties projectGradleProperties, Set<String> consumedProperties) {
+        ExtraPropertiesExtensionInternal extraPropertiesContainer = (ExtraPropertiesExtensionInternal) project.getExtensions().getExtraProperties();
+        // TODO:configuration-cache avoid the FilteringGradleProperties indirection when no properties are consumed
+        extraPropertiesContainer.setGradleProperties(
+            new FilteringGradleProperties(
+                projectGradleProperties,
+                it -> !consumedProperties.contains(it)
+            )
+        );
+    }
+
 }

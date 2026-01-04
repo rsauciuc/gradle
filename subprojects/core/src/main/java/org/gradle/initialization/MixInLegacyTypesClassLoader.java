@@ -20,12 +20,13 @@ import groovy.lang.GroovyObject;
 import groovy.lang.GroovySystem;
 import groovy.lang.MetaClass;
 import groovy.lang.MetaClassRegistry;
-import org.apache.commons.lang.StringUtils;
-import org.gradle.api.Nullable;
+import org.apache.commons.lang3.StringUtils;
 import org.gradle.internal.classloader.TransformingClassLoader;
+import org.gradle.internal.classloader.VisitableURLClassLoader;
 import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.reflect.PropertyAccessorType;
-import org.gradle.util.internal.Java9ClassReader;
+import org.gradle.model.internal.asm.AsmConstants;
+import org.jspecify.annotations.Nullable;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -35,13 +36,18 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
+import java.net.URL;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static org.gradle.internal.classpath.transforms.CommonTypes.OBJECT_TYPE;
+import static org.gradle.internal.classpath.transforms.CommonTypes.STRING_TYPE;
 
 /**
  * A ClassLoader that takes care of mixing-in some methods and types into various classes, for binary compatibility with older Gradle versions.
@@ -54,9 +60,7 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
     private static final Type META_CLASS_REGISTRY_TYPE = Type.getType(MetaClassRegistry.class);
     private static final Type GROOVY_SYSTEM_TYPE = Type.getType(GroovySystem.class);
     private static final Type META_CLASS_TYPE = Type.getType(MetaClass.class);
-    private static final Type OBJECT_TYPE = Type.getType(Object.class);
     private static final Type CLASS_TYPE = Type.getType(Class.class);
-    private static final Type STRING_TYPE = Type.getType(String.class);
 
     private static final String RETURN_OBJECT_FROM_OBJECT_STRING_OBJECT = Type.getMethodDescriptor(OBJECT_TYPE, OBJECT_TYPE, STRING_TYPE, OBJECT_TYPE);
     private static final String RETURN_OBJECT_FROM_STRING_OBJECT = Type.getMethodDescriptor(OBJECT_TYPE, STRING_TYPE, OBJECT_TYPE);
@@ -70,17 +74,30 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
     private static final String RETURN_CLASS = Type.getMethodDescriptor(CLASS_TYPE);
 
     private static final String META_CLASS_FIELD = "__meta_class__";
+    private static final String LEGACY_MIXIN_LOADER_NAME = "legacy-mixin-loader";
 
     private LegacyTypesSupport legacyTypesSupport;
 
+    static {
+        try {
+            ClassLoader.registerAsParallelCapable();
+        } catch (NoSuchMethodError ignore) {
+            // Not supported on Java 6
+        }
+    }
+
     public MixInLegacyTypesClassLoader(ClassLoader parent, ClassPath classPath, LegacyTypesSupport legacyTypesSupport) {
-        super(parent, classPath);
+        super(LEGACY_MIXIN_LOADER_NAME, parent, classPath);
         this.legacyTypesSupport = legacyTypesSupport;
     }
 
-    @Nullable
+    public MixInLegacyTypesClassLoader(ClassLoader parent, Collection<URL> urls, LegacyTypesSupport legacyTypesSupport) {
+        super(LEGACY_MIXIN_LOADER_NAME, parent, urls);
+        this.legacyTypesSupport = legacyTypesSupport;
+    }
+
     @Override
-    protected byte[] generateMissingClass(String name) {
+    protected byte @Nullable [] generateMissingClass(String name) {
         if (!legacyTypesSupport.getSyntheticClasses().contains(name)) {
             return null;
         }
@@ -94,7 +111,7 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
 
     @Override
     protected byte[] transform(String className, byte[] bytes) {
-        ClassReader classReader = new Java9ClassReader(bytes);
+        ClassReader classReader = new ClassReader(bytes);
         ClassWriter classWriter = new ClassWriter(0);
         classReader.accept(new TransformingAdapter(classWriter), 0);
         bytes = classWriter.toByteArray();
@@ -107,6 +124,9 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
         /**
          * We only add getters for `public static final String` constants. This is because in
          * the converted classes only contain these kinds of constants.
+         *
+         * This is a mapping of the synthesized accessor name to the name of the backing field,
+         * i.e. "getFOO" to "FOO"
          */
         private Map<String, String> missingStaticStringConstantGetters = new HashMap<String, String>();
         private Set<String> booleanGetGetters = new HashSet<String>();
@@ -114,7 +134,7 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
         private Set<String> booleanIsGetters = new HashSet<String>();
 
         TransformingAdapter(ClassVisitor cv) {
-            super(Opcodes.ASM5, cv);
+            super(AsmConstants.ASM_LEVEL, cv);
         }
 
         @Override
@@ -129,9 +149,9 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
         @Override
         public FieldVisitor visitField(int access, String name, String desc, String signature, Object value) {
             if (((access & PUBLIC_STATIC_FINAL) == PUBLIC_STATIC_FINAL) && Type.getDescriptor(String.class).equals(desc)) {
-                missingStaticStringConstantGetters.put("get" + name, (String) value);
+                missingStaticStringConstantGetters.put("get" + name, name);
             }
-            if (((access & Opcodes.ACC_PRIVATE) > 0) && !isStatic(access) && (Type.getDescriptor(boolean.class).equals(desc))) {
+            if (((access & Opcodes.ACC_PRIVATE) > 0) && !isStatic(access) && Type.getDescriptor(boolean.class).equals(desc)) {
                 booleanFields.add(name);
             }
             return super.visitField(access, name, desc, signature, value);
@@ -294,7 +314,8 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
                     constant.getKey(),
                     Type.getMethodDescriptor(Type.getType(String.class)), null, null);
                 mv.visitCode();
-                mv.visitLdcInsn(constant.getValue());
+                // accommodate cases where the RHS of the String constant is a method, not a hard-coded String
+                mv.visitFieldInsn(Opcodes.GETSTATIC, className, constant.getValue(), Type.getDescriptor(String.class));
                 mv.visitInsn(Opcodes.ARETURN);
                 mv.visitMaxs(1, 0);
                 mv.visitEnd();
@@ -325,6 +346,17 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
             mv.visitLocalVariable("this", "L" + className + ";", null, l0, l1, 0);
             mv.visitMaxs(1, 1);
             mv.visitEnd();
+        }
+    }
+
+    public static class Spec extends VisitableURLClassLoader.Spec {
+        public Spec(String name, List<URL> classpath) {
+            super(name, classpath);
+        }
+
+        @Override
+        public String toString() {
+            return "{legacy-mixin-class-loader name:" + super.getName() + ", classpath:" + getClasspath() + "}";
         }
     }
 }

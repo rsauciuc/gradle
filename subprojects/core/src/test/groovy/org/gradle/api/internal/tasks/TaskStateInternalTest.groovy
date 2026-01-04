@@ -13,17 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-
-
 package org.gradle.api.internal.tasks
 
-import org.gradle.api.GradleException
+
 import org.junit.Test
 
-import static org.hamcrest.Matchers.*
-import static org.junit.Assert.*
+import static org.hamcrest.CoreMatchers.equalTo
+import static org.hamcrest.CoreMatchers.nullValue
+import static org.hamcrest.CoreMatchers.sameInstance
+import static org.junit.Assert.assertFalse
+import static org.hamcrest.MatcherAssert.assertThat
+import static org.junit.Assert.assertTrue
+import static org.junit.Assert.fail
 
 class TaskStateInternalTest {
     private final TaskStateInternal state = new TaskStateInternal()
@@ -38,8 +39,7 @@ class TaskStateInternalTest {
         assertFalse(state.getSkipped())
         assertThat(state.getSkipMessage(), nullValue())
         assertFalse(state.upToDate)
-        assertFalse(state.taskOutputCaching.enabled)
-        assertFalse(state.actionsWereExecuted)
+        assertTrue(state.actionable)
     }
 
     @Test
@@ -113,31 +113,6 @@ class TaskStateInternalTest {
             fail()
         } catch (RuntimeException e) {
             assertThat(e, sameInstance(failure))
-        }
-    }
-
-    @Test
-    public void rethrowsFailureWhenFailureIsError() {
-        Error failure = new Error()
-        state.setOutcome(failure)
-        try {
-            state.rethrowFailure()
-            fail()
-        } catch (Error e) {
-            assertThat(e, sameInstance(failure))
-        }
-    }
-
-    @Test
-    public void rethrowsFailureWhenFailureIsException() {
-        Exception failure = new Exception()
-        state.setOutcome(failure)
-        try {
-            state.rethrowFailure()
-            fail()
-        } catch (GradleException e) {
-            assertThat(e.message, equalTo('Task failed with an exception.'))
-            assertThat(e.cause, sameInstance(failure))
         }
     }
 }

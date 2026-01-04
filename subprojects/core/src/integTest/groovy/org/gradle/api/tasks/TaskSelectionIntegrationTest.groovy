@@ -16,10 +16,15 @@
 
 package org.gradle.api.tasks
 
+
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
 
 class TaskSelectionIntegrationTest extends AbstractIntegrationSpec {
+
+    @ToBeFixedForIsolatedProjects(because = "subprojects")
     def "given an unqualified name traverse project tree from current project and select all tasks with matching name"() {
+        createDirs("a", "b", "a/a", "b/b")
         settingsFile << "include 'a', 'b', 'a:a', 'b:b'"
 
         buildFile << """
@@ -33,24 +38,26 @@ class TaskSelectionIntegrationTest extends AbstractIntegrationSpec {
         run "thing"
 
         then:
-        result.assertTasksExecuted(":a:thing", ":b:thing", ":a:a:thing", ":b:b:thing")
+        result.assertTasksScheduled(":a:thing", ":b:thing", ":a:a:thing", ":b:b:thing")
 
         when:
         executer.inDirectory(file("a"))
         run "thing"
 
         then:
-        result.assertTasksExecuted(":a:thing", ":a:a:thing")
+        result.assertTasksScheduled(":a:thing", ":a:a:thing")
 
         // camel case matching
         when:
         run "th"
 
         then:
-        result.assertTasksExecuted(":a:thing", ":b:thing", ":a:a:thing", ":b:b:thing")
+        result.assertTasksScheduled(":a:thing", ":b:thing", ":a:a:thing", ":b:b:thing")
     }
 
+    @ToBeFixedForIsolatedProjects(because = "subprojects")
     def "stops traversing sub-projects when task implies sub-projects"() {
+        createDirs("a", "b", "a/a", "b/b")
         settingsFile << "include 'a', 'b', 'a:a', 'b:b'"
 
         buildFile << """
@@ -67,24 +74,26 @@ class TaskSelectionIntegrationTest extends AbstractIntegrationSpec {
         run "thing"
 
         then:
-        result.assertTasksExecuted(":a:thing", ":b:thing", ":b:b:thing")
+        result.assertTasksScheduled(":a:thing", ":b:thing", ":b:b:thing")
 
         when:
         executer.inDirectory(file("a"))
         run "thing"
 
         then:
-        result.assertTasksExecuted(":a:thing")
+        result.assertTasksScheduled(":a:thing")
 
         // camel case matching
         when:
         run "th"
 
         then:
-        result.assertTasksExecuted(":a:thing", ":b:thing", ":b:b:thing")
+        result.assertTasksScheduled(":a:thing", ":b:thing", ":b:b:thing")
     }
 
+    @ToBeFixedForIsolatedProjects(because = "allprojects")
     def "can use camel-case for all segments of qualified task name"() {
+        createDirs("child", "child/child")
         settingsFile << "include 'child', 'child:child'"
 
         buildFile << """
@@ -94,10 +103,28 @@ allprojects { task thing }
         run "chi:chi:th"
 
         then:
-        result.assertTasksExecuted(":child:child:thing")
+        result.assertTasksScheduled(":child:child:thing")
     }
 
+    def "can use camel case to match software model tasks"() {
+        buildFile << """
+            model {
+                tasks {
+                    "sayHelloToUser"(DefaultTask) {
+                    }
+                }
+            }
+        """
+        when:
+        run "sHTU"
+
+        then:
+        result.assertTasksScheduled(":sayHelloToUser")
+    }
+
+    @ToBeFixedForIsolatedProjects(because = "allprojects")
     def "executes project default tasks when none specified"() {
+        createDirs("a")
         settingsFile << "include 'a'"
 
         buildFile << """
@@ -112,6 +139,6 @@ allprojects { task thing }
         run()
 
         then:
-        result.assertTasksExecuted(":a", ":b", ":a:b")
+        result.assertTasksScheduled(":a", ":b", ":a:b")
     }
 }

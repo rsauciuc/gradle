@@ -16,7 +16,7 @@
 
 package org.gradle.api
 
-import groovy.transform.NotYetImplemented
+import groovy.test.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import spock.lang.Ignore
 import spock.lang.Issue
@@ -25,7 +25,7 @@ class BuildScriptClassPathIntegrationTest extends AbstractIntegrationSpec {
     def "script can use xerces without affecting that used for dependency resolution"() {
         buildFile << """
 buildscript {
-    repositories { jcenter() }
+    ${mavenCentralRepository()}
     dependencies {
         classpath 'xerces:xercesImpl:2.9.1'
     }
@@ -34,17 +34,16 @@ plugins {
     id 'java'
 }
 
-repositories {
-    jcenter()
-}
+${mavenCentralRepository()}
 
 dependencies {
-    compile "com.google.guava:guava:19.0"
+    implementation "com.google.guava:guava:19.0"
 }
 
 task show {
+    def runtimeClasspath = configurations.runtimeClasspath
     doLast {
-        configurations.compile.files.each { println it }
+        runtimeClasspath.files.each { println it }
     }
 }
 """
@@ -57,7 +56,7 @@ task show {
     @NotYetImplemented
     @Ignore("Apparently sometimes the test passes on CI")
     def "doesn't cache the metaclass from previous execution if build script changes"() {
-        buildFile << '''
+        buildFile '''
 void bar() {
    println 'Original bar'
 }
@@ -87,9 +86,22 @@ task foo {
 
         when:
         buildFile.text = buildFile.text.replaceAll('Original bar', 'New bar')
-        run 'foo'
+        succeeds 'foo'
 
         then:
-        !result.output.contains('Original bar')
+        outputDoesNotContain('Original bar')
+    }
+
+    def 'buildscript classpath has proper usage attribute'() {
+        buildFile << """
+buildscript {
+    configurations.classpath {
+        def value = attributes.getAttribute(Usage.USAGE_ATTRIBUTE)
+        assert value.name == Usage.JAVA_RUNTIME
+    }
+}
+"""
+        expect:
+        succeeds()
     }
 }

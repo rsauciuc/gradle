@@ -15,13 +15,13 @@
  */
 package org.gradle.api.internal.project.antbuilder;
 
-import com.google.common.collect.Maps;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.classpath.ClassPath;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.ref.ReferenceQueue;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 
@@ -29,7 +29,7 @@ import static org.gradle.api.internal.project.antbuilder.Cleanup.Mode.CLOSE_CLAS
 import static org.gradle.api.internal.project.antbuilder.Cleanup.Mode.DONT_CLOSE_CLASSLOADER;
 
 class FinalizerThread extends Thread {
-    private final static Logger LOG = Logging.getLogger(FinalizerThread.class);
+    private final static Logger LOG = LoggerFactory.getLogger(FinalizerThread.class);
 
     private final ReferenceQueue<CachedClassLoader> referenceQueue;
     private final AtomicBoolean stopped = new AtomicBoolean();
@@ -44,10 +44,11 @@ class FinalizerThread extends Thread {
         this.setDaemon(true);
         this.referenceQueue = new ReferenceQueue<CachedClassLoader>();
         this.cacheEntries = cacheEntries;
-        this.cleanups = Maps.newConcurrentMap();
+        this.cleanups = new ConcurrentHashMap<>();
         this.lock = lock;
     }
 
+    @Override
     public void run() {
 
         try {
@@ -57,7 +58,7 @@ class FinalizerThread extends Thread {
                 removeCacheEntry(key, entry, DONT_CLOSE_CLASSLOADER);
             }
         } catch (InterruptedException ex) {
-            LOG.debug("Shutdown of classloader cache in progress");
+            Thread.currentThread().interrupt();
         }
     }
 

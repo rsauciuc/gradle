@@ -19,30 +19,28 @@ package org.gradle.internal.work;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-import org.gradle.api.specs.Spec;
 import org.gradle.internal.exceptions.DefaultMultiCauseException;
-import org.gradle.internal.progress.BuildOperationExecutor.Operation;
-import org.gradle.internal.resources.ProjectLeaseRegistry;
-import org.gradle.util.CollectionUtils;
+import org.gradle.internal.operations.BuildOperationRef;
+import org.gradle.util.internal.CollectionUtils;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class DefaultAsyncWorkTracker implements AsyncWorkTracker {
-    private final ListMultimap<Operation, AsyncWorkCompletion> items = ArrayListMultimap.create();
-    private final Set<Operation> waiting = Sets.newHashSet();
+    private final ListMultimap<BuildOperationRef, AsyncWorkCompletion> items = ArrayListMultimap.create();
+    private final Set<BuildOperationRef> waiting = new HashSet<>();
     private final ReentrantLock lock = new ReentrantLock();
-    private final ProjectLeaseRegistry projectLeaseRegistry;
+    private final WorkerLeaseService workerLeaseService;
 
-    public DefaultAsyncWorkTracker(ProjectLeaseRegistry projectLeaseRegistry) {
-        this.projectLeaseRegistry = projectLeaseRegistry;
+    public DefaultAsyncWorkTracker(WorkerLeaseService workerLeaseService) {
+        this.workerLeaseService = workerLeaseService;
     }
 
     @Override
-    public void registerWork(Operation operation, AsyncWorkCompletion workCompletion) {
+    public void registerWork(BuildOperationRef operation, AsyncWorkCompletion workCompletion) {
         lock.lock();
         try {
             if (waiting.contains(operation)) {
@@ -55,60 +53,112 @@ public class DefaultAsyncWorkTracker implements AsyncWorkTracker {
     }
 
     @Override
-    public void waitForCompletion(Operation operation) {
-        final List<Throwable> failures = Lists.newArrayList();
+    public void waitForCompletion(BuildOperationRef operation, ProjectLockRetention lockRetention) {
         final List<AsyncWorkCompletion> workItems;
         lock.lock();
         try {
             workItems = ImmutableList.copyOf(items.get(operation));
-            items.removeAll(operation);
-            startWaiting(operation);
+            startWaiting(operation, workItems);
         } finally {
             lock.unlock();
         }
 
-        try {
-            if (workItems.size() > 0) {
-                boolean workInProgress = CollectionUtils.any(workItems, new Spec<AsyncWorkCompletion>() {
-                    @Override
-                    public boolean isSatisfiedBy(AsyncWorkCompletion workCompletion) {
-                        return !workCompletion.isComplete();
-                    }
-                });
-                if (workInProgress) {
-                    projectLeaseRegistry.withoutProjectLock(new Runnable() {
-                        @Override
-                        public void run() {
-                            for (AsyncWorkCompletion item : workItems) {
-                                try {
-                                    item.waitForCompletion();
-                                } catch (Throwable t) {
-                                    failures.add(t);
-                                }
-                            }
+        waitForAll(operation, workItems, lockRetention);
+    }
 
-                            if (failures.size() > 0) {
-                                throw new DefaultMultiCauseException("There were failures while executing asynchronous work:", failures);
-                            }
-                        }
-                    });
-                }
+    @Override
+    public void waitForCompletion(BuildOperationRef operation, List<AsyncWorkCompletion> workItems, ProjectLockRetention lockRetention) {
+        startWaiting(operation, workItems);
+        waitForAll(operation, workItems, lockRetention);
+    }
+
+    private void waitForAll(BuildOperationRef operation, List<AsyncWorkCompletion> workItems, ProjectLockRetention lockRetention) {
+        try {
+            if (!workItems.isEmpty()) {
+                waitForItemsAndGatherFailures(workItems, lockRetention);
             }
         } finally {
             stopWaiting(operation);
         }
     }
 
-    private void startWaiting(Operation operation) {
+    private void waitForItemsAndGatherFailures(List<AsyncWorkCompletion> workItems, AsyncWorkTracker.ProjectLockRetention lockRetention) {
+        switch (lockRetention) {
+            case RETAIN_PROJECT_LOCKS:
+                waitForItemsAndGatherFailures(workItems);
+                return;
+            case RELEASE_PROJECT_LOCKS:
+                workerLeaseService.runAsIsolatedTask();
+                waitForItemsAndGatherFailures(workItems);
+                return;
+            case RELEASE_AND_REACQUIRE_PROJECT_LOCKS:
+                if (!hasWorkInProgress(workItems)) {
+                    // All items are complete. Do not release project lock and simply collect failures.
+                    waitForItemsAndGatherFailures(workItems);
+                    return;
+                }
+                workerLeaseService.runAsIsolatedTask(() -> waitForItemsAndGatherFailures(workItems));
+        }
+    }
+
+    private boolean hasWorkInProgress(List<AsyncWorkCompletion> workItems) {
+        return CollectionUtils.any(workItems, workCompletion -> !workCompletion.isComplete());
+    }
+
+    @Override
+    public boolean hasUncompletedWork(BuildOperationRef operation) {
         lock.lock();
         try {
+            List<AsyncWorkCompletion> workItems = items.get(operation);
+            for (AsyncWorkCompletion workCompletion : workItems) {
+                if (!workCompletion.isComplete()) {
+                    return true;
+                }
+            }
+            return false;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void waitForItemsAndGatherFailures(Iterable<AsyncWorkCompletion> workItems) {
+        // Release worker lease while waiting
+        workerLeaseService.withoutLock(workerLeaseService.getCurrentWorkerLease(), () -> {
+            final List<Throwable> failures = new ArrayList<>();
+            for (AsyncWorkCompletion item : workItems) {
+                try {
+                    item.waitForCompletion();
+                } catch (Throwable t) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        cancel(workItems);
+                    }
+                    failures.add(t);
+                }
+            }
+
+            if (failures.size() > 0) {
+                throw new DefaultMultiCauseException("There were failures while executing asynchronous work:", failures);
+            }
+        });
+    }
+
+    private void cancel(Iterable<AsyncWorkCompletion> workItems) {
+        for (AsyncWorkCompletion workItem : workItems) {
+            workItem.cancel();
+        }
+    }
+
+    private void startWaiting(BuildOperationRef operation, List<AsyncWorkCompletion> workItems) {
+        lock.lock();
+        try {
+            items.get(operation).removeAll(workItems);
             waiting.add(operation);
         } finally {
             lock.unlock();
         }
     }
 
-    private void stopWaiting(Operation operation) {
+    private void stopWaiting(BuildOperationRef operation) {
         lock.lock();
         try {
             waiting.remove(operation);

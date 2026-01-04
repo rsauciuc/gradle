@@ -16,11 +16,12 @@
 package org.gradle.internal.xml;
 
 import groovy.lang.Closure;
+import groovy.lang.DelegatesTo;
 import groovy.util.IndentPrinter;
 import groovy.util.Node;
-import groovy.util.XmlNodePrinter;
-import groovy.util.XmlParser;
-import org.apache.commons.lang.StringUtils;
+import groovy.xml.XmlNodePrinter;
+import groovy.xml.XmlParser;
+import org.apache.commons.lang3.StringUtils;
 import org.gradle.api.Action;
 import org.gradle.api.Transformer;
 import org.gradle.api.XmlProvider;
@@ -28,22 +29,21 @@ import org.gradle.api.internal.DomNode;
 import org.gradle.internal.IoActions;
 import org.gradle.internal.SystemProperties;
 import org.gradle.internal.UncheckedException;
-import org.gradle.util.ConfigureUtil;
-import org.gradle.util.GUtil;
-import org.gradle.util.TextUtil;
+import org.gradle.util.internal.ConfigureUtil;
+import org.gradle.util.internal.GUtil;
+import org.gradle.util.internal.TextUtil;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 
-import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.BufferedOutputStream;
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
@@ -51,27 +51,35 @@ import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
 public class XmlTransformer implements Transformer<String, String> {
-    private final List<Action<? super XmlProvider>> actions = new ArrayList<Action<? super XmlProvider>>();
+    private final List<Action<? super XmlProvider>> actions = new ArrayList<>();
+    private final List<Action<? super XmlProvider>> finalizers = new ArrayList<>(2);
     private String indentation = "  ";
 
     public void addAction(Action<? super XmlProvider> provider) {
         actions.add(provider);
     }
 
+    public void addFinalizer(Action<? super XmlProvider> provider) {
+        finalizers.add(provider);
+    }
+
     public void setIndentation(String indentation) {
         this.indentation = indentation;
     }
 
-    public void addAction(Closure closure) {
+    public void addAction(@DelegatesTo(XmlProvider.class) Closure closure) {
         actions.add(ConfigureUtil.configureUsing(closure));
     }
 
     public void transform(File destination, final String encoding, final Action<? super Writer> generator) {
         IoActions.writeTextFile(destination, encoding, new Action<Writer>() {
+            @Override
             public void execute(Writer writer) {
                 transform(writer, encoding, generator);
             }
@@ -80,6 +88,7 @@ public class XmlTransformer implements Transformer<String, String> {
 
     public void transform(File destination, final Action<? super Writer> generator) {
         IoActions.writeTextFile(destination, new Action<Writer>() {
+            @Override
             public void execute(Writer writer) {
                 transform(writer, generator);
             }
@@ -98,6 +107,7 @@ public class XmlTransformer implements Transformer<String, String> {
         doTransform(stringWriter.toString()).writeTo(destination, encoding);
     }
 
+    @Override
     public String transform(String original) {
         return doTransform(original).toString();
     }
@@ -144,6 +154,7 @@ public class XmlTransformer implements Transformer<String, String> {
 
     private XmlProviderImpl doTransform(XmlProviderImpl provider) {
         provider.apply(actions);
+        provider.apply(finalizers);
         return provider;
     }
 
@@ -191,21 +202,15 @@ public class XmlTransformer implements Transformer<String, String> {
         }
 
         public void writeTo(File file) {
-            try {
-                OutputStream outputStream = new BufferedOutputStream(new FileOutputStream(file));
-                try {
-                    writeTo(outputStream);
-                } finally {
-                    outputStream.close();
-                }
+            try (OutputStream outputStream = new BufferedOutputStream(Files.newOutputStream(file.toPath()))) {
+                writeTo(outputStream);
             } catch (IOException e) {
                 throw UncheckedException.throwAsUncheckedException(e);
             }
         }
 
         public void writeTo(OutputStream stream) {
-            try {
-                Writer writer = new OutputStreamWriter(stream, "UTF-8");
+            try(Writer writer = new BufferedWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8))) {
                 doWriteTo(writer, "UTF-8");
                 writer.flush();
             } catch (IOException e) {
@@ -213,6 +218,7 @@ public class XmlTransformer implements Transformer<String, String> {
             }
         }
 
+        @Override
         public StringBuilder asString() {
             if (builder == null) {
                 builder = new StringBuilder(toString());
@@ -222,6 +228,7 @@ public class XmlTransformer implements Transformer<String, String> {
             return builder;
         }
 
+        @Override
         public Node asNode() {
             if (node == null) {
                 try {
@@ -235,11 +242,12 @@ public class XmlTransformer implements Transformer<String, String> {
             return node;
         }
 
+        @Override
         public Element asElement() {
             if (element == null) {
                 Document document;
                 try {
-                    document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new InputSource(new StringReader(toString())));
+                    document = XmlFactories.newDocumentBuilderFactory().newDocumentBuilder().parse(new InputSource(new StringReader(toString())));
                 } catch (Exception e) {
                     throw UncheckedException.throwAsUncheckedException(e);
                 }
@@ -295,7 +303,7 @@ public class XmlTransformer implements Transformer<String, String> {
             int indentAmount = determineIndentAmount();
 
             try {
-                TransformerFactory factory = TransformerFactory.newInstance();
+                TransformerFactory factory = XmlFactories.newTransformerFactory();
                 try {
                     factory.setAttribute("indent-number", indentAmount);
                 } catch (IllegalArgumentException ignored) {
@@ -337,6 +345,7 @@ public class XmlTransformer implements Transformer<String, String> {
                 org.w3c.dom.Node child = children.item(i);
                 if (child.getNodeType() == org.w3c.dom.Node.TEXT_NODE && child.getNodeValue().trim().length() == 0) {
                     node.removeChild(child);
+                    i--;
                 } else {
                     removeEmptyTextNodes(child);
                 }

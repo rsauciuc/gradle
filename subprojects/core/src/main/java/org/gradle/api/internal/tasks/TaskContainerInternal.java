@@ -15,16 +15,19 @@
  */
 package org.gradle.api.internal.tasks;
 
-import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.internal.PolymorphicDomainObjectContainerInternal;
-import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.tasks.TaskContainer;
 import org.gradle.internal.metaobject.DynamicObject;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.gradle.model.internal.core.ModelPath;
 import org.gradle.model.internal.type.ModelType;
 
-public interface TaskContainerInternal extends TaskContainer, TaskResolver, PolymorphicDomainObjectContainerInternal<Task> {
+import java.util.Collection;
+
+@ServiceScope(Scope.Project.class)
+public interface TaskContainerInternal extends TaskContainer, PolymorphicDomainObjectContainerInternal<Task> {
 
     // The path to the project's task container in the model registry
     ModelPath MODEL_PATH = ModelPath.path("tasks");
@@ -32,12 +35,8 @@ public interface TaskContainerInternal extends TaskContainer, TaskResolver, Poly
 
     DynamicObject getTasksAsDynamicObject();
 
-    <T extends TaskInternal> void addPlaceholderAction(String placeholderName, Class<T> type, Action<? super T> configure);
-
     /**
      * Force the task graph to come into existence.
-     *
-     * As part of this, all placeholder actions are materialized to show up in 'tasks' and 'tasks --all' overview.
      */
     void realize();
 
@@ -52,4 +51,21 @@ public interface TaskContainerInternal extends TaskContainer, TaskResolver, Poly
      * Ensures that all configuration has been applied to the given task, and the task is ready to be added to the task graph.
      */
     void prepareForExecution(Task task);
+
+    /**
+     * Adds a previously constructed task into the container.  For internal use with software model bridging.
+     */
+    boolean addInternal(Task task);
+
+    /**
+     * Adds a previously constructed task into the container.  For internal use with software model bridging.
+     */
+    boolean addAllInternal(Collection<? extends Task> task);
+
+    /**
+     * Creates an instance of the given task type without invoking its constructors. This is used to recreate a task instance from the configuration cache.
+     *
+     * TODO:configuration-cache - review this
+     */
+    <T extends Task> T createWithoutConstructor(String name, Class<T> type, long uniqueId);
 }

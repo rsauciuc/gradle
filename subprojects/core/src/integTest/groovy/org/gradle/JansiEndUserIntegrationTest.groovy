@@ -17,14 +17,16 @@
 package org.gradle
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.Requires
+import org.gradle.integtests.fixtures.AvailableJavaHomes
+import org.gradle.integtests.fixtures.jvm.JavaToolchainFixture
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
 import spock.lang.Ignore
 import spock.lang.Issue
 
 import static org.gradle.internal.nativeintegration.jansi.JansiBootPathConfigurer.JANSI_LIBRARY_PATH_SYS_PROP
-import static org.gradle.util.TestPrecondition.JDK8_OR_EARLIER
 
-class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
+class JansiEndUserIntegrationTest extends AbstractIntegrationSpec implements JavaToolchainFixture {
 
     private final static String JANSI_VERSION = '1.11'
 
@@ -34,8 +36,8 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
         buildFile << basicJavaProject()
         buildFile << """
             dependencies {
-                testCompile 'org.fusesource.jansi:jansi:$JANSI_VERSION'
-                testCompile 'junit:junit:4.12'
+                testImplementation 'org.fusesource.jansi:jansi:$JANSI_VERSION'
+                testImplementation 'junit:junit:4.13'
             }
         """
 
@@ -67,8 +69,6 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
     @Ignore
     @Issue("GRADLE-3578")
     def "java compiler uses a different version of Jansi than initialized by Gradle's native services"() {
-        requireGradleDistribution()
-
         when:
         AnnotationProcessorPublisher annotationProcessorPublisher = new AnnotationProcessorPublisher()
         annotationProcessorPublisher.writeSourceFiles()
@@ -83,7 +83,7 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
         buildFile << annotationProcessorDependency(annotationProcessorPublisher.repoDir, annotationProcessorPublisher.dependencyCoordinates)
         buildFile << """
             compileJava {
-                options.compilerArgs += ['-processorpath', configurations.customAnnotation.asPath]
+                options.annotationProcessorPath = configurations.customAnnotation
             }
         """
 
@@ -91,19 +91,21 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
             public class MyClass {}
         """
 
-        succeeds 'compileJava'
+        withInstallations(AvailableJavaHomes.jdk11).succeeds 'compileJava'
 
         then:
         outputContains('Hello World')
     }
 
+    @Requires(IntegTestPreconditions.Java11HomeAvailable)
     def "groovy compiler uses a different version of Jansi than initialized by Gradle's native services"() {
-        requireGradleDistribution()
-
         when:
         AnnotationProcessorPublisher annotationProcessorPublisher = new AnnotationProcessorPublisher()
         annotationProcessorPublisher.writeSourceFiles()
-        inDirectory(annotationProcessorPublisher.projectDir).withTasks('publish').run()
+        withInstallations(AvailableJavaHomes.jdk11)
+            .inDirectory(annotationProcessorPublisher.projectDir)
+            .withTasks('publish')
+            .run()
 
         then:
         annotationProcessorPublisher.publishedJarFile.isFile()
@@ -116,12 +118,12 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
             apply plugin: 'groovy'
 
             dependencies {
-                compile localGroovy()
+                implementation localGroovy()
             }
 
             compileGroovy {
                 groovyOptions.javaAnnotationProcessing = true
-                options.compilerArgs += ['-processorpath', configurations.customAnnotation.asPath]
+                options.annotationProcessorPath = configurations.customAnnotation
             }
         """
 
@@ -129,78 +131,28 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
             class MyClass {}
         """
 
-        succeeds 'compileGroovy'
+        withInstallations(AvailableJavaHomes.jdk11).succeeds 'compileGroovy'
 
         then:
         outputContains('Hello World')
-    }
-
-    @Requires(JDK8_OR_EARLIER)
-    def "kotlin compiler bundles different version of Jansi than initialized by Gradle's native services"() {
-        given:
-        def kotlinVersion = '1.0.4'
-
-        buildFile << """
-            buildscript {
-                repositories {
-                    mavenCentral()
-                }
-                dependencies {
-                    classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion'
-                }
-            }
-
-            apply plugin: 'kotlin'
-
-            repositories {
-                mavenCentral()
-            }
-
-            dependencies {
-                compile 'org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion'
-            }
-        """
-
-        when:
-        file('src/main/kotlin/MyClass.kt') << """
-            class MyClass {}
-        """
-
-        succeeds 'compileKotlin'
-
-        then:
-        executedAndNotSkipped(':compileKotlin')
-
-        when:
-        file('src/main/kotlin/FailingClass.kt') << """
-            class FailingClass { < }
-        """
-
-        def result = fails 'compileKotlin'
-
-        then:
-        executedAndNotSkipped(':compileKotlin')
-        result.error.contains('> Compilation error. See log for more details')
-        result.error.contains('FailingClass.kt: (2, 34): Expecting member declaration')
     }
 
     static String basicJavaProject() {
         """
             apply plugin: 'java'
 
-            repositories {
-                mavenCentral()
-            }
+            ${mavenCentralRepository()}
         """
     }
 
     static String annotationProcessorDependency(File repoDir, String processorDependency) {
         """
-            sourceCompatibility = '1.6'
+            java.toolchain.languageVersion = JavaLanguageVersion.of(11)
+            java.sourceCompatibility = '1.7'
 
             repositories {
                 maven {
-                    url '${repoDir.toURI()}'
+                    url = '${repoDir.toURI()}'
                 }
             }
 
@@ -257,10 +209,11 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
 
                 group = '$group'
                 version = '$version'
-                sourceCompatibility = '1.6'
+                java.toolchain.languageVersion = JavaLanguageVersion.of(11)
+                java.sourceCompatibility = '1.7'
 
                 dependencies {
-                    compile 'org.fusesource.jansi:jansi:$JANSI_VERSION'
+                    implementation 'org.fusesource.jansi:jansi:$JANSI_VERSION'
                 }
 
                 publishing {
@@ -272,7 +225,7 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
 
                     repositories {
                         maven {
-                            url "\$buildDir/repo"
+                            url = layout.buildDirectory.dir('repo')
                         }
                     }
                 }
@@ -292,7 +245,7 @@ class JansiEndUserIntegrationTest extends AbstractIntegrationSpec {
                 import org.fusesource.jansi.AnsiConsole;
 
                 @SupportedAnnotationTypes({"org.gradle.Custom"})
-                @SupportedSourceVersion(SourceVersion.RELEASE_6)
+                @SupportedSourceVersion(SourceVersion.RELEASE_7)
                 public class MyProcessor extends AbstractProcessor {
                     @Override
                     public synchronized void init(ProcessingEnvironment processingEnv) {

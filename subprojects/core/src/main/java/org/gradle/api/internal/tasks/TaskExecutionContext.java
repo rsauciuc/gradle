@@ -16,12 +16,42 @@
 
 package org.gradle.api.internal.tasks;
 
-import org.gradle.api.internal.changedetection.TaskArtifactState;
-import org.gradle.caching.internal.tasks.TaskOutputCachingBuildCacheKey;
+import org.gradle.api.internal.changedetection.TaskExecutionMode;
+import org.gradle.api.internal.tasks.properties.TaskProperties;
+import org.gradle.execution.plan.LocalTaskNode;
+import org.gradle.internal.execution.WorkValidationContext;
+import org.gradle.internal.operations.BuildOperationContext;
+import org.gradle.internal.reflect.validation.TypeValidationContext;
+
+import java.util.Optional;
 
 public interface TaskExecutionContext {
-    TaskArtifactState getTaskArtifactState();
-    void setTaskArtifactState(TaskArtifactState taskArtifactState);
-    TaskOutputCachingBuildCacheKey getBuildCacheKey();
-    void setBuildCacheKey(TaskOutputCachingBuildCacheKey cacheKey);
+
+    LocalTaskNode getLocalTaskNode();
+
+    TaskExecutionMode getTaskExecutionMode();
+
+    WorkValidationContext getValidationContext();
+
+    OutputDependencyCheckAction getOutputDependencyCheckAction();
+
+    void setTaskExecutionMode(TaskExecutionMode taskExecutionMode);
+
+    TaskProperties getTaskProperties();
+
+    /**
+     * Gets and clears the context of the build operation designed to measure the time taken
+     * by capturing input snapshotting and cache key calculation.
+     */
+    Optional<BuildOperationContext> removeSnapshotTaskInputsBuildOperationContext();
+
+    /**
+     * Sets the context for the build operation designed to measure the time taken
+     * by capturing input snapshotting and cache key calculation.
+     */
+    void setSnapshotTaskInputsBuildOperationContext(BuildOperationContext operation);
+
+    interface OutputDependencyCheckAction {
+        void checkOutputDependencies(TypeValidationContext validationContext);
+    }
 }

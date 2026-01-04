@@ -16,7 +16,8 @@
 
 package org.gradle.internal.xml
 
-import org.gradle.util.TextUtil
+import groovy.xml.XmlSlurper
+import org.gradle.util.internal.TextUtil
 import spock.lang.Specification
 
 import javax.xml.parsers.DocumentBuilderFactory
@@ -73,6 +74,66 @@ class SimpleXmlWriterSpec extends Specification {
         and:
         def item = new XmlSlurper().parseText(xml).item
         item.@description.text() == "encoded: \t &lt; < > ' \n\r\"  "
+    }
+
+    def "surrogates in attributes"() {
+        when:
+        writer.startElement("root")
+        writer.attribute("test", "丈, 😃, and नि")
+        writer.endElement()
+
+        then:
+        xml == "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root test=\"丈, &#x1f603;, and नि\"/>"
+    }
+
+    def "surrogates in content"() {
+        when:
+        writer.startElement("root")
+        writer.startElement("a")
+        def v = "丈, 😃, and नि"
+        writer.characters(v)
+        writer.endElement()
+        writer.startElement("b")
+        writer.characters(v.toCharArray())
+        writer.endElement()
+        writer.endElement()
+
+        then:
+        xml == "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root><a>丈, &#x1f603;, and नि</a><b>丈, &#x1f603;, and नि</b></root>"
+    }
+
+    def "surrogates in comment"() {
+        when:
+        writer.startElement("root")
+        writer.comment("丈, 😃, and नि, and > or &")
+        writer.endElement()
+
+        then:
+        xml == "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root><!-- 丈, &#x1f603;, and नि, and > or & --></root>"
+    }
+
+    def 'detects invalid comment'() {
+        when:
+        writer.comment("Some comment that is -- invalid!")
+
+        then:
+        IllegalArgumentException exception = thrown()
+        exception.getMessage() == "'--' is invalid inside an XML comment: Some comment that is -- invalid!"
+    }
+
+    def "surrogates in CDATA"() {
+        when:
+        writer.startElement("root")
+        writer.startCDATA()
+        writer.characters("丈, 😃, and नि")
+        writer.endCDATA()
+        writer.startCDATA()
+        writer.characters("x丈, नि, 😃".toCharArray())
+        writer.endCDATA()
+        writer.endElement()
+
+        then:
+        xml == "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root><![CDATA[丈, ]]>&#x1f603;<![CDATA[, and नि]]><![CDATA[x丈, नि, ]]>&#x1f603;<![CDATA[]]></root>"
     }
 
     def "writes CDATA"() {

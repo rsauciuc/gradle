@@ -17,36 +17,45 @@
 package org.gradle.process.internal;
 
 import com.google.common.base.Joiner;
+import jnr.constants.platform.Signal;
 import net.rubygrapefruit.platform.ProcessLauncher;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
+import org.gradle.initialization.BuildCancellationToken;
 import org.gradle.internal.UncheckedException;
-import org.gradle.internal.concurrent.DefaultExecutorFactory;
-import org.gradle.internal.concurrent.StoppableExecutor;
 import org.gradle.internal.event.ListenerBroadcast;
 import org.gradle.internal.nativeintegration.services.NativeServices;
+import org.gradle.internal.operations.CurrentBuildOperationRef;
+import org.gradle.internal.os.OperatingSystem;
 import org.gradle.process.ExecResult;
-import org.gradle.process.internal.shutdown.ShutdownHookActionRegister;
-import org.gradle.process.internal.streams.StreamsHandler;
+import org.gradle.process.ProcessExecutionException;
+import org.gradle.process.internal.shutdown.ShutdownHooks;
+import org.jspecify.annotations.Nullable;
 
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Stream;
+
+import static java.lang.String.format;
+import static org.gradle.process.internal.util.LongCommandLineDetectionUtil.hasCommandLineExceedMaxLength;
+import static org.gradle.process.internal.util.LongCommandLineDetectionUtil.hasCommandLineExceedMaxLengthException;
 
 /**
  * Default implementation for the ExecHandle interface.
  *
- * <h3>State flows</h3>
+ * <h2>State flows</h2>
  *
  * <ul>
- *   <li>INIT -> STARTED -> [SUCCEEDED|FAILED|ABORTED|DETACHED]</li>
- *   <li>INIT -> FAILED</li>
- *   <li>INIT -> STARTED -> DETACHED -> ABORTED</li>
+ *   <li>INIT -&gt; STARTED -&gt; [SUCCEEDED|FAILED|ABORTED|DETACHED]</li>
+ *   <li>INIT -&gt; FAILED</li>
+ *   <li>INIT -&gt; STARTED -&gt; DETACHED -&gt; ABORTED</li>
  * </ul>
  *
  * State is controlled on all control methods:
@@ -56,17 +65,23 @@ import java.util.concurrent.locks.ReentrantLock;
  * </ul>
  */
 public class DefaultExecHandle implements ExecHandle, ProcessSettings {
+
     private static final Logger LOGGER = Logging.getLogger(DefaultExecHandle.class);
 
+    private static final Joiner ARGUMENT_JOINER = Joiner.on(' ').useForNull("null");
+
     private final String displayName;
+
     /**
      * The working directory of the process.
      */
     private final File directory;
+
     /**
      * The executable to run.
      */
     private final String command;
+
     /**
      * Arguments to pass to the executable.
      */
@@ -76,10 +91,10 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
      * The variables to set in the environment the executable is run in.
      */
     private final Map<String, String> environment;
-    private final StreamsHandler streamsHandler;
+    private final StreamsHandler outputHandler;
+    private final StreamsHandler inputHandler;
     private final boolean redirectErrorStream;
     private final ProcessLauncher processLauncher;
-    private final DefaultExecutorFactory executorFactory = new DefaultExecutorFactory();
     private int timeoutMillis;
     private boolean daemon;
 
@@ -87,10 +102,9 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
      * Lock to guard all mutable state
      */
     private final Lock lock;
+    private final Condition stateChanged;
 
-    private final Condition condition;
-
-    private final StoppableExecutor executor;
+    private final Executor executor;
 
     /**
      * State of this ExecHandle.
@@ -108,32 +122,39 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
 
     private final ExecHandleShutdownHookAction shutdownHookAction;
 
+    private final BuildCancellationToken buildCancellationToken;
+
     DefaultExecHandle(String displayName, File directory, String command, List<String> arguments,
-                      Map<String, String> environment, StreamsHandler streamsHandler,
-                      List<ExecHandleListener> listeners, boolean redirectErrorStream, int timeoutMillis, boolean daemon) {
+                      Map<String, String> environment, StreamsHandler outputHandler, StreamsHandler inputHandler,
+                      List<ExecHandleListener> listeners, boolean redirectErrorStream, int timeoutMillis, boolean daemon,
+                      Executor executor, BuildCancellationToken buildCancellationToken) {
         this.displayName = displayName;
         this.directory = directory;
         this.command = command;
         this.arguments = arguments;
         this.environment = environment;
-        this.streamsHandler = streamsHandler;
+        this.outputHandler = outputHandler;
+        this.inputHandler = inputHandler;
         this.redirectErrorStream = redirectErrorStream;
         this.timeoutMillis = timeoutMillis;
         this.daemon = daemon;
+        this.executor = executor;
         this.lock = new ReentrantLock();
-        this.condition = lock.newCondition();
+        this.stateChanged = lock.newCondition();
         this.state = ExecHandleState.INIT;
-        executor = executorFactory.create(String.format("Run %s", displayName));
+        this.buildCancellationToken = buildCancellationToken;
         processLauncher = NativeServices.getInstance().get(ProcessLauncher.class);
         shutdownHookAction = new ExecHandleShutdownHookAction(this);
         broadcast = new ListenerBroadcast<ExecHandleListener>(ExecHandleListener.class);
         broadcast.addAll(listeners);
     }
 
+    @Override
     public File getDirectory() {
         return directory;
     }
 
+    @Override
     public String getCommand() {
         return command;
     }
@@ -147,14 +168,17 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
         return displayName;
     }
 
+    @Override
     public List<String> getArguments() {
         return Collections.unmodifiableList(arguments);
     }
 
+    @Override
     public Map<String, String> getEnvironment() {
         return Collections.unmodifiableMap(environment);
     }
 
+    @Override
     public ExecHandleState getState() {
         lock.lock();
         try {
@@ -169,7 +193,7 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
         try {
             LOGGER.debug("Changing state to: {}", state);
             this.state = state;
-            this.condition.signalAll();
+            this.stateChanged.signalAll();
         } finally {
             lock.unlock();
         }
@@ -185,60 +209,84 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
     }
 
     private void setEndStateInfo(ExecHandleState newState, int exitValue, Throwable failureCause) {
-        ShutdownHookActionRegister.removeAction(shutdownHookAction);
-
-        ExecResultImpl result;
+        ShutdownHooks.removeShutdownHook(shutdownHookAction);
+        buildCancellationToken.removeCallback(shutdownHookAction);
         ExecHandleState currentState;
         lock.lock();
         try {
             currentState = this.state;
-            ExecException wrappedException = null;
-            if (failureCause != null) {
-                if (currentState == ExecHandleState.STARTING) {
-                    wrappedException = new ExecException(String.format("A problem occurred starting process '%s'",
-                            displayName), failureCause);
-                } else {
-                    wrappedException = new ExecException(String.format(
-                            "A problem occurred waiting for process '%s' to complete.", displayName), failureCause);
-                }
+        } finally {
+            lock.unlock();
+        }
+
+        ExecResultImpl newResult = new ExecResultImpl(exitValue, execExceptionFor(failureCause, currentState), displayName);
+        if (!currentState.isTerminal() && newState != ExecHandleState.DETACHED) {
+            try {
+                broadcast.getSource().executionFinished(this, newResult);
+            } catch (Exception e) {
+                newResult = new ExecResultImpl(exitValue, execExceptionFor(e, currentState), displayName);
             }
+        }
+
+        lock.lock();
+        try {
             setState(newState);
-            execResult = new ExecResultImpl(exitValue, wrappedException, displayName);
-            result = execResult;
+            this.execResult = newResult;
         } finally {
             lock.unlock();
         }
 
         LOGGER.debug("Process '{}' finished with exit value {} (state: {})", displayName, exitValue, newState);
-
-        if (currentState != ExecHandleState.DETACHED && newState != ExecHandleState.DETACHED) {
-            broadcast.getSource().executionFinished(this, result);
-        }
-        executor.requestStop();
     }
 
-    public ExecHandle start() {
-        LOGGER.info("Starting process '{}'. Working directory: {} Command: {}",
-                displayName, directory, command + ' ' + Joiner.on(' ').useForNull("null").join(arguments));
-        if (LOGGER.isDebugEnabled()) {
-            LOGGER.debug("Environment for process '{}': {}", displayName, environment);
+    @Nullable
+    private ProcessExecutionException execExceptionFor(Throwable failureCause, ExecHandleState currentState) {
+        return failureCause != null
+            ? new ProcessExecutionException(failureMessageFor(failureCause, currentState), failureCause)
+            : null;
+    }
+
+    private String failureMessageFor(Throwable failureCause, ExecHandleState currentState) {
+        if (currentState == ExecHandleState.STARTING) {
+            if (hasCommandLineExceedMaxLength(command, arguments) && hasCommandLineExceedMaxLengthException(failureCause)) {
+                return format("Process '%s' could not be started because the command line exceed operating system limits.", displayName);
+            }
+            return format("A problem occurred starting process '%s'", displayName);
         }
+        return format("A problem occurred waiting for process '%s' to complete.", displayName);
+    }
+
+    @Override
+    public ExecHandle start() {
+        LOGGER.info("Starting process '{}'. Working directory: {} Command: {} {}",
+                displayName, directory, command, ARGUMENT_JOINER.join(arguments));
         lock.lock();
         try {
             if (!stateIn(ExecHandleState.INIT)) {
-                throw new IllegalStateException(String.format("Cannot start process '%s' because it has already been started", displayName));
+                throw new IllegalStateException(format("Cannot start process '%s' because it has already been started", displayName));
             }
+            if (!directory.exists()) {
+                throw new IllegalArgumentException(String.format("Working directory '%s' does not exist.", directory));
+            }
+            if (!directory.isDirectory()) {
+                throw new IllegalArgumentException(String.format("Working directory '%s' is not a directory.", directory));
+            }
+
             setState(ExecHandleState.STARTING);
 
-            execHandleRunner = new ExecHandleRunner(this, streamsHandler, processLauncher, executorFactory);
+            broadcast.getSource().beforeExecutionStarted(this);
+            execHandleRunner = new ExecHandleRunner(
+                this, new CompositeStreamsHandler(), processLauncher, executor, CurrentBuildOperationRef.instance().get()
+            );
             executor.execute(execHandleRunner);
 
-            while(stateIn(ExecHandleState.STARTING)) {
+            while (stateIn(ExecHandleState.STARTING)) {
                 LOGGER.debug("Waiting until process started: {}.", displayName);
                 try {
-                    condition.await();
+                    stateChanged.await();
                 } catch (InterruptedException e) {
-                    //ok, wrapping up
+                    execHandleRunner.abortProcess();
+                    throw UncheckedException.throwAsUncheckedException(e);
                 }
             }
 
@@ -253,14 +301,30 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
         return this;
     }
 
+    @Override
+    public void removeStartupContext() {
+        lock.lock();
+        try {
+            if (!stateIn(ExecHandleState.STARTED)) {
+                throw new IllegalStateException(
+                    format("Cannot remove start context of process '%s' because it is not in started state", displayName));
+            }
+            execHandleRunner.removeStartupContext();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
     public void abort() {
         lock.lock();
         try {
-            if (state == ExecHandleState.SUCCEEDED || state == ExecHandleState.FAILED || state == ExecHandleState.ABORTED) {
+            if (stateIn(ExecHandleState.SUCCEEDED, ExecHandleState.FAILED, ExecHandleState.ABORTED)) {
                 return;
             }
             if (!stateIn(ExecHandleState.STARTED, ExecHandleState.DETACHED)) {
-                throw new IllegalStateException(String.format("Cannot abort process '%s' because it is not in started or detached state", displayName));
+                throw new IllegalStateException(
+                    format("Cannot abort process '%s' because it is not in started or detached state", displayName));
             }
             this.execHandleRunner.abortProcess();
             this.waitForFinish();
@@ -269,14 +333,15 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
         }
     }
 
+    @Override
     public ExecResult waitForFinish() {
         lock.lock();
         try {
-            while (!stateIn(ExecHandleState.SUCCEEDED, ExecHandleState.ABORTED, ExecHandleState.FAILED, ExecHandleState.DETACHED)) {
+            while (!state.isTerminal()) {
                 try {
-                    condition.await();
+                    stateChanged.await();
                 } catch (InterruptedException e) {
-                    //ok, wrapping up...
+                    execHandleRunner.abortProcess();
                     throw UncheckedException.throwAsUncheckedException(e);
                 }
             }
@@ -284,16 +349,28 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
             lock.unlock();
         }
 
-        executor.stop();
+        // At this point:
+        // If in daemon mode, the process has started successfully and all streams to the process have been closed
+        // If in fork mode, the process has completed and all cleanup has been done
+        // In both cases, all asynchronous work for the process has completed and we're done
 
         return result();
+    }
+
+    @Override
+    public ExecResult getExecResult() {
+        lock.lock();
+        try {
+            return execResult;
+        } finally {
+            lock.unlock();
+        }
     }
 
     private ExecResult result() {
         lock.lock();
         try {
-            execResult.rethrowFailure();
-            return execResult;
+            return execResult.rethrowFailure();
         } finally {
             lock.unlock();
         }
@@ -304,7 +381,8 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
     }
 
     void started() {
-        ShutdownHookActionRegister.addAction(shutdownHookAction);
+        ShutdownHooks.addShutdownHook(shutdownHookAction);
+        buildCancellationToken.addCallback(shutdownHookAction);
         setState(ExecHandleState.STARTED);
         broadcast.getSource().executionStarted(this);
     }
@@ -329,18 +407,22 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
         setEndStateInfo(ExecHandleState.FAILED, -1, failureCause);
     }
 
+    @Override
     public void addListener(ExecHandleListener listener) {
         broadcast.add(listener);
     }
 
+    @Override
     public void removeListener(ExecHandleListener listener) {
         broadcast.remove(listener);
     }
 
+    @Override
     public String getDisplayName() {
         return displayName;
     }
 
+    @Override
     public boolean getRedirectErrorStream() {
         return redirectErrorStream;
     }
@@ -351,27 +433,31 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
 
     private static class ExecResultImpl implements ExecResult {
         private final int exitValue;
-        private final ExecException failure;
+        private final ProcessExecutionException failure;
         private final String displayName;
 
-        ExecResultImpl(int exitValue, ExecException failure, String displayName) {
+        ExecResultImpl(int exitValue, ProcessExecutionException failure, String displayName) {
             this.exitValue = exitValue;
             this.failure = failure;
             this.displayName = displayName;
         }
 
+        @Override
         public int getExitValue() {
             return exitValue;
         }
 
-        public ExecResult assertNormalExitValue() throws ExecException {
+        @Override
+        public ExecResult assertNormalExitValue() throws ProcessExecutionException {
             if (exitValue != 0) {
-                throw new ExecException(String.format("Process '%s' finished with non-zero exit value %d", displayName, exitValue));
+                String hint = getExitCodeHint(exitValue);
+                throw new ProcessExecutionException(format("Process '%s' finished with non-zero exit value %d%s", displayName, exitValue, hint));
             }
             return this;
         }
 
-        public ExecResult rethrowFailure() throws ExecException {
+        @Override
+        public ExecResult rethrowFailure() throws ProcessExecutionException {
             if (failure != null) {
                 throw failure;
             }
@@ -381,6 +467,65 @@ public class DefaultExecHandle implements ExecHandle, ProcessSettings {
         @Override
         public String toString() {
             return "{exitValue=" + exitValue + ", failure=" + failure + "}";
+        }
+
+        private static String getExitCodeHint(int exitValue) {
+            if (OperatingSystem.current().isUnix() && exitValue > 128) {
+                int signalNumber = exitValue - 128;
+                Signal signal = Stream.of(Signal.values())
+                    .filter(s -> s.intValue() == signalNumber)
+                    .findFirst()
+                    .orElse(null);
+
+                if (signal != null) {
+                    return format(" (this value may indicate that the process was terminated with the %s signal%s)", signal.description(), getAdditionalHint(signal));
+                } else {
+                    return "";
+                }
+            }
+            if (OperatingSystem.current().isWindows() && exitValue > 0xC0000000 && exitValue < 0) {
+                return format(" (NTSTATUS 0x%08X)", exitValue);
+            }
+            return "";
+        }
+
+        private static String getAdditionalHint(Signal signal) {
+            if (signal == Signal.SIGKILL) {
+                return ", which is often caused by the system running out of memory";
+            }
+            return "";
+        }
+    }
+
+    private class CompositeStreamsHandler implements StreamsHandler {
+        @Override
+        public void connectStreams(Process process, String processName, Executor executor) {
+            inputHandler.connectStreams(process, processName, executor);
+            outputHandler.connectStreams(process, processName, executor);
+        }
+
+        @Override
+        public void start() {
+            inputHandler.start();
+            outputHandler.start();
+        }
+
+        @Override
+        public void removeStartupContext() {
+            inputHandler.removeStartupContext();
+            outputHandler.removeStartupContext();
+        }
+
+        @Override
+        public void stop() {
+            outputHandler.stop();
+            inputHandler.stop();
+        }
+
+        @Override
+        public void disconnect() {
+            outputHandler.disconnect();
+            inputHandler.disconnect();
         }
     }
 }

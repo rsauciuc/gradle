@@ -16,9 +16,9 @@
 
 package org.gradle.api.internal.tasks.options;
 
-import org.apache.commons.lang.builder.CompareToBuilder;
+import org.gradle.api.provider.Provider;
 import org.gradle.internal.reflect.JavaMethod;
-import org.gradle.util.CollectionUtils;
+import org.gradle.util.internal.CollectionUtils;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -29,26 +29,34 @@ public class InstanceOptionDescriptor implements OptionDescriptor {
 
     private final Object object;
     private final OptionElement optionElement;
-    private final JavaMethod<Object, Collection> optionValueMethod;
+    private final JavaMethod<Object, ?> optionValueMethod;
+    private final boolean clashing;
 
     InstanceOptionDescriptor(Object object, OptionElement optionElement) {
-        this(object, optionElement, null);
+        this(object, optionElement, null, false);
     }
 
-    public InstanceOptionDescriptor(Object object, OptionElement optionElement, JavaMethod<Object, Collection> optionValueMethod) {
+    public InstanceOptionDescriptor(Object object, OptionElement optionElement, JavaMethod<Object, ?> optionValueMethod) {
+        this(object, optionElement, optionValueMethod, false);
+    }
+
+    public InstanceOptionDescriptor(Object object, OptionElement optionElement, JavaMethod<Object, ?> optionValueMethod, boolean clashing) {
         this.object = object;
         this.optionElement = optionElement;
         this.optionValueMethod = optionValueMethod;
+        this.clashing = clashing;
     }
 
     public OptionElement getOptionElement() {
-        return optionElement;
+        return this.optionElement;
     }
 
+    @Override
     public String getName() {
         return optionElement.getOptionName();
     }
 
+    @Override
     public Set<String> getAvailableValues() {
         final Set<String> values = optionElement.getAvailableValues();
 
@@ -58,26 +66,35 @@ public class InstanceOptionDescriptor implements OptionDescriptor {
         return values;
     }
 
+    @Override
     public Class<?> getArgumentType() {
         return optionElement.getOptionType();
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     private List<String> readDynamicAvailableValues() {
         if (optionValueMethod != null) {
-            Collection values = optionValueMethod.invoke(object);
-            return CollectionUtils.toStringList(values);
+            Object values = optionValueMethod.invoke(object);
+            if (values instanceof Provider) {
+                return CollectionUtils.toStringList(((Provider<Collection>) values).get());
+            } else {
+                return CollectionUtils.toStringList((Collection) values);
+            }
         }
         return Collections.emptyList();
     }
 
+    @Override
     public String getDescription() {
         return optionElement.getDescription();
     }
 
-    public int getOrder() {
-        return optionElement.getOrder();
+    @Override
+    public boolean isClashing() {
+        return clashing;
     }
 
+    @Override
     public void apply(Object objectParam, List<String> parameterValues) {
         if (objectParam != object) {
             throw new AssertionError(String.format("Object %s not applyable. Expecting %s", objectParam, object));
@@ -85,7 +102,8 @@ public class InstanceOptionDescriptor implements OptionDescriptor {
         optionElement.apply(objectParam, parameterValues);
     }
 
+    @Override
     public int compareTo(OptionDescriptor o) {
-        return new CompareToBuilder().append(getOrder(), o.getOrder()).append(getName(), o.getName()).toComparison();
+        return getName().compareTo(o.getName());
     }
 }

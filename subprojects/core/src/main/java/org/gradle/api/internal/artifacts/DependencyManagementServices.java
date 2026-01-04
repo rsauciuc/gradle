@@ -16,20 +16,45 @@
 package org.gradle.api.internal.artifacts;
 
 import org.gradle.api.internal.DomainObjectContext;
-import org.gradle.api.internal.artifacts.configurations.DependencyMetaDataProvider;
-import org.gradle.api.internal.artifacts.dsl.dependencies.ProjectFinder;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.internal.service.ServiceRegistration;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
  * Factory for various types related to dependency management.
  */
+@ServiceScope(Scope.Build.class)
 public interface DependencyManagementServices {
+
     /**
      * Registers the dependency management DSL services.
      */
-    void addDslServices(ServiceRegistration registration);
+    void addDslServices(ServiceRegistration registration, DomainObjectContext domainObjectContext);
 
-    DependencyResolutionServices create(FileResolver resolver, DependencyMetaDataProvider dependencyMetaDataProvider,
-                                        ProjectFinder projectFinder, DomainObjectContext domainObjectContext);
+    /**
+     * Create a dependency resolution instance detached from any project instance. As such, the instance
+     * does not have a unique module identity. Resolutions made by this instance are performed from
+     * an anonymous root component, which does not expose any variants. As such, creating consumable
+     * configurations in a detached resolver is forbidden.
+     * <p>
+     * This resolver cannot resolve user-declared project dependencies, though is still able to resolve
+     * project dependencies if they're substituted for a module dependency.
+     *
+     * @return A new dependency resolution instance. This instance comes with its own configuration container,
+     * repositories, attribute schema, and other resolution services.
+     */
+    DependencyResolutionServices newDetachedResolver(DomainObjectContext owner);
+
+    /**
+     * Similar to {@link #newDetachedResolver(DomainObjectContext)}, but allows specifying
+     * how files are resolved.
+     */
+    DependencyResolutionServices newDetachedResolver(
+        FileResolver resolver,
+        FileCollectionFactory fileCollectionFactory,
+        DomainObjectContext owner
+    );
+
 }

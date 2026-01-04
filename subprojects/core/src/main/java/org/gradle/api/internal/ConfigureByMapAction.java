@@ -17,7 +17,7 @@
 package org.gradle.api.internal;
 
 import org.gradle.api.Action;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -37,11 +37,13 @@ public class ConfigureByMapAction<T> implements Action<T> {
         this.mandatoryProperties = mandatoryProperties;
     }
 
+    @Override
     public void execute(T thing) {
         ConfigureUtil.configureByMap(properties, thing, mandatoryProperties);
     }
 
     @Override
+    @SuppressWarnings("UndefinedEquals") // We're fine with having weak contract of Iterable/Collection.equals.
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -49,23 +51,13 @@ public class ConfigureByMapAction<T> implements Action<T> {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-
         ConfigureByMapAction that = (ConfigureByMapAction) o;
-
-        if (!mandatoryProperties.equals(that.mandatoryProperties)) {
-            return false;
-        }
-        if (!properties.equals(that.properties)) {
-            return false;
-        }
-
-        return true;
+        return mandatoryProperties.equals(that.mandatoryProperties)
+            && properties.equals(that.properties);
     }
 
     @Override
     public int hashCode() {
-        int result = properties.hashCode();
-        result = 31 * result + mandatoryProperties.hashCode();
-        return result;
+        return 31 * properties.hashCode() + mandatoryProperties.hashCode();
     }
 }

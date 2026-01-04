@@ -17,8 +17,14 @@
 package org.gradle.api.resource
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.test.fixtures.server.http.HttpServer
+import org.junit.Rule
 
 class BrokenTextResourceIntegrationTest extends AbstractIntegrationSpec {
+    @Rule
+    public final HttpServer server = new HttpServer()
+
     def setup() {
         buildFile << """
 class TextTask extends DefaultTask {
@@ -58,18 +64,35 @@ task text(type: TextTask)
         fails("text")
 
         def file = file('no-such-file')
-        failure.assertHasCause("Could not read '${file}' as it does not exist.")
+        failure.assertHasCause("Cannot expand TAR '${file}' as it does not exist.")
     }
 
+    @ToBeFixedForConfigurationCache(because = "the underlying file collection looses its display name")
     def "reports read of missing archive entry"() {
         given:
         buildFile << """
-            task jar(type: Jar)
+            task jar(type: Jar) {
+                destinationDirectory = buildDir
+            }
             text.text = resources.text.fromArchiveEntry(jar, 'config.txt')
-"""
+        """
 
         expect:
         fails("text")
         failure.assertHasCause("Expected entry 'config.txt' in archive file collection to contain exactly one file, however, it contains no files.")
+    }
+
+    def "reports read of missing uri resource"() {
+        given:
+        def uuid = UUID.randomUUID()
+        server.expectGetMissing("/myConfig-${uuid}.txt")
+        server.start()
+        buildFile << """
+            text.text = resources.text.fromUri("${server.uri}/myConfig-${uuid}.txt")
+"""
+
+        expect:
+        fails("text")
+        failure.assertHasCause("Could not read '${server.uri}/myConfig-${uuid}.txt' as it does not exist.")
     }
 }

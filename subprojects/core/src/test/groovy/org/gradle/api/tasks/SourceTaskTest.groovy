@@ -15,12 +15,10 @@
  */
 package org.gradle.api.tasks
 
-import org.gradle.api.internal.AbstractTask
-
 class SourceTaskTest extends AbstractTaskTest {
     private SourceTask task
 
-    AbstractTask getTask() {
+    SourceTask getTask() {
         return task
     }
 
@@ -35,7 +33,7 @@ class SourceTaskTest extends AbstractTaskTest {
         file2.createNewFile()
 
         task.source = file1
-        task.source = task.source + project.files(file2)
+        task.source = task.source + project.layout.files(file2)
 
         expect:
         task.source.asList() == [file1, file2]

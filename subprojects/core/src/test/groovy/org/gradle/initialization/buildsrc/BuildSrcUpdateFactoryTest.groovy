@@ -16,52 +16,31 @@
 
 package org.gradle.initialization.buildsrc
 
-import org.gradle.initialization.GradleLauncher
-import org.gradle.cache.PersistentCache
+import org.gradle.internal.buildtree.BuildTreeLifecycleController
+import org.gradle.internal.classpath.DefaultClassPath
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
 class BuildSrcUpdateFactoryTest extends Specification {
 
-    @Rule TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider()
+    @Rule
+    TestNameTestDirectoryProvider temp = new TestNameTestDirectoryProvider(getClass())
 
-    def cache = Stub(PersistentCache)
-    def launcher = Stub(GradleLauncher)
+    def controller = Stub(BuildTreeLifecycleController)
     def listener = Stub(BuildSrcBuildListenerFactory.Listener)
     def listenerFactory = Mock(BuildSrcBuildListenerFactory)
-    def factory = new BuildSrcUpdateFactory(cache, launcher, listenerFactory)
+    def factory = new BuildSrcUpdateFactory(listenerFactory)
 
     def "creates classpath"() {
-        cache.getBaseDir() >> temp.testDirectory
-        listener.getRuntimeClasspath() >> [new File("dummy")]
+        def classpath = DefaultClassPath.of(new File("dummy"))
+        listener.getRuntimeClasspath() >> classpath
 
         when:
-        def classpath = factory.create()
+        def result = factory.create(controller)
 
         then:
-        classpath.asFiles == [new File("dummy")]
-        1 * listenerFactory.create(_) >> listener
-    }
-
-    def "uses listener with rebuild off when marker file present"() {
-        temp.createFile("built.bin")
-        cache.getBaseDir() >> temp.testDirectory
-
-        when:
-        factory.create()
-
-        then:
-        1 * listenerFactory.create(false) >> listener
-    }
-
-    def "uses listener with rebuild on when marker file not present"() {
-        cache.getBaseDir() >> temp.createDir("empty")
-
-        when:
-        factory.create()
-
-        then:
-        1 * listenerFactory.create(true) >> listener
+        1 * listenerFactory.create() >> listener
+        result == classpath
     }
 }

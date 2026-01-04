@@ -16,119 +16,175 @@
 
 package org.gradle.api.tasks
 
+import org.gradle.api.logging.configuration.ShowStacktrace
+import org.gradle.caching.internal.controller.DefaultBuildCacheController
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.integtests.fixtures.LocalBuildCacheFixture
+import org.gradle.integtests.fixtures.DirectoryBuildCacheFixture
+import org.gradle.test.fixtures.file.TestFile
 
-class CachedTaskExecutionErrorHandlingIntegrationTest extends AbstractIntegrationSpec implements LocalBuildCacheFixture {
+class CachedTaskExecutionErrorHandlingIntegrationTest extends AbstractIntegrationSpec implements DirectoryBuildCacheFixture {
 
     def setup() {
         settingsFile << """
             class FailingBuildCache extends AbstractBuildCache {
-                boolean shouldFail
+                String shouldFail
             }
-            
+
             class FailingBuildCacheServiceFactory implements BuildCacheServiceFactory<FailingBuildCache> {
-                FailingBuildCacheService createBuildCacheService(FailingBuildCache configuration) {
+                FailingBuildCacheService createBuildCacheService(FailingBuildCache configuration, Describer describer) {
                     return new FailingBuildCacheService(configuration.shouldFail)
                 }
             }
-            
+
             class FailingBuildCacheService implements BuildCacheService {
-                boolean shouldFail
-                
-                FailingBuildCacheService(boolean shouldFail) {
+                String shouldFail
+
+                FailingBuildCacheService(String shouldFail) {
                     this.shouldFail = shouldFail
                 }
-                
+
                 @Override
                 boolean load(BuildCacheKey key, BuildCacheEntryReader reader) throws BuildCacheException {
-                    if (shouldFail) {
+                    println "> Attempting load for \$key"
+                    if (shouldFail == "load") {
+                        shouldFail = null
                         throw new BuildCacheException("Unable to read " + key)
                     } else {
                         return false
                     }
                 }
-    
+
                 @Override
                 void store(BuildCacheKey key, BuildCacheEntryWriter writer) throws BuildCacheException {
-                    if (shouldFail) {
+                    println "> Attempting store for \$key"
+                    if (shouldFail == "store") {
+                        shouldFail = null
                         throw new BuildCacheException("Unable to write " + key)
                     }
                 }
-    
-                @Override
-                String getDescription() {
-                    return "Failing cache backend"
-                }
-    
+
                 @Override
                 void close() throws IOException {
                 }
             }
-            
+
             buildCache {
                 registerBuildCacheService(FailingBuildCache, FailingBuildCacheServiceFactory)
-                
+
                 local {
                     enabled = false
                 }
-                
+
                 remote(FailingBuildCache) {
-                    shouldFail = gradle.startParameter.systemPropertiesArgs.containsKey("fail")
+                    shouldFail = System.getProperty("failOn")
                     push = true
                 }
             }
         """
 
-        buildFile << """
-            apply plugin: "base"
-            
-            @CacheableTask
-            class CustomTask extends DefaultTask {
-                @OutputFile 
-                File outputFile = new File(temporaryDir, "output.txt")
-                
-                @TaskAction
-                void generate() {
-                    outputFile.text = "done"
-                }
-            }
-            
-            task customTask(type: CustomTask)
-            task anotherCustomTask(type: CustomTask)
-            
-            // All of our tests just run 'assemble' and we need several 
-            // tasks that are cacheable.
-
-            // CustomTask is a dummy cacheable task that will cause
-            // enough requests to the build cache to trip our short circuiting if
-            // there are errors.
-            assemble.dependsOn customTask, anotherCustomTask
-        """
+        executer.beforeExecute {
+            executer.withBuildCacheEnabled()
+        }
     }
 
-    def "cache switches off after third error for the current build"() {
-        // We require a distribution here so that we can capture
-        // the output produced after the build has finished
-        executer.requireGradleDistribution()
-        executer.withBuildCacheEnabled()
-        executer.withStackTraceChecksDisabled()
+    def "remote cache #failEvent error stack trace is printed when requested (#showStacktrace)"() {
+        // Need to do it like this because stacktraces are always enabled for integration tests
+        settingsFile << """
+            gradle.startParameter.setShowStacktrace(org.gradle.api.logging.configuration.ShowStacktrace.$showStacktrace)
+        """
+
+        buildFile << """
+            task customTask {
+                outputs.cacheIf { true }
+                outputs.file("build/output.txt")
+                def outputFile = file("build/output.txt")
+                doLast {
+                    outputFile.text = "Done"
+                }
+            }
+        """
+
+        if (expectStacktrace) {
+            executer.withStackTraceChecksDisabled()
+        }
 
         when:
-        succeeds "assemble", "-Dfail"
+        succeeds "customTask", "-DfailOn=$failEvent"
         then:
-        output.count("Could not load entry") == 2
-        output.count("Could not store entry") == 1
-        output.count("The remote build cache is now disabled because 3 errors were encountered") == 1
-        output.count("The remote build cache was disabled during the build after encountering 3 errors.") == 1
+        output.count("> Attempting $failEvent") == 1
+        output.count("Could not $failEvent entry") == 1
+        output.count("The remote build cache was disabled during the build due to errors.") == 1
+        if (expectStacktrace) {
+            assert stackTraceContains(DefaultBuildCacheController)
+        }
 
-        expect:
-        succeeds "clean"
+        where:
+        failEvent | showStacktrace                     | expectStacktrace
+        "load"    | ShowStacktrace.INTERNAL_EXCEPTIONS | false
+        "load"    | ShowStacktrace.ALWAYS              | true
+        "load"    | ShowStacktrace.ALWAYS_FULL         | true
+        "store"   | ShowStacktrace.INTERNAL_EXCEPTIONS | false
+        "store"   | ShowStacktrace.ALWAYS              | true
+        "store"   | ShowStacktrace.ALWAYS_FULL         | true
+    }
+
+    def "remote cache is disabled after first #failEvent error for the current build"() {
+
+        buildFile << """
+            task firstTask {
+                outputs.cacheIf { true }
+                def outTxt = file("build/first.txt")
+                outputs.file(outTxt)
+                doLast {
+                    outTxt.text = "Done"
+                }
+            }
+
+            task secondTask {
+                dependsOn firstTask
+                outputs.cacheIf { true }
+                def outTxt = file("build/second.txt")
+                outputs.file(outTxt)
+                doLast {
+                    outTxt.text = "Done"
+                }
+            }
+        """
+
+        executer.beforeExecute {
+            executer.withStackTraceChecksDisabled()
+        }
 
         when:
-        succeeds "assemble"
+        succeeds "secondTask", "-DfailOn=$failEvent"
         then:
-        !output.contains("The remote build cache is now disabled")
+        attemptsBeforeFailure.each { event, count ->
+            assert output.count("> Attempting $failEvent") == count
+        }
+        output.count("Could not $failEvent entry") == 1
+        output.count("The remote build cache was disabled during the build due to errors.") == 1
+
+        when:
+        cleanBuildDir()
+        succeeds "secondTask"
+
+        then: "build cache is still enabled during next build"
         !output.contains("The remote build cache was disabled during the build")
+        output.count("> Attempting load") == 2
+        output.count("> Attempting store") == 2
+        noneSkipped()
+
+        where:
+        failEvent | attemptsBeforeFailure
+        "load"    | ["load": 1]
+        "store"   | ["load": 1 , "store": 1]
+    }
+
+    boolean stackTraceContains(Class<?> type) {
+        output.contains("\tat ${type.name}.")
+    }
+
+    private TestFile cleanBuildDir() {
+        file("build").assertIsDir().deleteDir()
     }
 }

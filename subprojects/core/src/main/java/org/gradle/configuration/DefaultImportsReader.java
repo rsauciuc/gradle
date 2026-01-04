@@ -16,80 +16,36 @@
 
 package org.gradle.configuration;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
 import com.google.common.io.LineProcessor;
 import com.google.common.io.Resources;
-import org.apache.commons.lang.StringUtils;
-import org.gradle.api.UncheckedIOException;
+import org.apache.commons.lang3.StringUtils;
+import org.gradle.api.internal.classpath.RuntimeApiInfo;
+import org.gradle.internal.UncheckedException;
 
 import java.io.IOException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
 public class DefaultImportsReader implements ImportsReader {
 
-    private static final String RESOURCE = "/default-imports.txt";
-    private static final String MAPPING_RESOURCE = "/api-mapping.txt";
     private final String[] importPackages;
     private final Map<String, List<String>> simpleNameToFQCN;
 
-    public DefaultImportsReader() {
+    public DefaultImportsReader(RuntimeApiInfo runtimeApiInfo) {
         try {
-            URL url = getClass().getResource(RESOURCE);
-            if (url == null) {
-                throw new IllegalStateException("Could not load default imports resource: " + RESOURCE);
-            }
-            this.importPackages = Resources.asCharSource(url, Charsets.UTF_8).readLines(new LineProcessor<String[]>() {
-                private final List<String> packages = Lists.newLinkedList();
-
-                @Override
-                public boolean processLine(@SuppressWarnings("NullableProblems") String line) throws IOException {
-                    packages.add(line.substring(7, line.length() - 2));
-                    return true;
-                }
-
-                @Override
-                public String[] getResult() {
-                    return packages.toArray(new String[0]);
-                }
-            });
-            url = getClass().getResource(MAPPING_RESOURCE);
-            if (url == null) {
-                throw new IllegalStateException("Could not load default imports resource: " + MAPPING_RESOURCE);
-            }
-            this.simpleNameToFQCN = Resources.asCharSource(url, Charsets.UTF_8).readLines(new LineProcessor<Map<String, List<String>>>() {
-                private final ImmutableMap.Builder<String, List<String>> builder = ImmutableMap.builder();
-
-                @Override
-                public boolean processLine(String line) throws IOException {
-                    boolean process = !StringUtils.isEmpty(line);
-                    if (process) {
-                        String[] split = line.split(":");
-                        if (split.length==2) {
-                            String simpleName = split[0];
-                            List<String> fqcns = Splitter.on(';').omitEmptyStrings().splitToList(split[1]);
-                            builder.put(simpleName, fqcns);
-                        } else {
-                            process = false;
-                        }
-                    }
-                    return process;
-                }
-
-                @Override
-                public Map<String, List<String>> getResult() {
-                    return builder.build();
-                }
-            });
+            this.importPackages = generateImportPackages(runtimeApiInfo.getDefaultImportsResource());
+            this.simpleNameToFQCN = generateSimpleNameToFQCN(runtimeApiInfo.getApiMappingResource());
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw UncheckedException.throwAsUncheckedException(e);
         }
     }
 
+    @Override
     public String[] getImportPackages() {
         return importPackages;
     }
@@ -97,5 +53,53 @@ public class DefaultImportsReader implements ImportsReader {
     @Override
     public Map<String, List<String>> getSimpleNameToFullClassNamesMapping() {
         return simpleNameToFQCN;
+    }
+
+    /**
+     * @implNote Logic is duplicated in {@link gradlebuild.integrationtests.action.AnnotationGeneratorWorkAction}.
+     * Please keep this code in sync.
+     */
+    private static String[] generateImportPackages(URL url) throws IOException {
+        return Resources.asCharSource(url, StandardCharsets.UTF_8).readLines(new LineProcessor<String[]>() {
+            private final List<String> packages = new LinkedList<>();
+
+            @Override
+            public boolean processLine(@SuppressWarnings("NullableProblems") String line) throws IOException {
+                packages.add(line.substring(7, line.length() - 2));
+                return true;
+            }
+
+            @Override
+            public String[] getResult() {
+                return packages.toArray(new String[packages.size()]);
+            }
+        });
+    }
+
+    private static Map<String, List<String>> generateSimpleNameToFQCN(URL url) throws IOException {
+        return Resources.asCharSource(url, StandardCharsets.UTF_8).readLines(new LineProcessor<Map<String, List<String>>>() {
+            private final ImmutableMap.Builder<String, List<String>> builder = ImmutableMap.builder();
+
+            @Override
+            public boolean processLine(String line) throws IOException {
+                boolean process = !StringUtils.isEmpty(line);
+                if (process) {
+                    String[] split = line.split(":");
+                    if (split.length == 2) {
+                        String simpleName = split[0];
+                        List<String> fqcns = Splitter.on(';').omitEmptyStrings().splitToList(split[1]);
+                        builder.put(simpleName, fqcns);
+                    } else {
+                        process = false;
+                    }
+                }
+                return process;
+            }
+
+            @Override
+            public Map<String, List<String>> getResult() {
+                return builder.build();
+            }
+        });
     }
 }

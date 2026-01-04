@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2008 the original author or authors.
+ * Copyright 2007 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,13 @@
  */
 package org.gradle.groovy.scripts;
 
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
 /**
  * A factory for script compilers.
  */
+@ServiceScope(Scope.Build.class)
 public interface ScriptCompilerFactory {
     /**
      * Creates a compiler for the given source. The returned compiler can be used to compile the script into various

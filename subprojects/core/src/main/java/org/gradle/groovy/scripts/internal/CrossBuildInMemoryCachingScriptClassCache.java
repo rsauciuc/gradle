@@ -15,41 +15,45 @@
  */
 package org.gradle.groovy.scripts.internal;
 
-import com.google.common.hash.HashCode;
 import groovy.lang.Script;
 import org.codehaus.groovy.ast.ClassNode;
 import org.gradle.api.Action;
-import org.gradle.api.internal.cache.CrossBuildInMemoryCache;
-import org.gradle.api.internal.cache.CrossBuildInMemoryCacheFactory;
-import org.gradle.api.internal.hash.FileHasher;
-import org.gradle.api.internal.initialization.loadercache.ClassLoaderId;
+import org.gradle.api.internal.initialization.ClassLoaderScope;
+import org.gradle.cache.internal.CrossBuildInMemoryCache;
+import org.gradle.cache.internal.CrossBuildInMemoryCacheFactory;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.Cast;
+import org.gradle.internal.hash.HashCode;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
+@ServiceScope(Scope.UserHome.class)
 public class CrossBuildInMemoryCachingScriptClassCache {
     private final CrossBuildInMemoryCache<ScriptCacheKey, CachedCompiledScript> cachedCompiledScripts;
-    private final FileHasher hasher;
 
-    public CrossBuildInMemoryCachingScriptClassCache(FileHasher hasher, CrossBuildInMemoryCacheFactory cacheFactory) {
-        this.hasher = hasher;
+    public CrossBuildInMemoryCachingScriptClassCache(CrossBuildInMemoryCacheFactory cacheFactory) {
         cachedCompiledScripts = cacheFactory.newCache();
     }
 
-    public <T extends Script, M> CompiledScript<T, M> getOrCompile(ScriptSource source, ClassLoader classLoader,
-                                                                   ClassLoaderId classLoaderId,
-                                                                   CompileOperation<M> operation,
-                                                                   Class<T> scriptBaseClass,
-                                                                   Action<? super ClassNode> verifier,
-                                                                   ScriptClassCompiler delegate) {
-        ScriptCacheKey key = new ScriptCacheKey(source.getClassName(), classLoader, operation.getId());
-        CachedCompiledScript cached = cachedCompiledScripts.get(key);
-        HashCode hash = hasher.hash(source.getResource());
+    public <T extends Script, M> CompiledScript<T, M> getOrCompile(
+        Object target,
+        ScriptSource source,
+        ClassLoaderScope targetScope,
+        CompileOperation<M> operation,
+        Class<T> scriptBaseClass,
+        Action<? super ClassNode> verifier,
+        ScriptClassCompiler delegate
+    ) {
+        ScriptCacheKey key = new ScriptCacheKey(source.getClassName(), targetScope.getExportClassLoader(), operation.getId());
+        CachedCompiledScript cached = cachedCompiledScripts.getIfPresent(key);
+        HashCode hash = source.getResource().getContentHash();
         if (cached != null) {
             if (hash.equals(cached.hash)) {
+                cached.compiledScript.onReuse();
                 return Cast.uncheckedCast(cached.compiledScript);
             }
         }
-        CompiledScript<T, M> compiledScript = delegate.compile(source, classLoader, classLoaderId, operation, scriptBaseClass, verifier);
+        CompiledScript<T, M> compiledScript = delegate.compile(source, scriptBaseClass, target, targetScope, operation, verifier);
         cachedCompiledScripts.put(key, new CachedCompiledScript(hash, compiledScript));
         return compiledScript;
     }

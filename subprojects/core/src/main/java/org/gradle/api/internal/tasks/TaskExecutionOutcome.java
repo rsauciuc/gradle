@@ -16,6 +16,8 @@
 
 package org.gradle.api.internal.tasks;
 
+import org.jspecify.annotations.Nullable;
+
 public enum TaskExecutionOutcome {
     FROM_CACHE(true, true, "FROM-CACHE"),
     UP_TO_DATE(true, true, "UP-TO-DATE"),
@@ -27,7 +29,7 @@ public enum TaskExecutionOutcome {
     private final boolean upToDate;
     private final String message;
 
-    TaskExecutionOutcome(boolean skipped, boolean upToDate, String message) {
+    TaskExecutionOutcome(boolean skipped, boolean upToDate, @Nullable String message) {
         this.skipped = skipped;
         this.upToDate = upToDate;
         this.message = message;
@@ -36,9 +38,12 @@ public enum TaskExecutionOutcome {
     public boolean isSkipped() {
         return skipped;
     }
+
     public boolean isUpToDate() {
         return upToDate;
     }
+
+    @Nullable
     public String getMessage() {
         return message;
     }

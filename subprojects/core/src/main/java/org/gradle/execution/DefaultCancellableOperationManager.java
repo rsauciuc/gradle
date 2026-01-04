@@ -19,7 +19,7 @@ package org.gradle.execution;
 import org.gradle.api.Action;
 import org.gradle.initialization.BuildCancellationToken;
 import org.gradle.internal.UncheckedException;
-import org.gradle.util.DisconnectableInputStream;
+import org.gradle.util.internal.DisconnectableInputStream;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -72,6 +72,15 @@ public class DefaultCancellableOperationManager implements CancellableOperationM
             if (handle != null) {
                 handle.cancel(true);
             }
+        }
+    }
+
+    @Override
+    public void closeInput() {
+        try {
+            input.close();
+        } catch (IOException e) {
+            throw UncheckedException.throwAsUncheckedException(e);
         }
     }
 

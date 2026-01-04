@@ -16,12 +16,15 @@
 
 package org.gradle.process.internal.worker.child;
 
-import org.gradle.api.Action;
 import org.gradle.api.GradleException;
+import org.gradle.api.JavaVersion;
 import org.gradle.api.internal.ClassPathProvider;
+import org.gradle.api.internal.classpath.ModuleRegistry;
+import org.gradle.api.internal.jvm.JavaVersionParser;
 import org.gradle.api.specs.Spec;
-import org.gradle.cache.CacheRepository;
+import org.gradle.cache.FileLockManager;
 import org.gradle.cache.PersistentCache;
+import org.gradle.cache.scopes.GlobalScopedCacheBuilderFactory;
 import org.gradle.internal.Factory;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.classloader.ClassLoaderHierarchy;
@@ -38,118 +41,140 @@ import org.gradle.internal.reflect.NoSuchMethodException;
 import org.gradle.internal.reflect.NoSuchPropertyException;
 import org.gradle.internal.reflect.PropertyAccessor;
 import org.gradle.internal.reflect.PropertyMutator;
-import org.gradle.process.internal.streams.EncodedStream;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+import org.gradle.internal.stream.EncodedStream;
+import org.gradle.model.internal.asm.AsmConstants;
 import org.gradle.process.internal.worker.GradleWorkerMain;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Type;
+import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
-import org.objectweb.asm.commons.RemappingClassAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedOutputStream;
-import java.io.Closeable;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-public class WorkerProcessClassPathProvider implements ClassPathProvider, Closeable {
-    private static final Logger LOGGER = LoggerFactory.getLogger(WorkerProcessClassPathProvider.class);
-    private final CacheRepository cacheRepository;
-    private final Object lock = new Object();
-    private ClassPath workerClassPath;
-    private PersistentCache workerClassPathCache;
+import static org.gradle.process.internal.worker.child.ApplicationClassesInSystemClassLoaderWorkerImplementationFactory.WORKER_GRADLE_REMAPPING_PREFIX;
 
-    public WorkerProcessClassPathProvider(CacheRepository cacheRepository) {
-        this.cacheRepository = cacheRepository;
+@ServiceScope(Scope.UserHome.class)
+public class WorkerProcessClassPathProvider implements ClassPathProvider {
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorkerProcessClassPathProvider.class);
+    private final GlobalScopedCacheBuilderFactory cacheBuilderFactory;
+    private final ModuleRegistry moduleRegistry;
+    private final Object lock = new Object();
+
+    private ClassPath workerClassPath;
+    private ClassPath daemonServerWorkerClasspath;
+
+    public WorkerProcessClassPathProvider(GlobalScopedCacheBuilderFactory cacheBuilderFactory, ModuleRegistry moduleRegistry) {
+        this.cacheBuilderFactory = cacheBuilderFactory;
+        this.moduleRegistry = moduleRegistry;
     }
 
+    @Override
     public ClassPath findClassPath(String name) {
         if (name.equals("WORKER_MAIN")) {
             synchronized (lock) {
                 if (workerClassPath == null) {
-                    workerClassPathCache = cacheRepository
-                            .cache("workerMain")
-                            .withInitializer(new CacheInitializer())
-                            .open();
-                    workerClassPath = new DefaultClassPath(jarFile(workerClassPathCache));
+                    PersistentCache workerClassPathCache = cacheBuilderFactory
+                        .createCacheBuilder("workerMain")
+                        .withInitialLockMode(FileLockManager.LockMode.Exclusive)
+                        .withInitializer(new CacheInitializer())
+                        .open();
+                    try {
+                        workerClassPath = DefaultClassPath.of(jarFile(workerClassPathCache));
+                    } finally {
+                        workerClassPathCache.close();
+                    }
                 }
                 LOGGER.debug("Using worker process classpath: {}", workerClassPath);
                 return workerClassPath;
             }
         }
 
-        return null;
-    }
-
-    public void close() {
-        // This isn't quite right. Should close the worker classpath cache once we're finished with the worker processes. This may be before the end of this build
-        // or they may be used across multiple builds
-        synchronized (lock) {
-            try {
-                if (workerClassPathCache != null) {
-                    workerClassPathCache.close();
+        if (name.equals("DAEMON_SERVER_WORKER")) {
+            synchronized (lock) {
+                if (daemonServerWorkerClasspath == null) {
+                    daemonServerWorkerClasspath = moduleRegistry.getModule("gradle-daemon-server-worker").getAllRequiredModulesClasspath();
                 }
-            } finally {
-                workerClassPathCache = null;
-                workerClassPath = null;
             }
+            return daemonServerWorkerClasspath;
         }
+
+        return null;
     }
 
     private static File jarFile(PersistentCache cache) {
         return new File(cache.getBaseDir(), "gradle-worker.jar");
     }
 
-    private static class CacheInitializer implements Action<PersistentCache> {
+    private static class CacheInitializer implements Consumer<PersistentCache> {
         private final WorkerClassRemapper remapper = new WorkerClassRemapper();
 
-        public void execute(PersistentCache cache) {
+        @Override
+        public void accept(PersistentCache cache) {
             try {
                 File jarFile = jarFile(cache);
                 LOGGER.debug("Generating worker process classes to {}.", jarFile);
-
-                // TODO - calculate this list of classes dynamically
-                List<Class<?>> classes = Arrays.asList(
-                        GradleWorkerMain.class,
-                        BootstrapSecurityManager.class,
-                        EncodedStream.EncodedInput.class,
-                        ClassLoaderUtils.class,
-                        FilteringClassLoader.class,
-                        FilteringClassLoader.Spec.class,
-                        ClassLoaderHierarchy.class,
-                        ClassLoaderVisitor.class,
-                        ClassLoaderSpec.class,
-                        SystemClassLoaderSpec.class,
-                        JavaReflectionUtil.class,
-                        JavaMethod.class,
-                        GradleException.class,
-                        NoSuchPropertyException.class,
-                        NoSuchMethodException.class,
-                        UncheckedException.class,
-                        PropertyAccessor.class,
-                        PropertyMutator.class,
-                        Factory.class,
-                        Spec.class);
-                ZipOutputStream outputStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(jarFile)));
-                try {
-                    for (Class<?> classToMap : classes) {
+                try (ZipOutputStream outputStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(jarFile)))) {
+                    for (Class<?> classToMap : getClassesForWorkerJar()) {
                         remapClass(classToMap, outputStream);
                     }
-                } finally {
-                    outputStream.close();
                 }
             } catch (Exception e) {
                 throw new GradleException("Could not generate worker process bootstrap classes.", e);
             }
+        }
+
+        private Set<Class<?>> getClassesForWorkerJar() {
+            // TODO - calculate this list of classes dynamically
+            List<Class<?>> classes = Arrays.asList(
+                GradleWorkerMain.class,
+                BootstrapSecurityManager.class,
+                EncodedStream.EncodedInput.class,
+                ClassLoaderUtils.class,
+                FilteringClassLoader.class,
+                FilteringClassLoader.Action.class,
+                FilteringClassLoader.Trie.Builder.class,
+                FilteringClassLoader.Trie.class,
+                FilteringClassLoader.TrieSet.class,
+                ClassLoaderHierarchy.class,
+                ClassLoaderVisitor.class,
+                ClassLoaderSpec.class,
+                SystemClassLoaderSpec.class,
+                JavaReflectionUtil.class,
+                JavaMethod.class,
+                GradleException.class,
+                NoSuchPropertyException.class,
+                NoSuchMethodException.class,
+                UncheckedException.class,
+                PropertyAccessor.class,
+                PropertyMutator.class,
+                Factory.class,
+                Spec.class,
+                JavaVersion.class,
+                JavaVersionParser.class);
+            Set<Class<?>> result = new HashSet<Class<?>>(classes);
+            for (Class<?> klass : classes) {
+                result.addAll(Arrays.asList(klass.getDeclaredClasses()));
+            }
+
+            return result;
         }
 
         private void remapClass(Class<?> classToMap, ZipOutputStream jar) throws IOException {
@@ -167,7 +192,7 @@ public class WorkerProcessClassPathProvider implements ClassPathProvider, Closea
                 inputStream.close();
             }
             ClassWriter classWriter = new ClassWriter(0);
-            ClassVisitor remappingVisitor = new RemappingClassAdapter(classWriter, remapper);
+            ClassVisitor remappingVisitor = new ClassRemapper(classWriter, remapper);
             classReader.accept(remappingVisitor, ClassReader.EXPAND_FRAMES);
             byte[] remappedClass = classWriter.toByteArray();
             String remappedClassName = remapper.map(internalName).concat(".class");
@@ -176,15 +201,14 @@ public class WorkerProcessClassPathProvider implements ClassPathProvider, Closea
         }
 
         private static class WorkerClassRemapper extends Remapper {
-            private static final String SYSTEM_APP_WORKER_INTERNAL_NAME = Type.getInternalName(SystemApplicationClassLoaderWorker.class);
+            public WorkerClassRemapper() {
+                super(AsmConstants.ASM_LEVEL);
+            }
 
             @Override
             public String map(String typeName) {
-                if (typeName.equals(SYSTEM_APP_WORKER_INTERNAL_NAME)) {
-                    return typeName;
-                }
                 if (typeName.startsWith("org/gradle/")) {
-                    return "worker/" + typeName;
+                    return WORKER_GRADLE_REMAPPING_PREFIX + "/" + typeName;
                 }
                 return typeName;
             }

@@ -20,39 +20,55 @@ import org.gradle.api.initialization.ProjectDescriptor;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.groovy.scripts.ScriptSource;
-import org.gradle.groovy.scripts.UriScriptSource;
+import org.gradle.groovy.scripts.TextResourceScriptSource;
+import org.gradle.initialization.DefaultProjectDescriptor;
+import org.gradle.initialization.DependenciesAccessors;
+import org.gradle.internal.management.DependencyResolutionManagementInternal;
 import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.resource.TextFileResourceLoader;
+import org.gradle.internal.resource.TextResource;
+import org.gradle.internal.scripts.ProjectScopedScriptResolution;
+import org.gradle.internal.service.scopes.ServiceRegistryFactory;
+import org.gradle.util.internal.NameValidator;
+import org.jspecify.annotations.Nullable;
 
 import java.io.File;
 
 public class ProjectFactory implements IProjectFactory {
     private final Instantiator instantiator;
-    private final ProjectRegistry<ProjectInternal> projectRegistry;
+    private final TextFileResourceLoader textFileResourceLoader;
+    private final ProjectScopedScriptResolution scriptResolution;
 
-    public ProjectFactory(Instantiator instantiator, ProjectRegistry<ProjectInternal> projectRegistry) {
+    public ProjectFactory(Instantiator instantiator, TextFileResourceLoader textFileResourceLoader, ProjectScopedScriptResolution scriptResolution) {
         this.instantiator = instantiator;
-        this.projectRegistry = projectRegistry;
+        this.textFileResourceLoader = textFileResourceLoader;
+        this.scriptResolution = scriptResolution;
     }
 
-    public DefaultProject createProject(ProjectDescriptor projectDescriptor, ProjectInternal parent, GradleInternal gradle, ClassLoaderScope selfClassLoaderScope, ClassLoaderScope baseClassLoaderScope) {
-        File buildFile = projectDescriptor.getBuildFile();
-        ScriptSource source = UriScriptSource.file("build file", buildFile);
+    @Override
+    public ProjectInternal createProject(GradleInternal gradle, ProjectDescriptor projectDescriptor, ProjectState owner, @Nullable ProjectInternal parent, ServiceRegistryFactory serviceRegistryFactory, ClassLoaderScope selfClassLoaderScope, ClassLoaderScope baseClassLoaderScope) {
+        // Need to wrap resolution of the build file to associate the build file with the correct project
+        File buildFile = scriptResolution.resolveScriptsForProject(owner.getIdentity(), projectDescriptor::getBuildFile);
+        TextResource resource = textFileResourceLoader.loadFile("build file", buildFile);
+        ScriptSource source = new TextResourceScriptSource(resource);
         DefaultProject project = instantiator.newInstance(DefaultProject.class,
-                projectDescriptor.getName(),
-                parent,
-                projectDescriptor.getProjectDir(),
-                source,
-                gradle,
-                gradle.getServiceRegistryFactory(),
-                selfClassLoaderScope,
-                baseClassLoaderScope
+            projectDescriptor.getName(),
+            parent,
+            projectDescriptor.getProjectDir(),
+            buildFile,
+            source,
+            gradle,
+            owner,
+            serviceRegistryFactory,
+            selfClassLoaderScope,
+            baseClassLoaderScope
         );
-
-        if (parent != null) {
-            parent.addChildProject(project);
-        }
-        projectRegistry.addProject(project);
-
+        gradle.getServices().get(DependencyResolutionManagementInternal.class).configureProject(project);
+        project.beforeEvaluate(p -> {
+            NameValidator.validate(project.getName(), "project name", DefaultProjectDescriptor.INVALID_NAME_IN_INCLUDE_HINT);
+            gradle.getServices().get(DependenciesAccessors.class).createExtensions(project);
+        });
+        gradle.getProjectRegistry().addProject(project);
         return project;
     }
 }

@@ -16,10 +16,13 @@
 
 package org.gradle.execution.taskgraph
 
-import groovy.transform.NotYetImplemented
+import groovy.test.NotYetImplemented
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.TextUtil
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
+import org.gradle.util.internal.TextUtil
 
+import static org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache.Skip.INVESTIGATE
 import static org.gradle.integtests.fixtures.executer.TaskOrderSpecs.any
 
 class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements WithRuleBasedTasks {
@@ -31,10 +34,12 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
                 @Mutate
                 void applyMessages(ModelMap<Task> tasks) {
                     println "as map: $tasks"
+                    assert tasks.get("tasks") != null
                 }
                 @Mutate
                 void applyMessages(TaskContainer tasks) {
                     println "as container: $tasks"
+                    assert tasks.getByName("tasks") != null
                 }
                 @Mutate
                 void applyMessages(@Path("tasks") ModelElement tasks) {
@@ -51,7 +56,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
 
         then:
         output.contains "as map: ModelMap<Task> 'tasks'"
-        output.contains "as container: []"
+        output.contains("as container:")
         output.contains "as model element: ModelMap<Task> 'tasks'"
         output.contains "name: tasks"
     }
@@ -130,40 +135,6 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         output.contains "bar: default message!"
     }
 
-    def "mutate rules are applied to placeholder tasks created using legacy DSL when the task is added to the task graph"() {
-        given:
-        buildFile << """
-            ${ruleBasedTasks()}
-
-            class MyPlugin extends RuleSource {
-                @Mutate
-                void applyMessages(ModelMap<EchoTask> tasks) {
-                    tasks.named('foo') {
-                        message += " message!"
-                    }
-                }
-            }
-
-            apply type: MyPlugin
-
-            tasks.addPlaceholderAction('foo', EchoTask) { message = 'custom' }
-            task dep { dependsOn foo }
-            task finalized { finalizedBy foo }
-        """
-
-        when:
-        succeeds "foo"
-
-        then:
-        output.contains "foo: custom message!"
-
-        when:
-        succeeds "dep"
-
-        then:
-        output.contains "foo: custom message!"
-    }
-
     def "mutate rules are not applied to tasks created using legacy DSL when the task is not added to the task graph"() {
         given:
         buildFile << """
@@ -212,29 +183,6 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
             }
 
             task foo(type: EchoTask)
-            assert foo.message == 'default'
-            foo.message = 'custom'
-        """
-
-        when:
-        succeeds "foo"
-
-        then:
-        output.contains "foo: custom message!"
-    }
-
-    def "mutate rules are applied to placeholder task created using legacy DSL after task is configured from legacy DSL"() {
-        given:
-        buildFile << """
-            ${ruleBasedTasks()}
-
-            model {
-                tasks.foo {
-                    message += " message!"
-                }
-            }
-
-            tasks.addPlaceholderAction('foo', EchoTask) { }
             assert foo.message == 'default'
             foo.message = 'custom'
         """
@@ -302,6 +250,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         output.contains "foo: task foo message"
     }
 
+    @ToBeFixedForConfigurationCache(skip = INVESTIGATE)
     def "task created in afterEvaluate() is visible to rules"() {
         when:
         buildFile << '''
@@ -357,6 +306,41 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         failure.assertHasCause("Cannot create 'tasks.foo' using creation rule 'MyPlugin#addTask(ModelMap<Task>) > create(foo)' as the rule 'Project.<init>.tasks.foo()' is already registered to create this model element.")
     }
 
+    def "registering creation rules to create a task using legacy container DSL that is already defined using container DSL"() {
+        when:
+        buildFile << """
+            class MyPlugin extends RuleSource {
+                @Mutate
+                void addTaskInContainer(TaskContainer tasks) {
+                    println("create task in container")
+                    tasks.create("foo") {
+                        doLast {
+                            println("created on TaskContainer")
+                        }
+                    }
+                }
+
+                @Mutate
+                void addTask(ModelMap<Task> tasks) {
+                    println("create task in model map")
+                    tasks.create("foo") {
+                        doLast {
+                            println("created on ModelMap")
+                        }
+                    }
+                }
+            }
+
+            apply type: MyPlugin
+        """
+
+        then:
+        fails "foo"
+
+        and:
+        failure.assertHasCause("Cannot add task 'foo' as a task with that name already exists.")
+    }
+
     def "a non-rule-source task can depend on a rule-source task"() {
         given:
         buildFile << """
@@ -378,7 +362,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':climbTask', ':customTask')
+        result.assertTasksScheduledInOrder(':climbTask', ':customTask')
     }
 
     def "a non-rule-source task can depend on one or more task of types created via both rule sources and old world container"() {
@@ -404,11 +388,13 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(any(':climbTask', ':oldClimber'),  ':customTask')
+        result.assertTasksScheduledInOrder(any(':climbTask', ':oldClimber'),  ':customTask')
     }
 
+    @ToBeFixedForIsolatedProjects(because = "evaluationDependsOn is not IP compatible, configuring projects from root, ")
     def "can depend on a rule-source task in a project which has already evaluated"() {
         given:
+        createDirs("sub1", "sub2")
         settingsFile << 'include "sub1", "sub2"'
         buildFile << """
         ${ruleBasedTasks()}
@@ -437,7 +423,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('sub2:customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':sub1:climbTask', ':sub2:customTask')
+        result.assertTasksScheduledInOrder(':sub1:climbTask', ':sub2:customTask')
     }
 
     def "can depend on a rule-source task after a project has been evaluated"() {
@@ -464,7 +450,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':climbTask', ':customTask')
+        result.assertTasksScheduledInOrder(':climbTask', ':customTask')
     }
 
     def "a build failure occurs when depending on a rule task with failing configuration"() {
@@ -491,8 +477,9 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         fails('customTask')
 
         then:
+        failure.assertHasDescription("Could not determine the dependencies of task ':customTask'.")
+        failure.assertHasCause('Exception thrown while executing model rule: Rules#addTasks(ModelMap<Task>) > create(climbTask)')
         failure.assertHasCause('Bang')
-        failure.assertHasDescription('Exception thrown while executing model rule: Rules#addTasks(ModelMap<Task>) > create(climbTask)')
     }
 
     def "can not depend on a general Task"() {
@@ -533,7 +520,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':climbTask', ':customTask')
+        result.assertTasksScheduledInOrder(':climbTask', ':customTask')
     }
 
     def "a non-rule-source task can depend on a rule-source task with matching criteria"() {
@@ -557,7 +544,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':climbTask', ':customTask')
+        result.assertTasksScheduledInOrder(':climbTask', ':customTask')
     }
 
     def "a non-rule-source task can not depend on both realizable and default task collections"() {
@@ -582,7 +569,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':foo', ':customTask')
+        result.assertTasksScheduledInOrder(':foo', ':customTask')
     }
 
     @NotYetImplemented
@@ -608,7 +595,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         succeeds('customTask')
 
         then:
-        result.assertTasksExecutedInOrder(':customTask', ':climbTask', ':jumpTask')
+        result.assertTasksScheduledInOrder(':customTask', ':climbTask', ':jumpTask')
     }
 
     @NotYetImplemented
@@ -677,7 +664,7 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
 
     def "only tasks of specified type are created when tasks with type are declared as dependency"() {
         when:
-        buildScript """
+        buildFile """
             ${ruleBasedTasks()}
 
             model {
@@ -696,6 +683,6 @@ class RuleTaskBridgingIntegrationTest extends AbstractIntegrationSpec implements
         run "customTask"
 
         then:
-        result.assertTasksExecutedInOrder(':climbTask', ':customTask')
+        result.assertTasksScheduledInOrder(':climbTask', ':customTask')
     }
 }

@@ -16,30 +16,48 @@
 
 package org.gradle.api.internal.project;
 
+import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.ProjectEvaluationListener;
 import org.gradle.api.UnknownProjectException;
+import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.dsl.DependencyHandler;
+import org.gradle.api.artifacts.dsl.RepositoryHandler;
+import org.gradle.api.attributes.Attribute;
 import org.gradle.api.internal.DomainObjectContext;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.ProcessOperations;
-import org.gradle.api.internal.artifacts.configurations.DependencyMetaDataProvider;
-import org.gradle.api.internal.file.FileOperations;
+import org.gradle.api.internal.artifacts.configurations.RoleBasedConfigurationContainerInternal;
 import org.gradle.api.internal.file.FileResolver;
+import org.gradle.api.internal.file.HasScriptServices;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
+import org.gradle.api.internal.initialization.ScriptHandlerInternal;
 import org.gradle.api.internal.plugins.ExtensionContainerInternal;
 import org.gradle.api.internal.plugins.PluginAwareInternal;
 import org.gradle.api.internal.tasks.TaskContainerInternal;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
+import org.gradle.api.provider.Property;
 import org.gradle.configuration.project.ProjectConfigurationActionContainer;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.logging.StandardOutputCapture;
 import org.gradle.internal.metaobject.DynamicObject;
+import org.gradle.internal.model.RuleBasedPluginListener;
+import org.gradle.internal.scan.UsedByScanPlugin;
 import org.gradle.internal.service.ServiceRegistry;
-import org.gradle.internal.service.scopes.ServiceRegistryFactory;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 import org.gradle.model.internal.registry.ModelRegistry;
 import org.gradle.model.internal.registry.ModelRegistryScope;
+import org.gradle.normalization.internal.InputNormalizationHandlerInternal;
 import org.gradle.util.Path;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
-public interface ProjectInternal extends Project, ProjectIdentifier, FileOperations, ProcessOperations, DomainObjectContext, DependencyMetaDataProvider, ModelRegistryScope, PluginAwareInternal {
+import java.util.Map;
+import java.util.Set;
+
+@UsedByScanPlugin("scan, test-retry")
+@ServiceScope(Scope.Project.class)
+public interface ProjectInternal extends Project, ProjectIdentifier, HasScriptServices, DomainObjectContext, ModelRegistryScope, PluginAwareInternal {
 
     // These constants are defined here and not with the rest of their kind in HelpTasksPlugin because they are referenced
     // in the ‘core’ modules, which don't depend on ‘plugins’ where HelpTasksPlugin is defined.
@@ -47,46 +65,88 @@ public interface ProjectInternal extends Project, ProjectIdentifier, FileOperati
     String TASKS_TASK = "tasks";
     String PROJECTS_TASK = "projects";
 
+    Attribute<String> STATUS_ATTRIBUTE = Attribute.of("org.gradle.status", String.class);
+
+    @Nullable
+    @Override
     ProjectInternal getParent();
 
+    @Nullable
+    ProjectInternal getParent(ProjectInternal referrer);
+
+    @Override
     ProjectInternal getRootProject();
+
+    ProjectInternal getRootProject(ProjectInternal referrer);
 
     Project evaluate();
 
+    /***
+     * This method should be used by internal Gradle code to trigger project evaluation.
+     */
+    ProjectInternal evaluateUnchecked();
+
     ProjectInternal bindAllModelRules();
 
+    @Override
     TaskContainerInternal getTasks();
 
     ScriptSource getBuildScriptSource();
 
-    void addChildProject(ProjectInternal childProject);
-
+    @Override
     ProjectInternal project(String path) throws UnknownProjectException;
 
+    ProjectInternal project(ProjectInternal referrer, String path) throws UnknownProjectException;
+
+    ProjectInternal project(ProjectInternal referrer, String path, Action<? super Project> configureAction);
+
+    @Override
+    @Nullable
     ProjectInternal findProject(String path);
 
-    ProjectRegistry<ProjectInternal> getProjectRegistry();
+    @Nullable
+    ProjectInternal findProject(ProjectInternal referrer, String path);
+
+    Set<? extends ProjectInternal> getSubprojects(ProjectInternal referrer);
+
+    void subprojects(ProjectInternal referrer, Action<? super Project> configureAction);
+
+    Map<String, Project> getChildProjects(ProjectInternal referrer);
+
+    Set<? extends ProjectInternal> getAllprojects(ProjectInternal referrer);
+
+    void allprojects(ProjectInternal referrer, Action<? super Project> configureAction);
 
     DynamicObject getInheritedScope();
 
+    @Override
+    @UsedByScanPlugin("test-retry")
     GradleInternal getGradle();
 
     ProjectEvaluationListener getProjectEvaluationBroadcaster();
 
+    void addRuleBasedPluginListener(RuleBasedPluginListener listener);
+
+    void prepareForRuleBasedPlugins();
+
     FileResolver getFileResolver();
 
-    ServiceRegistry getServices();
+    TaskDependencyFactory getTaskDependencyFactory();
 
-    ServiceRegistryFactory getServiceRegistryFactory();
+    @UsedByScanPlugin("scan, test-retry")
+    ServiceRegistry getServices();
 
     StandardOutputCapture getStandardOutputCapture();
 
+    @Override
     ProjectStateInternal getState();
 
+    @Override
     ExtensionContainerInternal getExtensions();
 
     ProjectConfigurationActionContainer getConfigurationActions();
 
+    @Override
     ModelRegistry getModelRegistry();
 
     ClassLoaderScope getClassLoaderScope();
@@ -99,15 +159,102 @@ public interface ProjectInternal extends Project, ProjectIdentifier, FileOperati
 
     void fireDeferredConfiguration();
 
+    @Override
+    @NullMarked
+    ProjectIdentity getProjectIdentity();
+
     /**
      * Returns a unique path for this project within its containing build.
      */
     Path getProjectPath();
 
     /**
-     * Returns a unique path for this project within the current Gradle invocation.
+     * Returns a unique path for this project within the current build tree.
      */
     Path getIdentityPath();
 
+    /**
+     * Executes the given action against the given listener collecting any new listener registrations in a separate
+     * {@link ProjectEvaluationListener} instance which is returned at the end if not empty.
+     *
+     * @param listener the current listener
+     * @param action the listener action
+     * @return null if no listeners were added during evaluation or the {@link ProjectEvaluationListener} instance representing the new batch of registered listeners
+     */
+    @Nullable
+    ProjectEvaluationListener stepEvaluationListener(ProjectEvaluationListener listener, Action<ProjectEvaluationListener> action);
 
+    /**
+     * Returns the {@link ProjectState} that manages the state of this instance.
+     */
+    ProjectState getOwner();
+
+    @Override
+    InputNormalizationHandlerInternal getNormalization();
+
+    @Override
+    ScriptHandlerInternal getBuildscript();
+
+    /**
+     * Returns a dependency resolver which can be used to resolve
+     * dependencies in isolation from the project itself. This is
+     * particularly useful if the repositories or configurations
+     * needed for resolution shouldn't leak to the project state.
+     *
+     * @return a detached resolver
+     */
+    DetachedResolver newDetachedResolver();
+
+    /**
+     * Returns the property that stored {@link Project#getStatus()}.
+     * <p>
+     * By exposing this property, the {@code base} plugin can override the default value without overriding the build configuration.
+     * <p>
+     * See: https://github.com/gradle/gradle/issues/16946
+     */
+    Property<Object> getInternalStatus();
+
+    /**
+     * When we get the {@link ConfigurationContainer} from internal locations, we'll override
+     * this getter to promise to return a {@link RoleBasedConfigurationContainerInternal} instance, to avoid
+     * the need to cast the result to create role-based configurations.
+     *
+     * @return the configuration container as a {@link RoleBasedConfigurationContainerInternal}
+     */
+    @Override
+    RoleBasedConfigurationContainerInternal getConfigurations();
+
+    void setLifecycleActionsState(@Nullable Object state);
+
+    /**
+     * The state of the execution of {@link org.gradle.api.invocation.GradleLifecycle} actions of this project.
+     * Its mutation NOT considered a mutable state access.
+     */
+    @Nullable
+    Object getLifecycleActionsState();
+
+    /**
+     * Two {@link ProjectInternal} instances are considered equal if their {@link #getProjectIdentity() identity} is equal.
+     *
+     * @param obj the object to compare with this project
+     * @return true if the given object is a {@link ProjectInternal} with the same identity as this project, false otherwise
+     */
+    @Override
+    boolean equals(Object obj);
+
+    /**
+     * Returns the hash code of this project based on its {@link #getProjectIdentity() identity}.
+     *
+     * @return the hash code of this project
+     */
+    @Override
+    int hashCode();
+
+    interface DetachedResolver {
+        RepositoryHandler getRepositories();
+
+        DependencyHandler getDependencies();
+
+        ConfigurationContainer getConfigurations();
+    }
 }

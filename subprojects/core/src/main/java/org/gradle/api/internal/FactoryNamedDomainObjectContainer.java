@@ -16,83 +16,85 @@
 package org.gradle.api.internal;
 
 import groovy.lang.Closure;
-import org.gradle.api.Namer;
+import org.gradle.api.Action;
 import org.gradle.api.Named;
 import org.gradle.api.NamedDomainObjectFactory;
+import org.gradle.api.Namer;
+import org.gradle.api.internal.collections.CollectionFilter;
+import org.gradle.api.specs.Spec;
+import org.gradle.internal.Cast;
 import org.gradle.internal.reflect.Instantiator;
 
 public class FactoryNamedDomainObjectContainer<T> extends AbstractNamedDomainObjectContainer<T> {
 
     private final NamedDomainObjectFactory<T> factory;
+    private final MutationGuard crossProjectConfiguratorMutationGuard;
+
+    // Many of these constructors are called by the nebula plugins
+    // https://github.com/nebula-plugins/nebula-project-plugin/blob/f0f587f7b7014b6202875dc499dae05b0fc32344/src/main/groovy/nebula/plugin/responsible/gradle/NamedContainerProperOrder.groovy#L12-L31
 
     /**
-     * <p>Creates a container that instantiates reflectively, expecting a 1 arg constructor taking the name.<p>
-     *
-     * <p>The type must implement the {@link Named} interface as a {@link Namer} will be created based on this type.</p>
-     *
-     * @param type The concrete type of element in the container (must implement {@link Named})
-     * @param instantiator The instantiator to use to create any other collections based on this one
-     */
-    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator) {
-        this(type, instantiator, Named.Namer.forType(type));
-    }
-
-    /**
-     * <p>Creates a container that instantiates reflectively, expecting a 1 arg constructor taking the name.<p>
-     *
-     * @param type The concrete type of element in the container (must implement {@link Named})
-     * @param instantiator The instantiator to use to create any other collections based on this one
-     * @param namer The naming strategy to use
-     */
-    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer) {
-        this(type, instantiator, namer, new ReflectiveNamedDomainObjectFactory<T>(type));
-    }
-
-    /**
-     * <p>Creates a container that instantiates using the given factory.<p>
+     * Creates a container that instantiates using the given factory.
      *
      * @param type The concrete type of element in the container (must implement {@link Named})
      * @param instantiator The instantiator to use to create any other collections based on this one
      * @param factory The factory responsible for creating new instances on demand
+     * @param collectionCallbackActionDecorator the decorator for collection callback action execution
      */
-    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, NamedDomainObjectFactory<T> factory) {
-        this(type, instantiator, Named.Namer.forType(type), factory);
+    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, NamedDomainObjectFactory<T> factory, CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+        this(type, instantiator, Named.Namer.forType(type), factory, MutationGuards.identity(), collectionCallbackActionDecorator);
     }
 
     /**
-     * <p>Creates a container that instantiates using the given factory.<p>
+     * Creates a container that instantiates using the given factory.
      *
      * @param type The concrete type of element in the container
      * @param instantiator The instantiator to use to create any other collections based on this one
      * @param namer The naming strategy to use
      * @param factory The factory responsible for creating new instances on demand
      */
-    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer, NamedDomainObjectFactory<T> factory) {
-        super(type, instantiator, namer);
+    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer, NamedDomainObjectFactory<T> factory, MutationGuard crossProjectConfiguratorMutationGuard, CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+        super(type, instantiator, namer, collectionCallbackActionDecorator);
         this.factory = factory;
+        this.crossProjectConfiguratorMutationGuard = crossProjectConfiguratorMutationGuard;
     }
 
     /**
-     * <p>Creates a container that instantiates using the given factory.<p>
+     * Creates a container that instantiates using the given factory.
      *
      * @param type The concrete type of element in the container (must implement {@link Named})
      * @param instantiator The instantiator to use to create any other collections based on this one
      * @param factoryClosure The closure responsible for creating new instances on demand
      */
-    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, final Closure factoryClosure) {
-        this(type, instantiator, Named.Namer.forType(type), factoryClosure);
+    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, final Closure<?> factoryClosure, CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+        this(type, instantiator, Named.Namer.forType(type), factoryClosure, MutationGuards.identity(), collectionCallbackActionDecorator);
     }
 
     /**
-     * <p>Creates a container that instantiates using the given factory.<p>
+     * Creates a container that instantiates using the given factory.
      *
      * @param type The concrete type of element in the container
      * @param instantiator The instantiator to use to create any other collections based on this one
      * @param namer The naming strategy to use
      * @param factoryClosure The factory responsible for creating new instances on demand
      */
-    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer, final Closure factoryClosure) {
-        this(type, instantiator, namer, new ClosureObjectFactory<T>(type, factoryClosure));
+    public FactoryNamedDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer, final Closure<?> factoryClosure, MutationGuard mutationGuard, CollectionCallbackActionDecorator collectionCallbackActionDecorator) {
+        this(type, instantiator, namer, new ClosureObjectFactory<>(type, factoryClosure), mutationGuard, collectionCallbackActionDecorator);
+    }
+
+    @Override
+    protected <S extends T> DefaultNamedDomainObjectSet<S> filtered(CollectionFilter<S> filter) {
+        return Cast.uncheckedNonnullCast(getInstantiator().newInstance(DefaultNamedDomainObjectSet.class, this, filter, getInstantiator(), getNamer(), crossProjectConfiguratorMutationGuard));
+    }
+
+    @Override
+    protected <S extends T> DefaultNamedDomainObjectSet<S> filtered(Spec<String> nameFilter, CollectionFilter<S> elementFilter) {
+        return Cast.uncheckedNonnullCast(getInstantiator().newInstance(DefaultNamedDomainObjectSet.class, this, nameFilter, elementFilter, getInstantiator(), getNamer(), crossProjectConfiguratorMutationGuard));
+    }
+
+    @Override
+    protected <I extends T> Action<? super I> wrapLazyAction(Action<? super I> action) {
+        return crossProjectConfiguratorMutationGuard.wrapLazyAction(super.wrapLazyAction(action));
     }
 
     @Override
@@ -100,15 +102,22 @@ public class FactoryNamedDomainObjectContainer<T> extends AbstractNamedDomainObj
         return factory.create(name);
     }
 
+    // For backwards compatibility with nebula plugins
+    // https://github.com/nebula-plugins/nebula-project-plugin/blob/f0f587f7b7014b6202875dc499dae05b0fc32344/src/main/groovy/nebula/plugin/responsible/gradle/NamedContainerProperOrder.groovy#L35
+    protected void assertCanAdd(String name) {
+        assertElementNotPresent(name);
+    }
+
     private static class ClosureObjectFactory<T> implements NamedDomainObjectFactory<T> {
         private final Class<T> type;
-        private final Closure factoryClosure;
+        private final Closure<?> factoryClosure;
 
-        public ClosureObjectFactory(Class<T> type, Closure factoryClosure) {
+        public ClosureObjectFactory(Class<T> type, Closure<?> factoryClosure) {
             this.type = type;
             this.factoryClosure = factoryClosure;
         }
 
+        @Override
         public T create(String name) {
             return type.cast(factoryClosure.call(name));
         }

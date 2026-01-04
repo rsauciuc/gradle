@@ -17,15 +17,26 @@
 package org.gradle.api.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.internal.reflect.validation.ValidationMessageChecker
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
+import org.gradle.test.preconditions.UnitTestPreconditions
 
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
-@Requires(TestPrecondition.SYMLINKS)
-class IncrementalBuildSymlinkHandlingIntegrationTest extends AbstractIntegrationSpec {
+@Requires(value = [
+    UnitTestPreconditions.Symlinks,
+    IntegTestPreconditions.NotEmbeddedExecutor,
+], reason = "requires isolated daemons for symlink data cleanup between builds")
+class IncrementalBuildSymlinkHandlingIntegrationTest extends AbstractIntegrationSpec implements ValidationMessageChecker {
     def setup() {
+        expectReindentedValidationMessage()
+
+        // Must run on isolated daemons so that symlink data can be properly cleaned up between builds
+        executer.requireDaemon()
+        executer.requireIsolatedDaemons()
+
         buildFile << """
 // This is a workaround to bust the JVM's file canonicalization cache
 def f = file("delete-me")
@@ -35,11 +46,13 @@ f.delete() // invalidates cache
 task work {
     inputs.file('in.txt')
     inputs.dir('in-dir')
-    outputs.file('out.txt')
-    outputs.dir('out-dir')
+    def outTxt = file('out.txt')
+    def outDir = file('out-dir')
+    outputs.file(outTxt)
+    outputs.dir(outDir)
     doLast {
-        file('out.txt').text = 'content'
-        def f2 = file('out-dir/file1.txt')
+        outTxt.text = 'content'
+        def f2 = new File(outDir, 'file1.txt')
         f2.parentFile.mkdirs()
         f2 << 'content'
     }
@@ -48,6 +61,7 @@ task work {
     }
 
     def "uses the target of symlink for input file content"() {
+        file("in-dir").createDir()
         def inFile = file("other").createFile()
         def link = file("in.txt")
         link.createLink("other")
@@ -62,7 +76,7 @@ task work {
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
 
         when:
         run("work")
@@ -72,6 +86,7 @@ task work {
     }
 
     def "uses the target of symlink for input directory content"() {
+        file('in.txt').touch()
         def inDir = file("other").createDir()
         def inFile = inDir.file("file").createFile()
         file("in-dir").createLink("other")
@@ -86,7 +101,7 @@ task work {
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
 
         when:
         run("work")
@@ -96,6 +111,7 @@ task work {
     }
 
     def "follows symlinks in input directories"() {
+        file('in.txt').touch()
         def inFile = file("other").createFile()
         def inDir = file("in-dir").createDir()
         inDir.file("file").createLink("../other")
@@ -110,7 +126,7 @@ task work {
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
 
         when:
         run("work")
@@ -119,32 +135,24 @@ task work {
         result.assertTasksSkipped(":work")
     }
 
-    def "symlink may reference missing input file"() {
-        def inFile = file("other")
+    def "symlink may not reference missing input file"() {
+        file("in-dir").createDir()
         def link = file("in.txt")
         link.createLink("other")
         assert !link.exists()
 
-        given:
-        run("work")
-        run("work")
-        result.assertTasksSkipped(":work")
-
-        when:
-        inFile.text = 'new content'
-        run("work")
-
-        then:
-        result.assertTasksNotSkipped(":work")
-
-        when:
-        run("work")
-
-        then:
-        result.assertTasksSkipped(":work")
+        expect:
+        fails("work")
+        failure.assertHasDescription("A problem was found with the configuration of task ':work' (type 'DefaultTask').")
+        failureDescriptionContains(inputDoesNotExist {
+            property('$1')
+                .file(link)
+                .includeLink()
+        })
     }
 
     def "can replace input file with symlink to file with same content"() {
+        file("in-dir").createDir()
         def inFile = file("in.txt").createFile()
         def copy = file("other")
 
@@ -159,25 +167,26 @@ task work {
         inFile.createLink(copy)
         run("work")
 
+        /*
+         * This documents the current behavior, which is optimizing
+         * for performance at the expense of not detecting some corner
+         * cases. If there actually is a task that needs to distinguish
+         * between links and real files, we should probably provide an
+         * opt-in to canonical snapshotting, as it's quite expensive.
+         */
         then:
-        // TODO - should not be skipped
-        result.assertTasksSkipped(":work")
-
-        when:
-        run("work")
-
-        then:
-        result.assertTasksSkipped(":work")
+        result.assertTaskSkipped(":work")
 
         when:
         copy.text = "new content"
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
     }
 
     def "can replace input directory with symlink to directory with same content"() {
+        file('in.txt').touch()
         def inDir = file("in-dir").createDir()
         inDir.file("file").createFile()
         def copy = file("other")
@@ -194,24 +203,27 @@ task work {
 
         run("work")
 
+        /*
+         * This documents the current behavior, which is optimizing
+         * for performance at the expense of not detecting some corner
+         * cases. If there actually is a task that needs to distinguish
+         * between links and real files, we should probably provide an
+         * opt-in to canonical snapshotting, as it's quite expensive.
+         */
         then:
-        result.assertTasksNotSkipped(":work")
-
-        when:
-        run("work")
-
-        then:
-        result.assertTasksSkipped(":work")
+        result.assertTaskSkipped(":work")
 
         when:
         copy.file("file").text = "new content"
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
     }
 
     def "can replace output file with symlink to file with same content"() {
+        file('in.txt').touch()
+        file("in-dir").createDir()
         def outFile = file("out.txt")
         def copy = file("other")
 
@@ -226,25 +238,28 @@ task work {
         outFile.createLink(copy)
         run("work")
 
-        then:
-        // TODO - should not be skipped
-        result.assertTasksSkipped(":work")
 
-        when:
-        run("work")
-
+        /*
+         * This documents the current behavior, which is optimizing
+         * for performance at the expense of not detecting some corner
+         * cases. If there actually is a task that needs to distinguish
+         * between links and real files, we should probably provide an
+         * opt-in to canonical snapshotting, as it's quite expensive.
+         */
         then:
-        result.assertTasksSkipped(":work")
+        result.assertTaskSkipped(":work")
 
         when:
         copy.text = "new content"
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
     }
 
     def "can replace output directory with symlink to directory with same content"() {
+        file('in.txt').touch()
+        file("in-dir").createDir()
         def outDir = file("out-dir")
         def copy = file("other")
 
@@ -260,20 +275,21 @@ task work {
 
         run("work")
 
+        /*
+         * This documents the current behavior, which is optimizing
+         * for performance at the expense of not detecting some corner
+         * cases. If there actually is a task that needs to distinguish
+         * between links and real files, we should probably provide an
+         * opt-in to canonical snapshotting, as it's quite expensive.
+         */
         then:
-        result.assertTasksNotSkipped(":work")
-
-        when:
-        run("work")
-
-        then:
-        result.assertTasksSkipped(":work")
+        result.assertTaskSkipped(":work")
 
         when:
         copy.listFiles().each { it.text = 'new content' }
         run("work")
 
         then:
-        result.assertTasksNotSkipped(":work")
+        result.assertTasksExecuted(":work")
     }
 }

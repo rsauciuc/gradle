@@ -1,0 +1,411 @@
+/*
+ * Copyright 2013 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.gradle.testing
+
+import com.google.common.base.Utf8
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.test.fixtures.file.TestFile
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
+import org.gradle.testing.fixture.AbstractTestingMultiVersionIntegrationTest
+import spock.lang.Issue
+
+import java.time.Duration
+
+import static org.hamcrest.Matchers.greaterThanOrEqualTo
+
+abstract class AbstractTestTaskIntegrationTest extends AbstractTestingMultiVersionIntegrationTest {
+    abstract String getStandaloneTestClass()
+    abstract String testClass(String className)
+
+    def setup() {
+        buildFile << """
+            allprojects {
+                apply plugin: 'java'
+
+                repositories {
+                    mavenCentral()
+                }
+
+                dependencies {
+                    ${testFrameworkDependencies}
+                }
+
+                test.${configureTestFramework}
+            }
+        """
+    }
+
+    def "test task can write report for long class names"() {
+        given:
+        // Remove .class so we can have the longest class name possible
+        def name = "A" * (255 - Utf8.encodedLength(".class"))
+        file("src/test/java/${name}.java") << """
+            ${testFrameworkImports}
+
+            public class ${name} {
+                @Test
+                public void test() {
+                    assertEquals(1, 1);
+                }
+            }
+        """.stripIndent()
+
+        when:
+        succeeds 'test'
+
+        then:
+        noExceptionThrown()
+
+        and:
+        // 255 is the filesystem limit on many systems, so we limit to that.
+        def htmlReportName = buildSafeFileName("__", "-39OAC63KMJT6O") + "/index.html"
+        def xmlReportName = buildSafeFileName("__TEST-", "-VDVVE6CE3E5C8.xml")
+        // These do an `any` check to give a better error message on failure
+        file("build/reports/tests/test/").assertContainsDescendants(htmlReportName)
+        file("build/test-results/test/").assertContainsDescendants(xmlReportName)
+        file("build/reports/tests/test/index.html").text.contains(name)
+    }
+
+    private static String buildSafeFileName(String prefix, String suffix) {
+        def maxFileNameLength = 120
+        def safeLength = maxFileNameLength - (Utf8.encodedLength(prefix) + Utf8.encodedLength(suffix))
+        def safeName = "A" * safeLength
+        return "${prefix}${safeName}${suffix}"
+    }
+
+    @Issue("GRADLE-2702")
+    @ToBeFixedForConfigurationCache(because = "early dependency resolution")
+    def "should not resolve configuration results when there are no tests"() {
+        given:
+        buildFile << """
+            configurations.all {
+                if (it.canBeResolved) {
+                    incoming.beforeResolve { throw new RuntimeException() }
+                }
+            }
+        """
+
+        when:
+        run("build")
+
+        then:
+        noExceptionThrown()
+    }
+
+    def "test task is skipped when there are no tests"() {
+        given:
+        file("src/test/java/not_a_test.txt")
+
+        when:
+        run("build")
+
+        then:
+        result.assertTaskSkipped(":test")
+    }
+
+    @Requires(UnitTestPreconditions.Jdk9OrLater)
+    def "compiles and executes a Java 9 test suite"() {
+        given:
+        buildFile << java9Build()
+
+        file('src/test/java/MyTest.java') << standaloneTestClass
+
+        when:
+        succeeds 'test'
+
+        then:
+        noExceptionThrown()
+
+        and:
+        classFormat(classFile('java', 'test', 'MyTest.class')) == 53
+
+    }
+
+    @Requires(UnitTestPreconditions.Jdk9OrLater)
+    def "compiles and executes a Java 9 test suite even if a module descriptor is on classpath"() {
+        given:
+        buildFile << java9Build()
+
+        file('src/test/java/MyTest.java') << standaloneTestClass
+        file('src/main/java/com/acme/Foo.java') << '''package com.acme;
+            public class Foo {}
+        '''
+        file('src/main/java/com/acme/module-info.java') << '''module com.acme {
+            exports com.acme;
+        }'''
+
+        when:
+        succeeds 'test'
+
+        then:
+        noExceptionThrown()
+
+        and:
+        classFormat(javaClassFile('module-info.class')) == 53
+        classFormat(classFile('java', 'test', 'MyTest.class')) == 53
+    }
+
+    def "test task does not hang if maxParallelForks is greater than max-workers (#maxWorkers)"() {
+        given:
+        def maxParallelForks = maxWorkers + 1
+
+        and:
+        2000.times { num ->
+            file("src/test/java/SomeTest${num}.java") << testClass("SomeTest${num}")
+        }
+
+        and:
+        buildFile << """
+            test {
+                maxParallelForks = $maxParallelForks
+            }
+        """.stripIndent()
+
+        when:
+        executer.withArguments("--max-workers=${maxWorkers}", "-i")
+        succeeds 'test'
+
+        then:
+        output.contains("test.maxParallelForks ($maxParallelForks) is larger than max-workers ($maxWorkers), forcing it to $maxWorkers")
+
+        where:
+        maxWorkers                                | _
+        Runtime.runtime.availableProcessors()     | _
+        Runtime.runtime.availableProcessors() - 1 | _
+        Runtime.runtime.availableProcessors() + 1 | _
+    }
+
+    @Requires(UnitTestPreconditions.Online)
+    def "re-runs tests when resources are renamed in a jar"() {
+        given:
+        buildFile << """
+            dependencies {
+                testImplementation project(":dependency")
+            }
+        """
+        settingsFile << """
+            include 'dependency'
+        """
+        file("src/test/java/MyTest.java") << """
+            ${testFrameworkImports}
+
+            public class MyTest {
+               @Test
+               public void test() {
+                  assertNotNull(getClass().getResource("dependency/foo.properties"));
+               }
+            }
+        """.stripIndent()
+
+        def resourceFile = file("dependency/src/main/resources/dependency/foo.properties")
+        resourceFile << """
+            someProperty = true
+        """
+
+        when:
+        succeeds 'test'
+        then:
+        noExceptionThrown()
+
+        when:
+        resourceFile.renameTo(file("dependency/src/main/resources/dependency/bar.properties"))
+        then:
+        fails 'test'
+    }
+
+    @Requires(UnitTestPreconditions.Online)
+    def "re-runs tests when resources are renamed"() {
+        given:
+        file("src/test/java/MyTest.java") << """
+            ${testFrameworkImports}
+
+            public class MyTest {
+               @Test
+               public void test() {
+                  assertNotNull(getClass().getResource("dependency/foo.properties"));
+               }
+            }
+        """.stripIndent()
+
+        def resourceFile = file("src/main/resources/dependency/foo.properties")
+        resourceFile << """
+            someProperty = true
+        """
+
+        when:
+        succeeds 'test'
+        then:
+        noExceptionThrown()
+
+        when:
+        resourceFile.renameTo(file("src/main/resources/dependency/bar.properties"))
+        then:
+        fails 'test'
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/3627")
+    def "can reference properties from TestTaskReports when using @CompileStatic"() {
+        given:
+        buildFile.text = """
+            import groovy.transform.CompileStatic
+
+            @CompileStatic
+            class StaticallyCompiledPlugin implements Plugin<Project> {
+                @Override
+                void apply(Project project) {
+                    project.apply plugin: 'java'
+                    Test test = (Test) project.tasks.getByName("test")
+                    if (test.reports.junitXml.outputLocation.asFile.get().exists()) {
+                        println 'JUnit XML report exists!'
+                    }
+                }
+            }
+
+            apply plugin: StaticallyCompiledPlugin
+        """
+
+        expect:
+        succeeds("help")
+    }
+
+    def "reports failure of TestExecuter regardless of filters"() {
+        given:
+        file('src/test/java/MyTest.java') << standaloneTestClass
+        buildFile << """
+            import org.gradle.api.internal.tasks.testing.*
+
+            test {
+                doFirst {
+                    testExecuter = new TestExecuter<JvmTestExecutionSpec>() {
+                        @Override
+                        void execute(JvmTestExecutionSpec testExecutionSpec, TestResultProcessor resultProcessor) {
+                            DefaultTestSuiteDescriptor suite = new DefaultTestSuiteDescriptor(testExecutionSpec.path, testExecutionSpec.path)
+                            resultProcessor.started(suite, new TestStartEvent(System.currentTimeMillis()))
+                            try {
+                                throw new RuntimeException("boom!")
+                            } finally {
+                                resultProcessor.completed(suite.getId(), new TestCompleteEvent(System.currentTimeMillis()))
+                            }
+                        }
+
+                        @Override
+                        void stopNow() {
+                            // do nothing
+                        }
+                    }
+                }
+            }
+        """
+
+        when:
+        fails("test", *extraArgs)
+
+        then:
+        result.assertHasCause('boom!')
+
+        where:
+        extraArgs << [[], ["--tests", "MyTest"]]
+    }
+
+    def "test framework can be set to the same value twice"() {
+        given:
+        file('src/test/java/MyTest.java') << standaloneTestClass
+
+        settingsFile << "rootProject.name = 'Sample'"
+        buildFile << """
+            test {
+                $configureTestFramework
+                $configureTestFramework
+            }
+        """.stripIndent()
+
+        expect:
+        succeeds("test")
+    }
+
+    def "options configured after setting test framework"() {
+        given:
+        file('src/test/java/MyTest.java') << standaloneTestClass
+
+        settingsFile << "rootProject.name = 'Sample'"
+        buildFile << """
+            test {
+                options {
+                    ${excludeCategoryOrTag("MyTest\$Slow")}
+                }
+            }
+
+            tasks.register('verifyTestOptions') {
+                def categoryOrTagExcludes = provider {
+                    tasks.getByName("test").getOptions().${buildScriptConfiguration.excludeCategoryOrTagConfigurationElement}
+                }
+                doLast {
+                    assert categoryOrTagExcludes.get().contains("MyTest\\\$Slow")
+                }
+            }
+        """.stripIndent()
+
+        expect:
+        succeeds("test", "verifyTestOptions", "--warn")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/17135")
+    def "records full #type class time"() {
+        given:
+        file('src/test/java/MyTest.java') << """
+            ${testFrameworkImports}
+
+            public class MyTest {
+               ${annotation}
+               public static void setUp() throws InterruptedException {
+                   Thread.sleep(1000);
+               }
+
+               @Test
+               public void test() {
+               }
+            }
+        """.stripIndent()
+
+        when:
+        succeeds 'test'
+
+        then:
+        def results = resultsFor(testDirectory)
+        def testClass = results.testPath(':MyTest').onlyRoot()
+        testClass.assertThatSingleDuration(greaterThanOrEqualTo(Duration.ofMillis(1000)))
+
+        where:
+        type     | annotation
+        "before" | beforeClassAnnotation
+        "after"  | afterClassAnnotation
+    }
+
+    private String java9Build() {
+        """
+            java {
+                sourceCompatibility = 1.9
+                targetCompatibility = 1.9
+            }
+        """
+    }
+
+    private static int classFormat(TestFile path) {
+        path.bytes[7] & 0xFF
+    }
+}

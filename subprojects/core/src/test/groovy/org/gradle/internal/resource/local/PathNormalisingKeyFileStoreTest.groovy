@@ -19,6 +19,7 @@ package org.gradle.internal.resource.local
 import org.gradle.api.Action
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.TestUtil
 import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Specification
@@ -26,7 +27,7 @@ import spock.lang.Specification
 @UsesNativeServices
 class PathNormalisingKeyFileStoreTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider dir = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider dir = new TestNameTestDirectoryProvider(getClass())
     TestFile fsBase
     PathNormalisingKeyFileStore store
 
@@ -34,7 +35,7 @@ class PathNormalisingKeyFileStoreTest extends Specification {
 
     def setup() {
         fsBase = dir.createDir("fs")
-        store = new PathNormalisingKeyFileStore(new PathKeyFileStore(fsBase))
+        store = new PathNormalisingKeyFileStore(fsBase, TestUtil.checksumService)
     }
 
     def "can move to filestore"() {

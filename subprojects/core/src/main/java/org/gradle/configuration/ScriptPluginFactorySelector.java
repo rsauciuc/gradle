@@ -16,69 +16,113 @@
 
 package org.gradle.configuration;
 
-import org.gradle.api.Incubating;
 import org.gradle.api.initialization.dsl.ScriptHandler;
-import org.gradle.api.internal.DependencyInjectingServiceLoader;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.groovy.scripts.ScriptSource;
-import org.gradle.internal.progress.BuildOperationExecutor;
+import org.gradle.groovy.scripts.internal.ScriptSourceListener;
+import org.gradle.internal.UncheckedException;
+import org.gradle.internal.code.UserCodeApplicationContext;
+import org.gradle.internal.operations.BuildOperationRunner;
+import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.scripts.ScriptingLanguages;
+import org.gradle.scripts.ScriptingLanguage;
 
 /**
  * Selects a {@link ScriptPluginFactory} suitable for handling a given build script based
  * on its file name. Build script file names ending in ".gradle" are supported by the
  * {@link DefaultScriptPluginFactory}. Other files are delegated to the first available
- * implementation of the {@link ScriptPluginFactoryProvider} SPI to return non-null from
- * {@link ScriptPluginFactoryProvider#getFor(String)}. If all provider
- * implementations return null for a given file name, handling falls back to the
+ * matching implementation of the {@link ScriptingLanguage} SPI. If no provider
+ * implementations matches for a given file name, handling falls back to the
  * {@link DefaultScriptPluginFactory}. This approach allows users to name build scripts
  * with a suffix of choice, e.g. "build.groovy" or "my.build" instead of the typical
- * "build.gradle" while preserving default behaviour.
+ * "build.gradle" while preserving default behaviour which is to fallback to Groovy support.
  *
  * This factory wraps each {@link ScriptPlugin} implementation in a {@link BuildOperationScriptPlugin}.
  *
- * @see ScriptPluginFactoryProvider
  * @since 2.14
  */
-@Incubating
 public class ScriptPluginFactorySelector implements ScriptPluginFactory {
 
-    private final ScriptPluginFactory defaultScriptPluginFactory;
-    private final DependencyInjectingServiceLoader serviceLoader;
-    private final BuildOperationExecutor buildOperationExecutor;
+    /**
+     * Scripting language ScriptPluginFactory instantiator.
+     *
+     * @since 4.0
+     */
+    public interface ProviderInstantiator {
+        ScriptPluginFactory instantiate(String providerClassName);
+    }
 
-    public ScriptPluginFactorySelector(ScriptPluginFactory defaultScriptPluginFactory,
-                                       DependencyInjectingServiceLoader serviceLoader,
-                                       BuildOperationExecutor buildOperationExecutor) {
+    /**
+     * Default scripting language ScriptPluginFactory instantiator.
+     *
+     * @param instantiator the instantiator
+     * @return the provider instantiator
+     * @since 4.0
+     */
+    public static ProviderInstantiator defaultProviderInstantiatorFor(final Instantiator instantiator) {
+        return new ProviderInstantiator() {
+
+            @Override
+            public ScriptPluginFactory instantiate(String providerClassName) {
+                Class<?> providerClass = loadProviderClass(providerClassName);
+                return (ScriptPluginFactory) instantiator.newInstance(providerClass);
+            }
+
+            private Class<?> loadProviderClass(String providerClassName) {
+                try {
+                    return getClass().getClassLoader().loadClass(providerClassName);
+                } catch (ClassNotFoundException e) {
+                    throw UncheckedException.throwAsUncheckedException(e);
+                }
+            }
+        };
+    }
+
+    private final ScriptPluginFactory defaultScriptPluginFactory;
+    private final ProviderInstantiator providerInstantiator;
+    private final BuildOperationRunner buildOperationRunner;
+    private final UserCodeApplicationContext userCodeApplicationContext;
+    private final ScriptSourceListener scriptSourceListener;
+
+    public ScriptPluginFactorySelector(
+        ScriptPluginFactory defaultScriptPluginFactory,
+        ProviderInstantiator providerInstantiator,
+        BuildOperationRunner buildOperationRunner,
+        UserCodeApplicationContext userCodeApplicationContext,
+        ScriptSourceListener scriptSourceListener
+    ) {
         this.defaultScriptPluginFactory = defaultScriptPluginFactory;
-        this.serviceLoader = serviceLoader;
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.providerInstantiator = providerInstantiator;
+        this.buildOperationRunner = buildOperationRunner;
+        this.userCodeApplicationContext = userCodeApplicationContext;
+        this.scriptSourceListener = scriptSourceListener;
     }
 
     @Override
-    public ScriptPlugin create(ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope targetScope,
-                               ClassLoaderScope baseScope, boolean topLevelScript) {
+    public ScriptPlugin create(
+        ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope targetScope,
+        ClassLoaderScope baseScope, boolean topLevelScript
+    ) {
+        scriptSourceListener.scriptSourceObserved(scriptSource);
         ScriptPlugin scriptPlugin = scriptPluginFactoryFor(scriptSource.getFileName())
             .create(scriptSource, scriptHandler, targetScope, baseScope, topLevelScript);
-        return new BuildOperationScriptPlugin(scriptPlugin, buildOperationExecutor);
+        return new BuildOperationScriptPlugin(scriptPlugin, buildOperationRunner, userCodeApplicationContext);
     }
 
     private ScriptPluginFactory scriptPluginFactoryFor(String fileName) {
-        return fileName.endsWith(".gradle")
-            ? defaultScriptPluginFactory
-            : findScriptPluginFactoryFor(fileName);
-    }
-
-    private ScriptPluginFactory findScriptPluginFactoryFor(String fileName) {
-        for (ScriptPluginFactoryProvider scriptPluginFactoryProvider : scriptPluginFactoryProviders()) {
-            ScriptPluginFactory scriptPluginFactory = scriptPluginFactoryProvider.getFor(fileName);
-            if (scriptPluginFactory != null) {
-                return scriptPluginFactory;
+        for (ScriptingLanguage scriptingLanguage : ScriptingLanguages.all()) {
+            if (fileName.endsWith(scriptingLanguage.getExtension())) {
+                String provider = scriptingLanguage.getProvider();
+                if (provider != null) {
+                    return instantiate(provider);
+                }
+                return defaultScriptPluginFactory;
             }
         }
         return defaultScriptPluginFactory;
     }
 
-    private Iterable<ScriptPluginFactoryProvider> scriptPluginFactoryProviders() {
-        return serviceLoader.load(ScriptPluginFactoryProvider.class, getClass().getClassLoader());
+    private ScriptPluginFactory instantiate(String provider) {
+        return providerInstantiator.instantiate(provider);
     }
 }

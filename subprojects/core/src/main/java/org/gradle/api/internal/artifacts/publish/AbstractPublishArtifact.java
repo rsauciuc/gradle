@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2009 the original author or authors.
+ * Copyright 2007 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,24 +15,23 @@
  */
 package org.gradle.api.internal.artifacts.publish;
 
-import org.gradle.api.artifacts.PublishArtifact;
+import com.google.common.collect.ImmutableSet;
+import org.gradle.api.internal.artifacts.PublishArtifactInternal;
 import org.gradle.api.internal.tasks.DefaultTaskDependency;
-import org.gradle.api.internal.tasks.TaskResolver;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
 import org.gradle.api.tasks.TaskDependency;
 
-public abstract class AbstractPublishArtifact implements PublishArtifact {
+public abstract class AbstractPublishArtifact implements PublishArtifactInternal {
     private final DefaultTaskDependency taskDependency;
 
-    public AbstractPublishArtifact(TaskResolver resolver, Object... tasks) {
-        taskDependency = new DefaultTaskDependency(resolver);
-        taskDependency.add(tasks);
+    public AbstractPublishArtifact(
+        TaskDependencyFactory taskDependencyFactory,
+        Object... dependencies
+    ) {
+        taskDependency = taskDependencyFactory.configurableDependency(ImmutableSet.copyOf(dependencies));
     }
 
-    public AbstractPublishArtifact(Object... tasks) {
-        taskDependency = new DefaultTaskDependency();
-        taskDependency.add(tasks);
-    }
-
+    @Override
     public TaskDependency getBuildDependencies() {
         return taskDependency;
     }

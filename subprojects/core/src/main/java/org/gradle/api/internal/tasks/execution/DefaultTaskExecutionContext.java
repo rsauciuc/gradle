@@ -15,31 +15,70 @@
  */
 package org.gradle.api.internal.tasks.execution;
 
-import org.gradle.api.internal.changedetection.TaskArtifactState;
+import org.gradle.api.internal.changedetection.TaskExecutionMode;
 import org.gradle.api.internal.tasks.TaskExecutionContext;
-import org.gradle.caching.internal.tasks.TaskOutputCachingBuildCacheKey;
+import org.gradle.api.internal.tasks.properties.TaskProperties;
+import org.gradle.execution.plan.LocalTaskNode;
+import org.gradle.internal.execution.WorkValidationContext;
+import org.gradle.internal.operations.BuildOperationContext;
+
+import java.util.Optional;
 
 public class DefaultTaskExecutionContext implements TaskExecutionContext {
-    private TaskArtifactState taskArtifactState;
-    private TaskOutputCachingBuildCacheKey buildCacheKey;
 
-    @Override
-    public TaskArtifactState getTaskArtifactState() {
-        return taskArtifactState;
+    private final LocalTaskNode localTaskNode;
+    private final TaskProperties properties;
+    private final WorkValidationContext validationContext;
+    private final OutputDependencyCheckAction dependencyCheckAction;
+    private TaskExecutionMode taskExecutionMode;
+    private BuildOperationContext snapshotTaskInputsBuildOperationContext;
+
+    public DefaultTaskExecutionContext(LocalTaskNode localTaskNode, TaskProperties taskProperties, WorkValidationContext validationContext, OutputDependencyCheckAction dependencyCheckAction) {
+        this.localTaskNode = localTaskNode;
+        this.properties = taskProperties;
+        this.validationContext = validationContext;
+        this.dependencyCheckAction = dependencyCheckAction;
     }
 
     @Override
-    public void setTaskArtifactState(TaskArtifactState taskArtifactState) {
-        this.taskArtifactState = taskArtifactState;
+    public LocalTaskNode getLocalTaskNode() {
+        return localTaskNode;
     }
 
     @Override
-    public TaskOutputCachingBuildCacheKey getBuildCacheKey() {
-        return buildCacheKey;
+    public TaskExecutionMode getTaskExecutionMode() {
+        return taskExecutionMode;
     }
 
     @Override
-    public void setBuildCacheKey(TaskOutputCachingBuildCacheKey buildCacheKey) {
-        this.buildCacheKey = buildCacheKey;
+    public WorkValidationContext getValidationContext() {
+        return validationContext;
+    }
+
+    @Override
+    public OutputDependencyCheckAction getOutputDependencyCheckAction() {
+        return dependencyCheckAction;
+    }
+
+    @Override
+    public void setTaskExecutionMode(TaskExecutionMode taskExecutionMode) {
+        this.taskExecutionMode = taskExecutionMode;
+    }
+
+    @Override
+    public TaskProperties getTaskProperties() {
+        return properties;
+    }
+
+    @Override
+    public Optional<BuildOperationContext> removeSnapshotTaskInputsBuildOperationContext() {
+        Optional<BuildOperationContext> result = Optional.ofNullable(snapshotTaskInputsBuildOperationContext);
+        snapshotTaskInputsBuildOperationContext = null;
+        return result;
+    }
+
+    @Override
+    public void setSnapshotTaskInputsBuildOperationContext(BuildOperationContext snapshotTaskInputsBuildOperation) {
+        this.snapshotTaskInputsBuildOperationContext = snapshotTaskInputsBuildOperation;
     }
 }

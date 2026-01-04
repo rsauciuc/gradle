@@ -16,25 +16,38 @@
 package org.gradle.internal.buildevents;
 
 import org.gradle.api.internal.tasks.execution.statistics.TaskExecutionStatistics;
-import org.gradle.api.internal.tasks.execution.statistics.TaskExecutionStatisticsListener;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.internal.logging.text.StyledTextOutput;
 import org.gradle.internal.logging.text.StyledTextOutputFactory;
 
-public class TaskExecutionStatisticsReporter implements TaskExecutionStatisticsListener {
+public class TaskExecutionStatisticsReporter {
     private final StyledTextOutputFactory textOutputFactory;
 
     public TaskExecutionStatisticsReporter(StyledTextOutputFactory textOutputFactory) {
         this.textOutputFactory = textOutputFactory;
     }
 
-    public void buildFinished(final TaskExecutionStatistics statistics) {
-        final int total = statistics.getAvoidedTasksCount() + statistics.getExecutedTasksCount();
+    public void buildFinished(TaskExecutionStatistics statistics) {
+        int total = statistics.getTotalTaskCount();
         if (total > 0) {
-            final long avoidedPercentage = Math.round(statistics.getAvoidedTasksCount() * 100.0 / total);
-            final String pluralizedTasks = total > 1 ? "tasks" : "task";
-            StyledTextOutput textOutput = textOutputFactory.create(BuildResultLogger.class, LogLevel.LIFECYCLE);
-            textOutput.formatln("%d actionable %s: %d executed, %d avoided (%d%%)", total, pluralizedTasks, statistics.getExecutedTasksCount(), statistics.getAvoidedTasksCount(), avoidedPercentage);
+            String pluralizedTasks = total > 1 ? "tasks" : "task";
+            StyledTextOutput textOutput = textOutputFactory.create(TaskExecutionStatisticsReporter.class, LogLevel.LIFECYCLE);
+            textOutput.format("%d actionable %s:", total, pluralizedTasks);
+            boolean printedDetail = formatDetail(textOutput, statistics.getExecutedTasksCount(), "executed", false);
+            printedDetail = formatDetail(textOutput, statistics.getFromCacheTaskCount(), "from cache", printedDetail);
+            formatDetail(textOutput, statistics.getUpToDateTaskCount(), "up-to-date", printedDetail);
+            textOutput.println();
         }
+    }
+
+    private static boolean formatDetail(StyledTextOutput textOutput, int count, String title, boolean alreadyPrintedDetail) {
+        if (count == 0) {
+            return alreadyPrintedDetail;
+        }
+        if (alreadyPrintedDetail) {
+            textOutput.format(",");
+        }
+        textOutput.format(" %d %s", count, title);
+        return true;
     }
 }

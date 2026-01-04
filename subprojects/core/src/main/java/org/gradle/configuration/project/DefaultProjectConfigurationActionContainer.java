@@ -19,7 +19,7 @@ package org.gradle.configuration.project;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.util.internal.ConfigureUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,18 +27,22 @@ import java.util.List;
 public class DefaultProjectConfigurationActionContainer implements ProjectConfigurationActionContainer {
     private final List<Action<? super ProjectInternal>> actions = new ArrayList<Action<? super ProjectInternal>>();
 
+    @Override
     public void finished() {
         actions.clear();
     }
 
+    @Override
     public List<Action<? super ProjectInternal>> getActions() {
         return actions;
     }
 
+    @Override
     public void add(Action<? super ProjectInternal> action) {
         actions.add(action);
     }
 
+    @Override
     public void add(Closure action) {
         add(ConfigureUtil.configureUsing(action));
     }

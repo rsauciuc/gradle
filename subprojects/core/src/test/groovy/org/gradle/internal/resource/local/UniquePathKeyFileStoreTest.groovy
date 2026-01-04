@@ -18,6 +18,7 @@ package org.gradle.internal.resource.local
 
 import org.gradle.api.Action
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.TestUtil
 import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Specification
@@ -25,13 +26,13 @@ import spock.lang.Specification
 @UsesNativeServices
 class UniquePathKeyFileStoreTest extends Specification {
     @Rule
-    TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider();
+    TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider(getClass());
     Action<File> action = Mock()
 
     UniquePathKeyFileStore uniquePathKeyFileStore
 
     def setup() {
-        uniquePathKeyFileStore = new UniquePathKeyFileStore(temporaryFolder.createDir("fsbase"))
+        uniquePathKeyFileStore = new UniquePathKeyFileStore(TestUtil.checksumService, temporaryFolder.createDir("fsbase"))
     }
 
     def "add executes action if file does not exist"() {
@@ -57,34 +58,7 @@ class UniquePathKeyFileStoreTest extends Specification {
         0 * action.execute(_)
     }
 
-    def "copy returns existing file it it already exists"() {
-        setup:
-        def source = temporaryFolder.createFile("some-file")
-        def file = temporaryFolder.createFile("fsbase/a/a");
-        file.text = 'existing content'
-
-        when:
-        def fileInStore = uniquePathKeyFileStore.copy("a/a", source)
-
-        then:
-        fileInStore.file == file
-        file.text == 'existing content'
-    }
-
-    def "copy adds file it it does not exist"() {
-        setup:
-        def source = temporaryFolder.createFile("some-file")
-        def file = temporaryFolder.file("fsbase/a/a");
-
-        when:
-        def fileInStore = uniquePathKeyFileStore.copy("a/a", source)
-
-        then:
-        fileInStore.file == file
-        file.assertIsCopyOf(source)
-    }
-
-    def "move returns existing file it it already exists"() {
+    def "move returns existing file if it already exists"() {
         setup:
         def source = temporaryFolder.createFile("some-file")
         def file = temporaryFolder.createFile("fsbase/a/a");
@@ -99,7 +73,7 @@ class UniquePathKeyFileStoreTest extends Specification {
         !source.exists()
     }
 
-    def "move adds file it it does not exist"() {
+    def "move adds file if it does not exist"() {
         setup:
         def source = temporaryFolder.createFile("some-file")
         def file = temporaryFolder.file("fsbase/a/a");

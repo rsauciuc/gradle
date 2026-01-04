@@ -15,35 +15,107 @@
  */
 package org.gradle.api
 
-import org.gradle.integtests.fixtures.AbstractIntegrationTest
+import org.gradle.api.internal.FeaturePreviewsActivationFixture
+import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.executer.ArtifactBuilder
-import org.gradle.integtests.fixtures.executer.ExecutionResult
+import org.gradle.internal.os.OperatingSystem
 import org.gradle.test.fixtures.file.TestFile
-import org.junit.Test
+import spock.lang.Issue
 
-import static org.hamcrest.Matchers.containsString
-import static org.hamcrest.Matchers.not
-import static org.junit.Assert.assertThat
+class SettingsScriptExecutionIntegrationTest extends AbstractIntegrationSpec {
+    def "emits deprecation warnings when enabling inactive #feature feature"() {
+        given:
+        settingsFile << """
+            enableFeaturePreview('$feature')
+        """
 
-class SettingsScriptExecutionIntegrationTest extends AbstractIntegrationTest {
-    @Test
-    public void executesSettingsScriptWithCorrectEnvironment() {
+        when:
+        executer.expectDocumentedDeprecationWarning("enableFeaturePreview('$feature') has been deprecated. This is scheduled to be removed in Gradle 10. " +
+                "The feature flag is no longer relevant, please remove it from your settings file. " +
+                "For more information, please refer to https://docs.gradle.org/current/userguide/feature_lifecycle.html#feature_preview in the Gradle documentation.")
+
+        then:
+        succeeds()
+
+        where:
+        feature << FeaturePreviewsActivationFixture.inactiveFeatures()
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/8840")
+    def "can use exec in settings"() {
+        addExecToScript(settingsFile)
+        when:
+        succeeds()
+        then:
+        outputContains("hello from settings")
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/8840")
+    def "can use exec in settings applied from another script"() {
+        settingsFile << """
+            apply from: 'other.gradle'
+        """
+        addExecToScript(file("other.gradle"))
+        when:
+        succeeds()
+        then:
+        outputContains("hello from settings")
+    }
+
+    private void addExecToScript(TestFile scriptFile) {
+        file("message") << """
+            hello from settings
+        """
+        if (OperatingSystem.current().windows) {
+            scriptFile << """
+                def message = providers.exec {
+                    commandLine "cmd.exe", "/d", "/c", "type", "message"
+                }.standardOutput.asText.get()
+                print message
+            """
+        } else {
+            scriptFile << """
+                def message = providers.exec {
+                    commandLine "cat", "message"
+                }.standardOutput.asText.get()
+                print message
+            """
+        }
+    }
+
+    def "notices changes to settings scripts that do not change the file length"() {
+        settingsFile.text = "println 'counter: __'"
+        long before = settingsFile.length()
+
+        expect:
+        (10..40).each {
+            settingsFile.text = "println 'counter: $it'"
+            assert settingsFile.length() == before
+
+            succeeds()
+            result.assertOutputContains("counter: $it")
+        }
+    }
+
+    def "executes settings script with correct environment"() {
+        given:
         createExternalJar()
         createBuildSrc()
         def implClassName = 'com.google.common.collect.Multimap'
 
-        testFile('settings.gradle') << """
+        settingsFile << """
 buildscript {
     dependencies { classpath files('repo/test-1.3.jar') }
 }
 new org.gradle.test.BuildClass()
-new BuildSrcClass();
+
 println 'quiet message'
 logging.captureStandardOutput(LogLevel.ERROR)
 println 'error message'
 assert settings != null
-assert buildscript.classLoader == getClass().classLoader.parent
-assert buildscript.classLoader == Thread.currentThread().contextClassLoader
+// TODO:configuration-cache consider restoring assertion on the relationship
+//  between buildscript.classLoader and getClas().classLoader
+assert getClass().classLoader.parent == Thread.currentThread().contextClassLoader
 Gradle.class.classLoader.loadClass('${implClassName}')
 try {
     buildscript.classLoader.loadClass('${implClassName}')
@@ -55,20 +127,28 @@ try {
         buildscript.classLoader.close()
     }
 }
-"""
-        testFile('build.gradle') << 'task doStuff'
 
-        ExecutionResult result = inTestDirectory().withTasks('doStuff').run()
-        assertThat(result.output, containsString('quiet message'))
-        assertThat(result.output, not(containsString('error message')))
-        assertThat(result.error, containsString('error message'))
-        assertThat(result.error, not(containsString('quiet message')))
+try {
+    buildscript.classLoader.loadClass('BuildSrcClass')
+    assert false: 'should fail'
+} catch (ClassNotFoundException e) {
+    // expected
+}
+"""
+        buildFile << 'task doStuff'
+
+        when:
+        run('doStuff')
+
+        then:
+        output.contains('quiet message')
+        errorOutput.contains('error message')
     }
 
     private TestFile createBuildSrc() {
-        return testFile('buildSrc/src/main/java/BuildSrcClass.java') << '''
+        return file('buildSrc/src/main/java/BuildSrcClass.java') << '''
             public class BuildSrcClass { }
-'''
+        '''
     }
 
     private def createExternalJar() {
@@ -76,7 +156,7 @@ try {
         builder.sourceFile('org/gradle/test/BuildClass.java') << '''
             package org.gradle.test;
             public class BuildClass { }
-'''
-        builder.buildJar(testFile("repo/test-1.3.jar"))
+        '''
+        builder.buildJar(file("repo/test-1.3.jar"))
     }
 }

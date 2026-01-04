@@ -31,7 +31,11 @@ public interface OptionDescriptor extends Comparable<OptionDescriptor> {
 
     String getDescription();
 
-    int getOrder();
+    /**
+     * An option will be considered clashing (and hence can be ignored/reported)
+     * if it has the same name as a previous option.
+     */
+    boolean isClashing();
 
     /**
      * @throws TypeConversionException On failure to convert the given values to the required types.

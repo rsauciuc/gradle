@@ -16,25 +16,33 @@
 
 package org.gradle.api.internal.initialization.loadercache
 
-import com.google.common.hash.HashCode
 import org.gradle.internal.classloader.DefaultHashingClassLoaderFactory
 import org.gradle.internal.classloader.FilteringClassLoader
 import org.gradle.internal.classpath.ClassPath
 import org.gradle.internal.classpath.DefaultClassPath
+import org.gradle.internal.hash.TestHashCodes
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
+import java.util.function.Function
+
 class DefaultClassLoaderCacheTest extends Specification {
 
     def classpathHasher = new FileClasspathHasher()
     def cache = new DefaultClassLoaderCache(new DefaultHashingClassLoaderFactory(classpathHasher), classpathHasher)
-    def id1 = new ClassLoaderId() {}
-    def id2 = new ClassLoaderId() {}
+    def id1 = new ClassLoaderId() {
+        @Override
+        String getDisplayName() { "id1" }
+    }
+    def id2 = new ClassLoaderId() {
+        @Override
+        String getDisplayName() { "id2" }
+    }
 
     @Rule
-    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
+    TestNameTestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider(getClass())
 
     TestFile file(String path) {
         def f = testDirectoryProvider.testDirectory.file(path)
@@ -43,7 +51,7 @@ class DefaultClassLoaderCacheTest extends Specification {
     }
 
     ClassPath classPath(String... paths) {
-        new DefaultClassPath(paths.collect { file(it) } as Iterable<File>)
+        DefaultClassPath.of(paths.collect { file(it) } as Iterable<File>)
     }
 
     ClassLoader classLoader(ClassPath classPath) {
@@ -55,9 +63,9 @@ class DefaultClassLoaderCacheTest extends Specification {
         def root = classLoader(classPath("root"))
         cache.get(id1, classPath("c1"), root, null) == cache.get(id1, classPath("c1"), root, null)
         cache.get(id1, classPath("c1"), root, null) != cache.get(id1, classPath("c1", "c2"), root, null)
-        cache.get(id1, classPath("c1"), root, null, HashCode.fromInt(100)) == cache.get(id1, classPath("c1"), root, null, HashCode.fromInt(100))
-        cache.get(id1, classPath("c1"), root, null, HashCode.fromInt(100)) != cache.get(id1, classPath("c1", "c2"), root, null, HashCode.fromInt(200))
-        cache.get(id1, classPath("c1"), root, null, HashCode.fromInt(100)) != cache.get(id1, classPath("c1"), root, null, null)
+        cache.get(id1, classPath("c1"), root, null, TestHashCodes.hashCodeFrom(100)) == cache.get(id1, classPath("c1"), root, null, TestHashCodes.hashCodeFrom(100))
+        cache.get(id1, classPath("c1"), root, null, TestHashCodes.hashCodeFrom(100)) != cache.get(id1, classPath("c1", "c2"), root, null, TestHashCodes.hashCodeFrom(200))
+        cache.get(id1, classPath("c1"), root, null, TestHashCodes.hashCodeFrom(100)) != cache.get(id1, classPath("c1"), root, null, null)
         cache.get(id1, classPath("c1"), root, null, classpathHasher.hash(classPath("c1"))) == cache.get(id1, classPath("c1"), root, null, null)
     }
 
@@ -175,13 +183,30 @@ class DefaultClassLoaderCacheTest extends Specification {
         cache.size() == 0
     }
 
-    def "can put loaders"() {
+    def "can add specialized loaders"() {
+        def parent = Stub(ClassLoader)
         def loader = Stub(ClassLoader)
+        def classPath = classPath("root")
 
         when:
-        cache.put(id1, loader)
+        def result = cache.createIfAbsent(id1, classPath, parent, { ClassLoader spec -> loader } as Function, null)
 
         then:
+        result == loader
+        cache.size() == 1
+
+        when:
+        def result2 = cache.createIfAbsent(id1, classPath, parent, { throw new RuntimeException() } as Function, null)
+
+        then:
+        result2 == loader
+        cache.size() == 1
+
+        when:
+        def result3 = cache.get(id1, classPath, parent, null)
+
+        then:
+        result3 == loader
         cache.size() == 1
 
         when:
@@ -189,37 +214,5 @@ class DefaultClassLoaderCacheTest extends Specification {
 
         then:
         cache.size() == 0
-    }
-
-    def "can replace specialized loader"() {
-        def parent = classLoader(classPath("root"))
-        def loader1 = Stub(ClassLoader)
-        def loader2 = Stub(ClassLoader)
-
-        when:
-        cache.put(id1, loader1)
-
-        then:
-        cache.size() == 1
-
-        when:
-        cache.put(id1, loader2)
-
-        then:
-        cache.size() == 1
-
-        when:
-        def cl = cache.get(id1, classPath("c1"), parent, null)
-
-        then:
-        cl != loader1
-        cl != loader2
-        cache.size() == 1
-
-        when:
-        cache.put(id1, loader1)
-
-        then:
-        cache.size() == 1
     }
 }

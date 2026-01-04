@@ -16,57 +16,42 @@
 
 package org.gradle.initialization.buildsrc
 
-import org.gradle.StartParameter
 import org.gradle.api.Action
 import org.gradle.api.internal.GradleInternal
-import org.gradle.api.internal.component.BuildableJavaComponent
-import org.gradle.api.internal.component.ComponentRegistry
+import org.gradle.api.internal.StartParameterInternal
+import org.gradle.api.internal.initialization.DefaultScriptClassPathResolver
 import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.internal.service.ServiceRegistry
+import org.gradle.api.internal.project.ProjectState
+import org.gradle.api.invocation.Gradle
+import org.gradle.internal.instrumentation.agent.AgentStatus
+import org.gradle.internal.instrumentation.reporting.PropertyUpgradeReportConfig
+import org.gradle.util.TestUtil
 import spock.lang.Specification
+
+import java.util.function.Function
 
 class BuildSrcBuildListenerFactoryTest extends Specification {
 
-    def startParameter = Mock(StartParameter)
-    def component = Stub(BuildableJavaComponent)
-    def services = Mock(ServiceRegistry) {
-        get(ComponentRegistry) >> Stub(ComponentRegistry) {
-            getMainComponent() >> component
-        }
+    def startParameter = Mock(StartParameterInternal)
+    def projectState = Mock(ProjectState) {
+        fromMutableState(_) >> { Function function -> function.apply(project) }
     }
     def project = Mock(ProjectInternal) {
-        getServices() >> services
+        getOwner() >> projectState
     }
     def gradle = Mock(GradleInternal) {
         getStartParameter() >> startParameter
         getRootProject() >> project
     }
 
-    def "configures task names when rebuild on"() {
-        def listener = new BuildSrcBuildListenerFactory().create(true)
-        component.getRebuildTasks() >> ['fooBuild']
-
-        when:
-        listener.onConfigure(gradle)
-
-        then:
-        1 * startParameter.setTaskNames(['fooBuild'])
-    }
-
-    def "configures task names when rebuild off"() {
-        def listener = new BuildSrcBuildListenerFactory().create(false)
-        component.getBuildTasks() >> ['barBuild']
-
-        when:
-        listener.onConfigure(gradle)
-
-        then:
-        1 * startParameter.setTaskNames(['barBuild'])
-    }
-
     def "executes buildSrc configuration action after projects are loaded"() {
         def action = Mock(Action)
-        def listener = new BuildSrcBuildListenerFactory(action).create(true)
+        def listener = new BuildSrcBuildListenerFactory(action, new DefaultScriptClassPathResolver(
+            TestUtil.objectInstantiator(),
+            Stub(AgentStatus),
+            Stub(Gradle),
+            Stub(PropertyUpgradeReportConfig)
+        )).create()
 
         when:
         listener.projectsLoaded(gradle)

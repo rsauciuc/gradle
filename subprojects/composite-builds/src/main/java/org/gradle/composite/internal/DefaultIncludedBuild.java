@@ -16,125 +16,163 @@
 
 package org.gradle.composite.internal;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import org.gradle.BuildResult;
 import org.gradle.api.Action;
+import org.gradle.api.Transformer;
 import org.gradle.api.artifacts.DependencySubstitutions;
+import org.gradle.api.internal.BuildDefinition;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.SettingsInternal;
-import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
-import org.gradle.api.internal.artifacts.ivyservice.dependencysubstitution.DefaultDependencySubstitutions;
-import org.gradle.api.internal.artifacts.ivyservice.dependencysubstitution.DependencySubstitutionsInternal;
+import org.gradle.api.internal.tasks.DefaultTaskReference;
+import org.gradle.api.internal.tasks.TaskDependencyFactory;
 import org.gradle.api.tasks.TaskReference;
-import org.gradle.initialization.GradleLauncher;
-import org.gradle.internal.Factory;
+import org.gradle.initialization.IncludedBuildSpec;
+import org.gradle.internal.build.BuildState;
+import org.gradle.internal.build.ExecutionResult;
+import org.gradle.internal.build.IncludedBuildState;
+import org.gradle.internal.buildtree.BuildTreeState;
+import org.gradle.internal.composite.IncludedBuildInternal;
+import org.gradle.util.Path;
 
 import java.io.File;
-import java.util.List;
 
-public class DefaultIncludedBuild implements IncludedBuildInternal {
-    private final File projectDir;
-    private final Factory<GradleLauncher> gradleLauncherFactory;
-    private final ImmutableModuleIdentifierFactory moduleIdentifierFactory;
-    private final List<Action<? super DependencySubstitutions>> dependencySubstitutionActions = Lists.newArrayList();
-    private DefaultDependencySubstitutions dependencySubstitutions;
+public class DefaultIncludedBuild extends AbstractCompositeParticipantBuildState implements IncludedBuildState {
 
-    private GradleLauncher gradleLauncher;
-    private SettingsInternal settings;
-    private GradleInternal gradle;
+    private final Path identityPath;
+    private final BuildDefinition buildDefinition;
+    private final boolean isImplicit;
 
-    public DefaultIncludedBuild(File projectDir, Factory<GradleLauncher> launcherFactory, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
-        this.projectDir = projectDir;
-        this.gradleLauncherFactory = launcherFactory;
-        this.moduleIdentifierFactory = moduleIdentifierFactory;
-    }
+    public DefaultIncludedBuild(
+        Path identityPath,
+        BuildDefinition buildDefinition,
+        boolean isImplicit,
+        BuildState owner,
+        BuildTreeState buildTree
+    ) {
+        // Use a defensive copy of the build definition, as it may be mutated during build execution
+        super(buildTree, buildDefinition.newInstance(), owner);
+        assert !identityPath.equals(Path.ROOT) : "An included build must not be located at the root path";
 
-    public File getProjectDir() {
-        return projectDir;
-    }
-
-    @Override
-    public TaskReference task(String path) {
-        Preconditions.checkArgument(path.startsWith(":"), "Task path '%s' is not a qualified task path (e.g. ':task' or ':project:task').", path);
-        return new IncludedBuildTaskReference(getName(), path);
+        this.identityPath = identityPath;
+        this.buildDefinition = buildDefinition;
+        this.isImplicit = isImplicit;
     }
 
     @Override
-    public synchronized String getName() {
-        return getLoadedSettings().getRootProject().getName();
+    public BuildDefinition getBuildDefinition() {
+        return buildDefinition;
     }
 
     @Override
-    public void dependencySubstitution(Action<? super DependencySubstitutions> action) {
-        if (dependencySubstitutions != null) {
-            throw new IllegalStateException("Cannot configure included build after dependency substitutions are resolved.");
+    public File getRootDirectory() {
+        return buildDefinition.getBuildRootDir();
+    }
+
+    @Override
+    public Path getIdentityPath() {
+        return identityPath;
+    }
+
+    @Override
+    public boolean isImplicitBuild() {
+        return isImplicit;
+    }
+
+    @Override
+    public boolean isImportableBuild() {
+        return !isImplicit;
+    }
+
+    @Override
+    public IncludedBuildInternal getModel() {
+        TaskDependencyFactory taskDependencyFactory = getBuildServices().get(TaskDependencyFactory.class);
+        return new IncludedBuildImpl(this, taskDependencyFactory);
+    }
+
+    @Override
+    public boolean isPluginBuild() {
+        return buildDefinition.isPluginBuild();
+    }
+
+    File getProjectDir() {
+        return buildDefinition.getBuildRootDir();
+    }
+
+    @Override
+    public String getName() {
+        return identityPath.getName();
+    }
+
+    @Override
+    public void assertCanAdd(IncludedBuildSpec includedBuildSpec) {
+        if (isImplicit) {
+            // Not yet supported for implicit included builds
+            super.assertCanAdd(includedBuildSpec);
         }
-        dependencySubstitutionActions.add(action);
     }
 
-    public DependencySubstitutionsInternal resolveDependencySubstitutions() {
-        if (dependencySubstitutions == null) {
-            dependencySubstitutions = DefaultDependencySubstitutions.forIncludedBuild(this, moduleIdentifierFactory);
+    @Override
+    public File getBuildRootDir() {
+        return buildDefinition.getBuildRootDir();
+    }
 
-            for (Action<? super DependencySubstitutions> action : dependencySubstitutionActions) {
-                action.execute(dependencySubstitutions);
+    @Override
+    public Action<? super DependencySubstitutions> getRegisteredDependencySubstitutions() {
+        return buildDefinition.getDependencySubstitutions();
+    }
+
+    @Override
+    public <T> T withState(Transformer<T, ? super GradleInternal> action) {
+        // This should apply some locking, but most access to the build state does not happen via this method yet
+        return action.transform(getMutableModel());
+    }
+
+    @Override
+    public ExecutionResult<Void> finishBuild() {
+        return getBuildController().finishBuild(null);
+    }
+
+    public static class IncludedBuildImpl implements IncludedBuildInternal {
+
+        private final DefaultIncludedBuild buildState;
+        private final TaskDependencyFactory taskDependencyFactory;
+
+        public IncludedBuildImpl(DefaultIncludedBuild buildState, TaskDependencyFactory taskDependencyFactory) {
+            this.buildState = buildState;
+            this.taskDependencyFactory = taskDependencyFactory;
+        }
+
+        @Override
+        public String getName() {
+            return buildState.getName();
+        }
+
+        @Override
+        public File getProjectDir() {
+            return buildState.getProjectDir();
+        }
+
+        @Override
+        public TaskReference task(String pathStr) {
+            return DefaultTaskReference.create(pathStr, taskDependencyFactory);
+        }
+
+        @Override
+        public BuildState getTarget() {
+            return buildState;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
             }
+
+            IncludedBuildImpl that = (IncludedBuildImpl) o;
+            return buildState.equals(that.buildState);
         }
-        return dependencySubstitutions;
-    }
 
-    @Override
-    public SettingsInternal getLoadedSettings() {
-        if (settings == null) {
-            GradleLauncher gradleLauncher = getGradleLauncher();
-            gradleLauncher.load();
-            settings = gradleLauncher.getSettings();
+        @Override
+        public int hashCode() {
+            return buildState.hashCode();
         }
-        return settings;
-    }
-
-    @Override
-    public GradleInternal getConfiguredBuild() {
-        if (gradle == null) {
-            GradleLauncher gradleLauncher = getGradleLauncher();
-            gradleLauncher.getBuildAnalysis();
-            settings = gradleLauncher.getSettings();
-            gradle = gradleLauncher.getGradle();
-        }
-        return gradle;
-    }
-
-    private GradleLauncher getGradleLauncher() {
-        if (gradleLauncher == null) {
-            gradleLauncher = gradleLauncherFactory.create();
-            reset();
-        }
-        return gradleLauncher;
-    }
-
-    private void reset() {
-        gradle = null;
-        settings = null;
-    }
-
-    @Override
-    public BuildResult execute(Iterable<String> tasks) {
-        GradleLauncher launcher = getGradleLauncher();
-        launcher.getGradle().getStartParameter().setTaskNames(tasks);
-        try {
-            return launcher.run();
-        } finally {
-            markAsNotReusable();
-        }
-    }
-
-    private void markAsNotReusable() {
-        gradleLauncher = null;
-    }
-
-    @Override
-    public String toString() {
-        return String.format("includedBuild[%s]", projectDir.getPath());
     }
 }

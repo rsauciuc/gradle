@@ -16,11 +16,12 @@
 
 package org.gradle.api.internal.plugins;
 
-import org.gradle.api.Nullable;
+import org.gradle.internal.DisplayName;
 import org.gradle.plugin.use.PluginId;
+import org.jspecify.annotations.Nullable;
 
 public interface PluginImplementation<T> extends PotentialPlugin<T> {
-    String getDisplayName();
+    DisplayName getDisplayName();
 
     /**
      * An id for the plugin implementation, if known.

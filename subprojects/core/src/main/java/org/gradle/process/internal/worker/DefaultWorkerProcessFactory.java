@@ -18,8 +18,8 @@ package org.gradle.process.internal.worker;
 
 import org.gradle.api.Action;
 import org.gradle.api.internal.ClassPathRegistry;
-import org.gradle.api.internal.file.TemporaryFileProvider;
-import org.gradle.api.logging.LogLevel;
+import org.gradle.api.internal.file.temp.TemporaryFileProvider;
+import org.gradle.api.logging.LoggingManager;
 import org.gradle.internal.classloader.ClasspathUtil;
 import org.gradle.internal.id.IdGenerator;
 import org.gradle.internal.jvm.inspection.JvmVersionDetector;
@@ -33,26 +33,35 @@ import java.io.File;
 
 public class DefaultWorkerProcessFactory implements WorkerProcessFactory {
 
-    private final LogLevel workerLogLevel;
+    private final LoggingManager loggingManager;
     private final MessagingServer server;
-    private final IdGenerator<?> idGenerator;
-    private final File gradleUserHomeDir;
+    private final IdGenerator<Long> idGenerator;
     private final JavaExecHandleFactory execHandleFactory;
+    private final JvmVersionDetector jvmVersionDetector;
     private final OutputEventListener outputEventListener;
     private final ApplicationClassesInSystemClassLoaderWorkerImplementationFactory workerImplementationFactory;
     private final MemoryManager memoryManager;
     private int connectTimeoutSeconds = 120;
 
-    public DefaultWorkerProcessFactory(LogLevel workerLogLevel, MessagingServer server, ClassPathRegistry classPathRegistry, IdGenerator<?> idGenerator,
-                                       File gradleUserHomeDir, TemporaryFileProvider temporaryFileProvider, JavaExecHandleFactory execHandleFactory,
-                                       JvmVersionDetector jvmVersionDetector, OutputEventListener outputEventListener, MemoryManager memoryManager) {
-        this.workerLogLevel = workerLogLevel;
+    public DefaultWorkerProcessFactory(
+        LoggingManager loggingManager,
+        MessagingServer server,
+        ClassPathRegistry classPathRegistry,
+        IdGenerator<Long> idGenerator,
+        File gradleUserHomeDir,
+        TemporaryFileProvider temporaryFileProvider,
+        JavaExecHandleFactory execHandleFactory,
+        JvmVersionDetector jvmVersionDetector,
+        OutputEventListener outputEventListener,
+        MemoryManager memoryManager
+    ) {
+        this.loggingManager = loggingManager;
         this.server = server;
         this.idGenerator = idGenerator;
-        this.gradleUserHomeDir = gradleUserHomeDir;
         this.execHandleFactory = execHandleFactory;
+        this.jvmVersionDetector = jvmVersionDetector;
         this.outputEventListener = outputEventListener;
-        this.workerImplementationFactory = new ApplicationClassesInSystemClassLoaderWorkerImplementationFactory(classPathRegistry, temporaryFileProvider, jvmVersionDetector);
+        this.workerImplementationFactory = new ApplicationClassesInSystemClassLoaderWorkerImplementationFactory(classPathRegistry, temporaryFileProvider, gradleUserHomeDir);
         this.memoryManager = memoryManager;
     }
 
@@ -69,19 +78,13 @@ public class DefaultWorkerProcessFactory implements WorkerProcessFactory {
     }
 
     @Override
-    public <P> SingleRequestWorkerProcessBuilder<P> singleRequestWorker(Class<P> protocolType, Class<? extends P> workerImplementation) {
-        return new DefaultSingleRequestWorkerProcessBuilder<P>(protocolType, workerImplementation, newWorkerProcessBuilder());
-    }
-
-    @Override
-    public <P, W extends P> MultiRequestWorkerProcessBuilder<W> multiRequestWorker(Class<W> workerType, Class<P> protocolType, Class<? extends P> workerImplementation) {
-        return new DefaultMultiRequestWorkerProcessBuilder<W>(workerType, workerImplementation, newWorkerProcessBuilder());
+    public <IN, OUT> MultiRequestWorkerProcessBuilder<IN, OUT> multiRequestWorker(Class<? extends RequestHandler<? super IN, ? extends OUT>> workerImplementation) {
+        return new DefaultMultiRequestWorkerProcessBuilder<>(workerImplementation, newWorkerProcessBuilder(), outputEventListener);
     }
 
     private DefaultWorkerProcessBuilder newWorkerProcessBuilder() {
-        DefaultWorkerProcessBuilder builder = new DefaultWorkerProcessBuilder(execHandleFactory, server, idGenerator, workerImplementationFactory, outputEventListener, memoryManager);
-        builder.setLogLevel(workerLogLevel);
-        builder.setGradleUserHomeDir(gradleUserHomeDir);
+        DefaultWorkerProcessBuilder builder = new DefaultWorkerProcessBuilder(execHandleFactory, server, idGenerator, workerImplementationFactory, outputEventListener, memoryManager, jvmVersionDetector);
+        builder.setLogLevel(loggingManager.getLevel());
         builder.setConnectTimeoutSeconds(connectTimeoutSeconds);
         return builder;
     }

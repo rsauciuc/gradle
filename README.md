@@ -1,95 +1,121 @@
-<img src="gradle.png" width="350px" alt="Gradle Logo" />
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/gradle-white-primary.png" width="700px">
+    <img alt="Gradle Logo" src="images/gradle-dark-green-primary.png" width="600px">
+  </picture>
+</div>
 
-Gradle is a build tool with a focus on build automation and support for multi-language development. If you are building, testing, publishing, and deploying software on any platform, Gradle offers a flexible model that can support the entire development lifecycle from compiling and packaging code to publishing web sites. Gradle has been designed to support build automation across multiple languages and platforms including Java, Scala, Android, C/C++, and Groovy, and is closely integrated with development tools and continuous integration servers including Eclipse, IntelliJ, and Jenkins.
+<div align="center">
+  <a href="https://ge.gradle.org/scans">
+    <img src="https://img.shields.io/badge/Revved%20up%20by-Develocity-06A0CE?logo=Gradle&labelColor=02303A" alt="Revved up by Develocity">
+  </a>
+  <a href="https://bestpractices.coreinfrastructure.org/projects/4898">
+    <img src="https://bestpractices.coreinfrastructure.org/projects/4898/badge" alt="CII Best Practices">
+  </a>
+  <a href="https://gradle.org/slack-invite">
+    <img src="https://img.shields.io/badge/Slack-Join%20the%20Community-brightgreen?style=flat&logo=slack" alt="Join the Gradle Community Slack">
+  </a>
+  <a href="https://docs.gradle.org/current/userguide/userguide.html">
+    <img src="https://img.shields.io/badge/Docs-Gradle%20User%20Guide-blueviolet?style=flat&logo=read-the-docs" alt="Gradle Documentation">
+  </a>
+</div>
 
-For more information about Gradle, please visit: https://gradle.org
 
-## Downloading
+## 🐘 **Gradle Build Tool** 
 
-You can download released versions and nightly build artifacts from: https://gradle.org/downloads
+**[Gradle](https://gradle.org/)** is a highly scalable build automation tool designed to handle everything from large, multi-project enterprise builds to quick development tasks across various languages. Gradle’s modular, performance-oriented architecture seamlessly integrates with development environments, making it a go-to solution for building, testing, and deploying applications on **Java**, **Kotlin**, **Scala**, **Android**, **Groovy**, **C++**, and **Swift**.
 
-## Building
+> For a comprehensive overview, please visit the [official Gradle project homepage](https://gradle.org).
 
-Naturally, Gradle builds itself with Gradle. Gradle provides an innovative [wrapper](https://gradle.org/docs/current/userguide/gradle_wrapper.html) that allows you to work with a Gradle build without having to manually install Gradle. The wrapper is a batch script on Windows and a shell script on other operating systems.
+---
 
-You should use the wrapper to build the gradle project. Generally, you should use the wrapper for any wrapper-enabled project because it guarantees building with the Gradle version that the build was intended to use.
+### 🚀 **Getting Started**
 
-To build the entire Gradle project, you should run the following in the root of the checkout.
+Starting with Gradle is easy with these essential resources. Follow these to install Gradle, set up initial projects, and explore supported platforms:
 
-    ./gradlew build
+- **[Installing Gradle](https://docs.gradle.org/current/userguide/installation.html)**
+- **Build Projects for Popular Languages and Frameworks**:
+  - [Java Applications](https://docs.gradle.org/current/samples/sample_building_java_applications.html)
+  - [Java Modules](https://docs.gradle.org/current/samples/sample_java_modules_multi_project.html)
+  - [Android Apps](https://developer.android.com/studio/build/index.html)
+  - [Groovy Applications](https://docs.gradle.org/current/samples/sample_building_groovy_applications.html)
+  - [Kotlin Libraries](https://docs.gradle.org/current/samples/sample_building_kotlin_libraries.html)
+  - [Scala Applications](https://docs.gradle.org/current/samples/sample_building_scala_applications.html)
+  - [Spring Boot Web Apps](https://docs.gradle.org/current/samples/sample_building_spring_boot_web_applications.html)
+  - [C++ Libraries](https://docs.gradle.org/current/samples/sample_building_cpp_libraries.html)
+  - [Swift Apps](https://docs.gradle.org/current/samples/sample_building_swift_applications.html)
+  - [Swift Libraries](https://docs.gradle.org/current/samples/sample_building_swift_libraries.html)
 
-This will compile all the code, generate all the documentation and run all the tests. It can take several hours because we have thousands of tests, including integration tests that exercise virtually every Gradle feature. Among the things we test are: compatibility across versions, validity of samples and Javadoc snippets, daemon process capabilities, etc.
+> 📘 Explore Gradle’s full array of resources through the [Gradle Documentation](https://docs.gradle.org/).
 
-In order for this build to pass, you will need a supported native tool chain installed. See the [Gradle userguide](https://docs.gradle.org/current/userguide/native_software.html#native-binaries:tool-chain-support) for a list of supported tool chains.
+---
 
-### Installing from source
+### 🛠 **Seamless IDE & CI Integration**
 
-To create an install from the source tree you can run either of the following:
+Gradle is built to work smoothly with a variety of Integrated Development Environments (IDEs) and Continuous Integration (CI) systems, providing extensive support for a streamlined workflow:
 
-    ./gradlew install -Pgradle_installPath=/usr/local/gradle-source-build
+-   **Supported IDEs**: Quickly integrate Gradle with [Android Studio](https://docs.gradle.org/current/userguide/gradle_ides.html), [IntelliJ IDEA](https://docs.gradle.org/current/userguide/gradle_ides.html), [Eclipse](https://docs.gradle.org/current/userguide/gradle_ides.html), [NetBeans](https://docs.gradle.org/current/userguide/gradle_ides.html), and [Visual Studio Code](https://docs.gradle.org/current/userguide/gradle_ides.html).
+-   **Continuous Integration**: Gradle easily connects with popular CI tools, including Jenkins, [GitHub Actions](https://docs.github.com/actions), [GitLab CI](https://docs.gitlab.com/ee/ci/), [CircleCI](https://circleci.com/), and more, to streamline build and deployment pipelines.
 
-This will create a minimal installation; just what's needed to run Gradle (i.e. no docs). Note that the `-Pgradle_installPath` denotes where to install to.
+---
 
-You can then build a Gradle based project with this installation:
+### 🎓 **Learning Resources for Gradle**
 
-    /usr/local/gradle-source-build/bin/gradle «some task»
+Kickstart your Gradle knowledge with courses, guides, and community support tailored to various experience levels:
 
-To create a full installation (includes docs):
+- **[DPE University Free Courses](https://dpeuniversity.gradle.com/app/catalog)**: A collection of hands-on courses for learning Gradle, complete with project-based tasks to improve real-world skills.
+- **[Gradle Community Resources](https://community.gradle.org/resources/)**: Discover a range of resources, tutorials, and guides to support your Gradle journey, from foundational concepts to advanced practices.
 
-    ./gradlew installAll -Pgradle_installPath=/usr/local/gradle-source-build
+---
 
-### Working with subprojects
+### 💬 **Community Support & Resources**
 
-The Gradle build uses Gradle's ability to customize the logical structure of a multiproject build. All of the build's subprojects are in the `subprojects/` directory and are mapped to top level children in [settings.gradle](https://github.com/gradle/gradle/blob/master/settings.gradle).
+The Gradle community offers a range of forums, documentation, and direct help to guide you through every step of your Gradle journey:
 
-This means that to build just the `core` subproject (that lives in `subprojects/core`) you would run:
+- **Documentation**: The [Gradle User Manual](https://docs.gradle.org/current/userguide/userguide.html) covers everything from basic to advanced configurations.
+- **Community Forum**: Engage with others on the [Gradle Forum](https://discuss.gradle.org/) for discussions, tips, and best practices.
+- **Community Slack**: [Join our Slack Channel](https://gradle.org/slack-invite) for real-time discussions, with specialized channels like `#github-integrations` for integration topics.
+- **Newsletter**: Subscribe to the [Gradle Newsletter](https://newsletter.gradle.org) for news, tutorials, and community highlights.
 
-    ./gradlew core:build
+> **Quick Tip**: New contributors to Gradle projects are encouraged to ask questions in the Slack `#community-support` channel.
 
-Or to build the docs:
+---
 
-    ./gradlew docs:build
+### 🌱 **Contributing to Gradle**
 
-And so on.
+- **Contribution Guide**: [Contribute](https://github.com/gradle/gradle/blob/master/CONTRIBUTING.md) to Gradle by submitting patches or pull requests for code or documentation improvements.
+- **Code of Conduct**: Gradle enforces a [Code of Conduct](https://gradle.org/conduct/) to ensure a welcoming and supportive community for all contributors.
 
-## Contributing
+---
 
-If you're looking to contribute to Gradle or provide a patch/pull request, you can find more info [here](https://github.com/gradle/gradle/blob/master/.github/CONTRIBUTING.md).
+### 🔗 **Additional Resources**
 
-### Contributing Code
+To make the most out of Gradle, take advantage of these additional resources:
 
-This is a complicated topic and the Gradle development team are happy to help anybody get started working with the Gradle code base, so don't hesitate to get in touch with the developers if you need help working with the finer points of the build.
+- **[Gradle Documentation](https://docs.gradle.org/)** - Your go-to guide for all Gradle-related documentation.
+- **[DPE University](https://dpeuniversity.gradle.com/app/catalog)** - Explore tutorials designed to get you started quickly.
+- **[Community Resources](https://gradle.org/resources/)** - Find more community-contributed materials to expand your knowledge.
 
-If you are simply wanting to fix something or adding a small minor feature, it is usually good enough to simply make your change to the code and then run the `check` task for that subproject. So if the patch was to the `launcher` package for example, you can run:
+> 🌟 **Stay connected with the Gradle Community and access the latest news, training, and updates via [Slack](https://gradle.org/slack-invite), [Forum](https://discuss.gradle.org/), and our [Newsletter](https://newsletter.gradle.org)**.
 
-    ./gradlew launcher:check
-
-To run all of the tests and code quality checks for that module.
-
-### Contributing Documentation
-
-Please see the readme in the [docs subproject](https://github.com/gradle/gradle/tree/master/subprojects/docs).
-
-## Opening in your IDE
-
-### IntelliJ IDEA
-
-To open the Gradle project in IDEA, simply run the following task from the root:
-
-    ./gradlew idea
-
-This will generate appropriate IDEA metadata so that the project can be opened from within IDEA. Also, IntelliJ Run Configurations will be generated, which allow you to run/debug Gradle or run pre-commit tests.
-
-Note that due to an IDEA glitch, the first build of Gradle from IDEA will fail. Launching a second build fixes the compilation error.
-
-### Eclipse
-
-Building the Gradle project with Eclipse is currently limited due to Eclipse's lacking Groovy support.
-We recommend using IntelliJ IDEA.
-
-1. You will need Eclipse 4.5 (Mars)
-2. Install the Groovy Eclipse plugin from http://dist.springsource.org/snapshot/GRECLIPSE/e4.5/
-3. Make sure you have a Java 8 compatible JRE configured in your workspace
-4. In `Window->Preferences->Groovy->Compiler`, check `Enable Script folder support` and add `**/*.gradle`
-5. Run `./gradlew eclipse` from the root directory
-6. Import all projects using the "Import Existing Projects into Workspace" wizard
+<br><br>
+<div align="center" style="margin-top: 20px;">
+    <a href="https://www.linkedin.com/company/gradle/">
+        <img src="https://img.shields.io/badge/-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn" style="margin: 0 0px;">
+    </a>
+    <a href="https://x.com/gradle">
+        <img src="https://img.shields.io/badge/-000000?style=for-the-badge&logo=x&logoColor=white" alt="X (Twitter)" style="margin: 0 20px;">
+    </a>
+    <a href="https://www.youtube.com/@GradleInc">
+        <img src="https://img.shields.io/badge/-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube" style="margin: 0 20px;">
+    </a>
+    <a href="https://mastodon.social/@Gradle">
+        <img src="https://img.shields.io/badge/-6364FF?style=for-the-badge&logo=mastodon&logoColor=white" alt="Mastodon" style="margin: 0 20px;">
+    </a>
+    <a href="https://www.facebook.com/gradleinc">
+        <img src="https://img.shields.io/badge/-1877F2?style=for-the-badge&logo=facebook&logoColor=white" alt="Facebook" style="margin: 0 20px;">
+    </a>
+    <a href="https://gradle.org/slack-invite">
+        <img src="https://img.shields.io/badge/-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack" style="margin: 0 20px;">
+    </a>
+</div>

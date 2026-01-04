@@ -16,13 +16,14 @@
 
 package org.gradle.initialization;
 
-import org.gradle.util.Clock;
-
 public class DefaultBuildRequestContext implements BuildRequestContext {
+
     private final BuildCancellationToken token;
     private final BuildEventConsumer buildEventConsumer;
     private final BuildRequestMetaData metaData;
 
+    // TODO: Decide if we want to push the gate concept into TAPI or other entry points
+    // currently, a gate is only used by continuous build and can only be controlled from within the build.
     public DefaultBuildRequestContext(BuildRequestMetaData metaData, BuildCancellationToken token, BuildEventConsumer buildEventConsumer) {
         this.metaData = metaData;
         this.token = token;
@@ -45,7 +46,12 @@ public class DefaultBuildRequestContext implements BuildRequestContext {
     }
 
     @Override
-    public Clock getBuildTimeClock() {
-        return metaData.getBuildTimeClock();
+    public long getStartTime() {
+        return metaData.getStartTime();
+    }
+
+    @Override
+    public boolean isInteractive() {
+        return metaData.isInteractive();
     }
 }

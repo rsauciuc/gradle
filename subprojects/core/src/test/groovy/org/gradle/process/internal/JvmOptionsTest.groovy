@@ -18,13 +18,27 @@
 package org.gradle.process.internal
 
 import org.gradle.api.internal.file.TestFiles
+import org.gradle.process.JavaDebugOptions
 import org.gradle.process.JavaForkOptions
+import org.gradle.util.TestUtil
 import spock.lang.Specification
-import spock.lang.Unroll
 
 import java.nio.charset.Charset
 
-import static org.gradle.process.internal.JvmOptions.*
+import static org.gradle.process.internal.JvmOptions.FILE_ENCODING_KEY
+import static org.gradle.process.internal.JvmOptions.JAVA_IO_TMPDIR_KEY
+import static org.gradle.process.internal.JvmOptions.JAVA_SECURITY_PROPERTIES_KEY
+import static org.gradle.process.internal.JvmOptions.JMX_REMOTE_KEY
+import static org.gradle.process.internal.JvmOptions.SSL_KEYSTOREPASSWORD_KEY
+import static org.gradle.process.internal.JvmOptions.SSL_KEYSTORETYPE_KEY
+import static org.gradle.process.internal.JvmOptions.SSL_KEYSTORE_KEY
+import static org.gradle.process.internal.JvmOptions.SSL_TRUSTPASSWORD_KEY
+import static org.gradle.process.internal.JvmOptions.SSL_TRUSTSTORETYPE_KEY
+import static org.gradle.process.internal.JvmOptions.SSL_TRUSTSTORE_KEY
+import static org.gradle.process.internal.JvmOptions.USER_COUNTRY_KEY
+import static org.gradle.process.internal.JvmOptions.USER_LANGUAGE_KEY
+import static org.gradle.process.internal.JvmOptions.USER_VARIANT_KEY
+import static org.gradle.process.internal.JvmOptions.fromString
 
 class JvmOptionsTest extends Specification {
     final String defaultCharset = Charset.defaultCharset().name()
@@ -72,21 +86,6 @@ class JvmOptionsTest extends Specification {
     def "system properties are always before the symbolic arguments"() {
         expect:
         parse("-Xms1G -Dfile.encoding=UTF-8 -Dfoo.encoding=blah -Dfile.encoding=UTF-16").allJvmArgs == ["-Dfoo.encoding=blah", "-Xms1G", "-Dfile.encoding=UTF-16", *localePropertyStrings()]
-    }
-
-    def "debug option can be set via allJvmArgs"() {
-        setup:
-        def opts = createOpts()
-
-        when:
-        opts.allJvmArgs = ['-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005']
-        then:
-        opts.debug
-
-        when:
-        opts.allJvmArgs = []
-        then:
-        opts.debug == false
     }
 
     def "managed jvm args includes heap settings"() {
@@ -151,9 +150,24 @@ class JvmOptionsTest extends Specification {
         1 * target.systemProperties({
             it == new TreeMap(["file.encoding": "UTF-16"] + localeProperties())
         })
+        1 * target.getDebugOptions() >> TestUtil.newInstance(DefaultJavaDebugOptions)
     }
 
-    @Unroll
+    def "copyTo copies debugOptions"() {
+        JavaDebugOptions debugOptions = TestUtil.newInstance(DefaultJavaDebugOptions);
+        JavaForkOptions target = Mock(JavaForkOptions) { it.debugOptions >> debugOptions }
+        JvmOptions source = parse("-Dx=y")
+        source.debugSpec.host = "*"
+        source.debugSpec.port = 1234
+
+        when:
+        source.copyTo(target)
+
+        then: "Target should have the debugOptions copied from source"
+        target.debugOptions.host.get() == "*"
+        target.debugOptions.port.get() == 1234
+    }
+
     def "#propDescr is immutable system property"() {
         when:
         def opts = createOpts()
@@ -165,16 +179,22 @@ class JvmOptionsTest extends Specification {
         opts.immutableSystemProperties.containsKey(propKey)
 
         where:
-        propDescr                 | propKey                  | propAsArg
-        "file encoding"           | FILE_ENCODING_KEY        | "-D${FILE_ENCODING_KEY}=UTF-8"
-        "user variant"            | USER_VARIANT_KEY         | "-D${USER_VARIANT_KEY}"
-        "user language"           | USER_LANGUAGE_KEY        | "-D${USER_LANGUAGE_KEY}=en"
-        "user country"            | USER_COUNTRY_KEY         | "-D${USER_COUNTRY_KEY}=US"
-        "jmx remote"              | JMX_REMOTE_KEY           | "-D${JMX_REMOTE_KEY}"
-        "temp directory"          | JAVA_IO_TMPDIR_KEY       | "-D${JAVA_IO_TMPDIR_KEY}=/some/tmp/folder"
+        propDescr                 | propKey                         | propAsArg
+        "file encoding"           | FILE_ENCODING_KEY               | "-D${FILE_ENCODING_KEY}=UTF-8"
+        "user variant"            | USER_VARIANT_KEY                | "-D${USER_VARIANT_KEY}"
+        "user language"           | USER_LANGUAGE_KEY               | "-D${USER_LANGUAGE_KEY}=en"
+        "user country"            | USER_COUNTRY_KEY                | "-D${USER_COUNTRY_KEY}=US"
+        "jmx remote"              | JMX_REMOTE_KEY                  | "-D${JMX_REMOTE_KEY}"
+        "temp directory"          | JAVA_IO_TMPDIR_KEY              | "-D${JAVA_IO_TMPDIR_KEY}=/some/tmp/folder"
+        "security properties"     | JAVA_SECURITY_PROPERTIES_KEY    | "-D${JAVA_SECURITY_PROPERTIES_KEY}=/some/tmp/security.properties"
+        "ssl keystore path"       | SSL_KEYSTORE_KEY                | "-D${SSL_KEYSTORE_KEY}=/keystore/path"
+        "ssl keystore password"   | SSL_KEYSTOREPASSWORD_KEY        | "-D${SSL_KEYSTOREPASSWORD_KEY}=secret"
+        "ssl keystore type"       | SSL_KEYSTORETYPE_KEY            | "-D${SSL_KEYSTORETYPE_KEY}=jks"
+        "ssl truststore path"     | SSL_TRUSTSTORE_KEY              | "-D${SSL_TRUSTSTORE_KEY}=truststore/path"
+        "ssl truststore password" | SSL_TRUSTPASSWORD_KEY           | "-D${SSL_TRUSTPASSWORD_KEY}=secret"
+        "ssl truststore type"     | SSL_TRUSTSTORETYPE_KEY          | "-D${SSL_TRUSTSTORETYPE_KEY}=jks"
     }
 
-    @Unroll
     def "#propDescr can be set as systemproperty"() {
         JvmOptions opts = createOpts()
         when:
@@ -182,11 +202,18 @@ class JvmOptionsTest extends Specification {
         then:
         opts.allJvmArgs.contains("-D${propKey}=${propValue}".toString());
         where:
-        propDescr                 | propKey                  | propValue
-        "file encoding"           | FILE_ENCODING_KEY        | "ISO-8859-1"
-        "user country"            | USER_COUNTRY_KEY         | "en"
-        "user language"           | USER_LANGUAGE_KEY        | "US"
-        "temp directory"          | JAVA_IO_TMPDIR_KEY       | "/some/tmp/folder"
+        propDescr                 | propKey                         | propValue
+        "file encoding"           | FILE_ENCODING_KEY               | "ISO-8859-1"
+        "user country"            | USER_COUNTRY_KEY                | "en"
+        "user language"           | USER_LANGUAGE_KEY               | "US"
+        "temp directory"          | JAVA_IO_TMPDIR_KEY              | "/some/tmp/folder"
+        "security properties"     | JAVA_SECURITY_PROPERTIES_KEY    | "/some/folder/security.properties"
+        "ssl keystore path"       | SSL_KEYSTORE_KEY                | "/keystore/path"
+        "ssl keystore password"   | SSL_KEYSTOREPASSWORD_KEY        | "secret"
+        "ssl keystore type"       | SSL_KEYSTORETYPE_KEY            | "jks"
+        "ssl truststore path"     | SSL_TRUSTSTORE_KEY              | "truststore/path"
+        "ssl truststore password" | SSL_TRUSTPASSWORD_KEY           | "secret"
+        "ssl truststore type"     | SSL_TRUSTSTORETYPE_KEY          | "jks"
     }
 
     def "can enter debug mode"() {
@@ -215,6 +242,27 @@ class JvmOptionsTest extends Specification {
         opts.allJvmArgs.containsAll(['-Xmx1G', '-Xms1G', '-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005'])
     }
 
+    def "can configure debug mode"(port, server, suspend, expected) {
+        setup:
+        def opts = createOpts()
+
+        when:
+        opts.debug = true
+        opts.debugSpec.port = port
+        opts.debugSpec.server = server
+        opts.debugSpec.suspend = suspend
+
+        then:
+        opts.allJvmArgs.findAll { it.contains 'jdwp' } == [expected]
+
+        where:
+        port | server | suspend | expected
+        1122 | false  | false   | '-agentlib:jdwp=transport=dt_socket,server=n,suspend=n,address=1122'
+        1123 | false  | true    | '-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=1123'
+        1124 | true   | false   | '-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1124'
+        1125 | true   | true    | '-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=1125'
+    }
+
     def "options with newlines are parsed correctly"() {
         def opts = createOpts()
         when:
@@ -236,7 +284,7 @@ class JvmOptionsTest extends Specification {
     }
 
     private JvmOptions createOpts() {
-        return new JvmOptions(TestFiles.resolver())
+        return new JvmOptions(TestFiles.fileCollectionFactory())
     }
 
     private JvmOptions parse(String optsString) {

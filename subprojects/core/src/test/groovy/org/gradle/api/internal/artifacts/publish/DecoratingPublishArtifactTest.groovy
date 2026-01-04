@@ -17,6 +17,9 @@
 package org.gradle.api.internal.artifacts.publish
 
 import org.gradle.api.Task
+import org.gradle.api.artifacts.PublishArtifact
+import org.gradle.api.internal.file.TestFiles
+import org.gradle.api.tasks.TaskDependency
 import spock.lang.Specification
 
 class DecoratingPublishArtifactTest extends Specification {
@@ -25,7 +28,7 @@ class DecoratingPublishArtifactTest extends Specification {
         def task = Stub(Task)
         def task2 = Stub(Task)
         def original = new DefaultPublishArtifact("name", "ext", "type", "classifier", new Date(), file, task)
-        def decorator = new DecoratingPublishArtifact(original)
+        def decorator = new DecoratingPublishArtifact(TestFiles.taskDependencyFactory(), original)
 
         expect:
         decorator.name == "name"
@@ -54,5 +57,27 @@ class DecoratingPublishArtifactTest extends Specification {
 
         then:
         decorator.classifier == null
+    }
+
+    def "if an explicit #field is set don't query the publish artifact"() {
+        def delegate = Mock(PublishArtifact) {
+            getBuildDependencies() >> Stub(TaskDependency)
+        }
+        def decorator = new DecoratingPublishArtifact(TestFiles.taskDependencyFactory(), delegate)
+        decorator."$field" = 'foo'
+
+        when:
+        decorator."$field"
+
+        then:
+        0 * delegate."$field"
+        0 * _
+
+        where:
+        field << [
+            'name',
+            'extension',
+            'type'
+        ]
     }
 }

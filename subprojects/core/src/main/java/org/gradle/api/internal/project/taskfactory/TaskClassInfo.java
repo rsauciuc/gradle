@@ -16,39 +16,37 @@
 
 package org.gradle.api.internal.project.taskfactory;
 
-import org.gradle.api.Action;
-import org.gradle.api.Task;
-import org.gradle.internal.Factory;
+import com.google.common.collect.ImmutableList;
+import org.gradle.internal.properties.annotations.TypeMetadata;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Optional;
 
 public class TaskClassInfo {
-    private TaskClassValidator validator;
-    private final List<Factory<Action<Task>>> taskActions = new ArrayList<Factory<Action<Task>>>();
-    private boolean incremental;
+    private final ImmutableList<TaskActionFactory> taskActionFactories;
+    private final boolean cacheable;
+    private final Optional<String> reasonNotToTrackState;
+    private final TypeMetadata typeMetadata;
 
-    public TaskClassValidator getValidator() {
-        return validator;
+    public TaskClassInfo(ImmutableList<TaskActionFactory> taskActionFactories, boolean cacheable, Optional<String> reasonNotToTrackState, TypeMetadata typeMetadata) {
+        this.taskActionFactories = taskActionFactories;
+        this.cacheable = cacheable;
+        this.reasonNotToTrackState = reasonNotToTrackState;
+        this.typeMetadata = typeMetadata;
     }
 
-    public void setValidator(TaskClassValidator validator) {
-        this.validator = validator;
-    }
-
-    public List<Factory<Action<Task>>> getTaskActions() {
-        return taskActions;
-    }
-
-    public boolean isIncremental() {
-        return incremental;
-    }
-
-    public void setIncremental(boolean incremental) {
-        this.incremental = incremental;
+    public ImmutableList<TaskActionFactory> getTaskActionFactories() {
+        return taskActionFactories;
     }
 
     public boolean isCacheable() {
-        return validator.isCacheable();
+        return cacheable;
+    }
+
+    public Optional<String> getReasonNotToTrackState() {
+        return reasonNotToTrackState;
+    }
+
+    public TypeMetadata getTypeMetadata() {
+        return typeMetadata;
     }
 }

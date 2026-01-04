@@ -17,6 +17,7 @@
 package org.gradle.integtests.composite
 
 import org.gradle.integtests.fixtures.build.BuildTestFile
+
 /**
  * Tests for resolving dependency artifacts with substitution within a composite build.
  */
@@ -74,7 +75,7 @@ class CompositeBuildDetectionIntegrationTest extends AbstractCompositeBuildInteg
         buildA.settingsFile << """
             includeBuild('${buildB.toURI()}') {
                 dependencySubstitution {
-                    substitute module('org.test:buildB:1.0') with project(':')
+                    substitute module('org.test:buildB:1.0') using project(':')
                 }
             }
 """

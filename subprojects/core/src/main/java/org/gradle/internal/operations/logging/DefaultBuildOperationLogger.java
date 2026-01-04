@@ -16,16 +16,19 @@
 
 package org.gradle.internal.operations.logging;
 
-import org.apache.commons.io.IOUtils;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
+import org.gradle.internal.IoActions;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.logging.ConsoleRenderer;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.nio.file.Files.newOutputStream;
 
 class DefaultBuildOperationLogger implements BuildOperationLogger {
     private final BuildOperationLogInfo configuration;
@@ -56,7 +59,7 @@ class DefaultBuildOperationLogger implements BuildOperationLogger {
     protected PrintWriter createWriter(File outputFile) {
         PrintWriter logWriter = null;
         try {
-            logWriter = new PrintWriter(new FileWriter(outputFile), true);
+            logWriter = new PrintWriter(new OutputStreamWriter(newOutputStream(outputFile.toPath()), UTF_8), true);
         } catch (IOException e) {
             UncheckedException.throwAsUncheckedException(e);
         }
@@ -87,7 +90,7 @@ class DefaultBuildOperationLogger implements BuildOperationLogger {
             }
             logInBoth(LogLevel.INFO, String.format("Finished %s, see full log %s.", configuration.getTaskName(), getLogLocation()));
         } finally {
-            IOUtils.closeQuietly(logWriter);
+            IoActions.closeQuietly(logWriter);
             started = false;
         }
     }
@@ -110,6 +113,7 @@ class DefaultBuildOperationLogger implements BuildOperationLogger {
         logWriter.println(message);
     }
 
+    @Override
     public String getLogLocation() {
         return new ConsoleRenderer().asClickableFileUrl(configuration.getOutputFile());
     }

@@ -15,39 +15,46 @@
  */
 package org.gradle.api.file
 
-import org.gradle.testfixtures.ProjectBuilder
 import org.gradle.api.Project
-
-import spock.lang.Specification
+import org.gradle.test.fixtures.file.TestFile
+import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
+import org.gradle.testfixtures.ProjectBuilder
+import org.gradle.util.UsesNativeServices
+import org.junit.ClassRule
 import spock.lang.Shared
-import spock.lang.Unroll
+import spock.lang.Specification
 
-// cannot use org.gradle.util.Resources here because the files it returns have already been canonicalized
+@Requires(UnitTestPreconditions.Symlinks)
+@UsesNativeServices
 class FileCollectionSymlinkTest extends Specification {
-    @Shared Project project = new ProjectBuilder().build()
+    @Shared Project project = ProjectBuilder.builder().build()
+    @Shared @ClassRule TestNameTestDirectoryProvider temporaryFolder = TestNameTestDirectoryProvider.newInstance(getClass())
+    @Shared TestFile baseDir = temporaryFolder.createDir('baseDir')
+    @Shared TestFile file = baseDir.file("file")
+    @Shared TestFile symlink = baseDir.file("symlink")
+    @Shared TestFile symlinked = baseDir.file("symlinked")
 
-    @Shared File baseDir = getTestFile("symlinks")
-    @Shared File file = new File(baseDir, "file")
-    @Shared File symlink = new File(baseDir, "symlink")
-    @Shared File symlinked = new File(baseDir, "symlinked")
+    def setupSpec() {
+        file.text = 'some contents'
+        symlinked.text = 'target of symlink'
+        symlink.createLink(symlinked)
+    }
 
-    @Unroll("#desc can handle symlinks")
-    def "file collection can handle symlinks"() {
+    def "#desc can handle symlinks"() {
         expect:
         fileCollection.contains(file)
         fileCollection.contains(symlink)
         fileCollection.contains(symlinked)
         fileCollection.files == [file, symlink, symlinked] as Set
 
-        (fileCollection - project.files(symlink)).files == [file, symlinked] as Set
+        (fileCollection - project.getLayout().files(symlink)).files == [file, symlinked] as Set
 
         where:
-        desc                 | fileCollection
-        "project.files()"    | project.files(file, symlink, symlinked)
-        "project.fileTree()" | project.fileTree(baseDir)
-    }
-
-    private static File getTestFile(String name) {
-        new File(FileCollectionSymlinkTest.getResource(name).toURI().path)
+        desc                                    | fileCollection
+        "project.files()"                       | project.files(file, symlink, symlinked)
+        "project.layout.files()"                | project.getLayout().files(file, symlink, symlinked)
+        "project.fileTree()"                    | project.fileTree(baseDir)
     }
 }

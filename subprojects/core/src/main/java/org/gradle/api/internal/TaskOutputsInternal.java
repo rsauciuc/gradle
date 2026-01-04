@@ -16,32 +16,36 @@
 
 package org.gradle.api.internal;
 
-import com.google.common.collect.ImmutableSortedSet;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.internal.tasks.TaskOutputFilePropertySpec;
-import org.gradle.api.specs.Spec;
+import org.gradle.api.internal.tasks.execution.SelfDescribingSpec;
+import org.gradle.api.specs.AndSpec;
 import org.gradle.api.tasks.TaskOutputs;
+import org.gradle.internal.properties.PropertyVisitor;
+import org.jspecify.annotations.NullMarked;
 
+import java.io.File;
+import java.util.List;
+import java.util.Set;
+
+@NullMarked
 public interface TaskOutputsInternal extends TaskOutputs {
 
-    Spec<? super TaskInternal> getUpToDateSpec();
+    /**
+     * Calls the corresponding visitor methods for all outputs added via the runtime API.
+     */
+    void visitRegisteredProperties(PropertyVisitor visitor);
 
-    ImmutableSortedSet<TaskOutputFilePropertySpec> getFileProperties();
+    AndSpec<? super TaskInternal> getUpToDateSpec();
+
+    void setPreviousOutputFiles(FileCollection previousOutputFiles);
 
     /**
-     * Returns the output files recorded during the previous execution of the task.
+     * Returns the output files and directories recorded during the previous execution of the task.
      */
-    FileCollection getPreviousOutputFiles();
+    Set<File> getPreviousOutputFiles();
 
-    void setHistory(TaskExecutionHistory history);
+    List<SelfDescribingSpec<TaskInternal>> getCacheIfSpecs();
 
-    /**
-     * Yields information about the cacheability of the outputs.
-     */
-    TaskOutputCachingState getCachingState();
+    List<SelfDescribingSpec<TaskInternal>> getDoNotCacheIfSpecs();
 
-    /**
-     * Returns whether the task has declared any outputs.
-     */
-    boolean hasDeclaredOutputs();
 }

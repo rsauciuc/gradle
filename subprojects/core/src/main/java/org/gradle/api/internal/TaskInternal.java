@@ -18,19 +18,23 @@ package org.gradle.api.internal;
 
 import org.gradle.api.Action;
 import org.gradle.api.Task;
-import org.gradle.api.internal.tasks.ContextAwareTaskAction;
-import org.gradle.api.internal.tasks.TaskExecuter;
+import org.gradle.api.internal.project.taskfactory.TaskIdentity;
+import org.gradle.api.internal.tasks.InputChangesAwareTaskAction;
+import org.gradle.api.internal.tasks.TaskRequiredServices;
 import org.gradle.api.internal.tasks.TaskStateInternal;
-import org.gradle.api.internal.tasks.execution.TaskValidator;
+import org.gradle.api.internal.tasks.properties.ServiceReferenceSpec;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.TaskDependency;
 import org.gradle.internal.Factory;
-import org.gradle.logging.StandardOutputCapture;
+import org.gradle.internal.logging.StandardOutputCapture;
+import org.gradle.internal.resources.ResourceLock;
 import org.gradle.util.Configurable;
 import org.gradle.util.Path;
 
 import java.io.File;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 public interface TaskInternal extends Task, Configurable<Task> {
@@ -41,34 +45,69 @@ public interface TaskInternal extends Task, Configurable<Task> {
      * once they start executing.
      */
     @Internal
-    List<ContextAwareTaskAction> getTaskActions();
+    List<InputChangesAwareTaskAction> getTaskActions();
+
+    /**
+     * Sets the task actions for this task. Used by the configuration cache when restoring the task.
+     *
+     * @param taskActions the actions to restore
+     */
+    void restoreTaskActions(List<InputChangesAwareTaskAction> taskActions);
 
     @Internal
-    Set<ClassLoader> getActionClassLoaders();
+    boolean hasTaskActions();
 
     @Internal
     Spec<? super TaskInternal> getOnlyIf();
 
-    void execute();
+    /**
+     * Sets the only-if condition for this task without any decoration. Used by the configuration cache when restoring the task.
+     *
+     * @param onlyIf the spec to restore
+     */
+    void restoreOnlyIf(Spec<? super TaskInternal> onlyIf);
+
+    /**
+     * Returns the combined reasons to not track state in a single String.
+     *
+     * Gradle considers the task as untracked if the reason is present.
+     * When not tracking state, a reason must be present. Hence the {@code Optional} represents the state of enablement, too.
+     *
+     * @see org.gradle.api.tasks.UntrackedTask
+     */
+    @Internal
+    Optional<String> getReasonNotToTrackState();
+
+    /**
+     * Returns the individual reasons to not track the task state.  This is used for serializing the reasons to the
+     * configuration cache.
+     */
+    @Internal
+    Set<String> getReasonsNotToTrackState();
+
+    /**
+     * Sets a condition to not track the task state when the given spec matches.  This condition will be evaluated when the return
+     * value of {@link #getReasonNotToTrackState()} is queried.
+     *
+     * @param reason - the reason for not tracking the task state when the condition matches
+     * @param spec - the condition to evaluate
+     */
+    void doNotTrackStateIf(String reason, Spec<? super TaskInternal> spec);
+
+    @Internal
+    boolean isCompatibleWithConfigurationCache();
+
+    @Internal
+    Optional<String> getReasonTaskIsIncompatibleWithConfigurationCache();
 
     @Internal
     StandardOutputCapture getStandardOutputCapture();
-
-    @Internal
-    TaskExecuter getExecuter();
-
-    void setExecuter(TaskExecuter executer);
 
     @Override
     TaskInputsInternal getInputs();
 
     @Override
     TaskOutputsInternal getOutputs();
-
-    @Internal
-    List<TaskValidator> getValidators();
-
-    void addValidator(TaskValidator validator);
 
     @Override
     TaskStateInternal getState();
@@ -95,4 +134,26 @@ public interface TaskInternal extends Task, Configurable<Task> {
 
     @Internal
     Path getIdentityPath();
+
+    @Internal
+    TaskIdentity<?> getTaskIdentity();
+
+    @Internal
+    TaskRequiredServices getRequiredServices();
+
+    void acceptServiceReferences(Set<ServiceReferenceSpec> serviceReferences);
+
+    /**
+     * <p>Gets the shared resources required by this task.</p>
+     */
+    @Internal
+    List<? extends ResourceLock> getSharedResources();
+
+    /**
+     * "Lifecycle dependencies" are dependencies of this task declared via an explicit {@link Task#dependsOn(Object...)} call,
+     * as opposed to the recommended approach of connecting producer tasks' outputs to consumer tasks' inputs.
+     * @return the dependencies of this task declared via an explicit {@link Task#dependsOn(Object...)}
+     */
+    @Internal
+    TaskDependency getLifecycleDependencies();
 }

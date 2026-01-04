@@ -16,9 +16,10 @@
 
 package org.gradle.internal.typeconversion
 
+import org.gradle.internal.exceptions.DiagnosticsVisitor
 import spock.lang.Specification
 
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
+import static org.gradle.util.internal.TextUtil.toPlatformLineSeparators
 
 class NotationParserBuilderSpec extends Specification {
 
@@ -32,6 +33,7 @@ class NotationParserBuilderSpec extends Specification {
 
     def "can add a converter"() {
         def converter = Mock(NotationConverter)
+
         given:
         converter.convert(_, _) >> { Object n, NotationConvertResult result -> result.converted("[${n}]") }
 
@@ -40,6 +42,22 @@ class NotationParserBuilderSpec extends Specification {
 
         expect:
         parser.parseNotation(12) == "[12]"
+    }
+
+    def "can add multiple converters"() {
+        def converter1 = Mock(NotationConverter)
+        def converter2 = Mock(NotationConverter)
+
+        given:
+        _ * converter1.convert(12, _) >> { Object n, NotationConvertResult result -> result.converted("[12]") }
+        converter2.convert(true, _) >> { Object n, NotationConvertResult result -> result.converted("True") }
+
+        and:
+        def parser = NotationParserBuilder.toType(String.class).converter(converter1).converter(converter2).toComposite()
+
+        expect:
+        parser.parseNotation(12) == "[12]"
+        parser.parseNotation(true) == "True"
     }
 
     def "can add a converter that converts notations of a given type"() {
@@ -90,6 +108,41 @@ class NotationParserBuilderSpec extends Specification {
 
         expect:
         parser.parseNotation(null) == "[null]"
+    }
+
+    def "reports available formats when accepts any notation type"() {
+        def converter = Mock(NotationConverter)
+
+        given:
+        converter.describe(_) >> { DiagnosticsVisitor visitor -> visitor.candidate("a string containing a greeting").example("'hello world'") }
+        def parser = NotationParserBuilder.toType(Number).fromType(String, converter).toComposite()
+
+        when:
+        parser.parseNotation(false)
+
+        then:
+        UnsupportedNotationException e = thrown()
+        e.message == toPlatformLineSeparators("""Cannot convert the provided notation to an object of type Number: false.
+The following types/formats are supported:
+  - Instances of Number.
+  - a string containing a greeting, for example 'hello world'.""")
+    }
+
+    def "reports available formats when accepts notation type that is not assignable to target type"() {
+        def converter = Mock(NotationConverter)
+
+        given:
+        converter.describe(_) >> { DiagnosticsVisitor visitor -> visitor.candidate("a string containing a greeting").example("'hello world'") }
+        def parser = NotationParserBuilder.builder(String, Number).fromType(String, converter).toComposite()
+
+        when:
+        parser.parseNotation("broken")
+
+        then:
+        UnsupportedNotationException e = thrown()
+        e.message == toPlatformLineSeparators("""Cannot convert the provided notation to an object of type Number: broken.
+The following types/formats are supported:
+  - a string containing a greeting, for example 'hello world'.""")
     }
 
     def "can tweak the conversion error messages"() {

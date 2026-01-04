@@ -15,20 +15,20 @@
  */
 package org.gradle.api.internal.project.antbuilder;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.gradle.api.Action;
-import org.gradle.api.internal.classloading.GroovySystemLoader;
-import org.gradle.api.internal.classloading.GroovySystemLoaderFactory;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
 import org.gradle.internal.Factory;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.concurrent.Stoppable;
+import org.gradle.internal.groovyloader.GroovySystemLoader;
+import org.gradle.internal.groovyloader.GroovySystemLoaderFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -41,15 +41,15 @@ import java.util.concurrent.locks.ReentrantLock;
  * cleared before we have a chance to clean it up. So we use a PhantomReference to the cached class loader, in addition to the soft reference, to finalize the class loader before it gets kicked off
  * the cache.
  */
-public class ClassPathToClassLoaderCache implements Stoppable {
-    private final static Logger LOG = Logging.getLogger(ClassPathToClassLoaderCache.class);
+class ClassPathToClassLoaderCache implements Stoppable {
+    private final static Logger LOG = LoggerFactory.getLogger(ClassPathToClassLoaderCache.class);
 
     private final FinalizerThread finalizerThread;
 
     // Protects the following fields
     private final Lock lock = new ReentrantLock();
-    private final Map<ClassPath, CacheEntry> cacheEntries = Maps.newConcurrentMap();
-    private final Set<CachedClassLoader> inUseClassLoaders = Sets.newHashSet();
+    private final Map<ClassPath, CacheEntry> cacheEntries = new ConcurrentHashMap<>();
+    private final Set<CachedClassLoader> inUseClassLoaders = new HashSet<>();
     private final GroovySystemLoaderFactory groovySystemLoaderFactory;
 
     public ClassPathToClassLoaderCache(GroovySystemLoaderFactory groovySystemLoaderFactory) {
@@ -58,6 +58,7 @@ public class ClassPathToClassLoaderCache implements Stoppable {
         this.finalizerThread.start();
     }
 
+    @Override
     public void stop() {
         finalizerThread.exit();
         try {

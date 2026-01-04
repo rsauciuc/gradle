@@ -16,18 +16,18 @@
 
 package org.gradle.process.internal
 
-import org.apache.commons.lang.RandomStringUtils
+import org.apache.commons.lang3.RandomStringUtils
 import org.gradle.api.Action
 import org.gradle.internal.event.ListenerBroadcast
 import org.gradle.internal.jvm.Jvm
+import org.gradle.process.ProcessExecutionException
 import org.gradle.process.internal.worker.WorkerProcess
 import org.gradle.process.internal.worker.WorkerProcessBuilder
 import org.gradle.process.internal.worker.WorkerProcessContext
 import org.gradle.test.fixtures.file.TestFile
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
 import spock.lang.Timeout
-import spock.lang.Unroll
 
 import static org.junit.Assert.assertFalse
 import static org.junit.Assert.assertTrue
@@ -42,8 +42,7 @@ class PathLimitationIntegrationTest extends AbstractWorkerProcessIntegrationSpec
         broadcast.add(listenerMock)
     }
 
-    @Requires(TestPrecondition.NOT_WINDOWS)
-    @Unroll
+    @Requires(UnitTestPreconditions.NotWindows)
     def "WorkerProcessBuilder handles workingDir with absolute path length #absolutePathLength"() {
         when:
         def testWorkingDir = generateTestWorkingDirectory(absolutePathLength)
@@ -54,8 +53,7 @@ class PathLimitationIntegrationTest extends AbstractWorkerProcessIntegrationSpec
         absolutePathLength << [258, 259, 260]
     }
 
-    @Requires(TestPrecondition.NOT_WINDOWS)
-    @Unroll
+    @Requires(UnitTestPreconditions.NotWindows)
     def "JavaProcessBuilder handles workingDir with absolute path length #absolutePathLength"() {
         when:
         def testWorkingDir = generateTestWorkingDirectory(absolutePathLength)
@@ -129,7 +127,7 @@ class PathLimitationIntegrationTest extends AbstractWorkerProcessIntegrationSpec
             try {
                 proc.start();
                 assertFalse(startFails);
-            } catch (ExecException e) {
+            } catch (ProcessExecutionException e) {
                 e.printStackTrace()
                 assertTrue(startFails);
                 return;
@@ -145,7 +143,7 @@ class PathLimitationIntegrationTest extends AbstractWorkerProcessIntegrationSpec
             try {
                 proc.waitForStop();
                 assertFalse("Expected process to fail", stopFails);
-            } catch (ExecException e) {
+            } catch (ProcessExecutionException e) {
                 assertTrue("Unexpected failure in worker process", stopFails);
             }
         }

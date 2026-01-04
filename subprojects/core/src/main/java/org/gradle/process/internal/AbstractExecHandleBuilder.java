@@ -1,5 +1,5 @@
 /*
- * Copyright 2010 the original author or authors.
+ * Copyright 2024 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,139 +15,109 @@
  */
 package org.gradle.process.internal;
 
-import org.apache.commons.lang.StringUtils;
-import org.gradle.internal.file.PathToFileResolver;
 import org.gradle.process.BaseExecSpec;
-import org.gradle.process.internal.streams.SafeStreams;
-import org.gradle.process.internal.streams.StreamsForwarder;
-import org.gradle.process.internal.streams.StreamsHandler;
 
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-public abstract class AbstractExecHandleBuilder extends DefaultProcessForkOptions implements BaseExecSpec {
-    private OutputStream standardOutput;
-    private OutputStream errorOutput;
-    private InputStream input;
-    private String displayName;
-    private final List<ExecHandleListener> listeners = new ArrayList<ExecHandleListener>();
-    boolean ignoreExitValue;
-    boolean redirectErrorStream;
-    private StreamsHandler streamsHandler;
-    private int timeoutMillis = Integer.MAX_VALUE;
-    protected boolean daemon;
+/**
+ * Deprecated. Will be removed in Gradle 10. Kept for now it's subclass is used by the Kotlin plugin.
+ */
+@Deprecated
+public abstract class AbstractExecHandleBuilder implements BaseExecSpec {
 
-    public AbstractExecHandleBuilder(PathToFileResolver fileResolver) {
-        super(fileResolver);
-        standardOutput = SafeStreams.systemOut();
-        errorOutput = SafeStreams.systemErr();
-        input = SafeStreams.emptyInput();
+    protected final ClientExecHandleBuilder delegate;
+    private boolean ignoreExitValue;
+
+    AbstractExecHandleBuilder(ClientExecHandleBuilder delegate) {
+        this.delegate = delegate;
     }
 
     public abstract List<String> getAllArguments();
 
+    @Override
     public List<String> getCommandLine() {
-        List<String> commandLine = new ArrayList<String>();
+        List<String> commandLine = new ArrayList<>();
         commandLine.add(getExecutable());
         commandLine.addAll(getAllArguments());
         return commandLine;
     }
 
+    @Override
     public AbstractExecHandleBuilder setStandardInput(InputStream inputStream) {
-        this.input = inputStream;
+        delegate.setStandardInput(inputStream);
         return this;
     }
 
+    @Override
     public InputStream getStandardInput() {
-        return input;
+        return delegate.getStandardInput();
     }
 
+    @Override
     public AbstractExecHandleBuilder setStandardOutput(OutputStream outputStream) {
-        if (outputStream == null) {
-            throw new IllegalArgumentException("outputStream == null!");
-        }
-        this.standardOutput = outputStream;
+        delegate.setStandardOutput(outputStream);
         return this;
     }
 
+    @Override
     public OutputStream getStandardOutput() {
-        return standardOutput;
+        return delegate.getStandardOutput();
     }
 
+    @Override
     public AbstractExecHandleBuilder setErrorOutput(OutputStream outputStream) {
-        if (outputStream == null) {
-            throw new IllegalArgumentException("outputStream == null!");
-        }
-        this.errorOutput = outputStream;
+        delegate.setErrorOutput(outputStream);
         return this;
     }
 
+    @Override
     public OutputStream getErrorOutput() {
-        return errorOutput;
+        return delegate.getErrorOutput();
     }
 
+    @Override
     public boolean isIgnoreExitValue() {
         return ignoreExitValue;
     }
 
+    @Override
     public AbstractExecHandleBuilder setIgnoreExitValue(boolean ignoreExitValue) {
         this.ignoreExitValue = ignoreExitValue;
         return this;
     }
 
-    public String getDisplayName() {
-        return displayName == null ? String.format("command '%s'", getExecutable()) : displayName;
-    }
-
     public AbstractExecHandleBuilder setDisplayName(String displayName) {
-        this.displayName = displayName;
+        delegate.setDisplayName(displayName);
         return this;
     }
 
     public AbstractExecHandleBuilder listener(ExecHandleListener listener) {
-        if (listeners == null) {
-            throw new IllegalArgumentException("listeners == null!");
-        }
-        this.listeners.add(listener);
+        delegate.listener(listener);
         return this;
-    }
-
-    public ExecHandle build() {
-        String executable = getExecutable();
-        if (StringUtils.isEmpty(executable)) {
-            throw new IllegalStateException("execCommand == null!");
-        }
-
-        StreamsHandler effectiveHandler = getEffectiveStreamsHandler();
-        return new DefaultExecHandle(getDisplayName(), getWorkingDir(), executable, getAllArguments(), getActualEnvironment(),
-                effectiveHandler, listeners, redirectErrorStream, timeoutMillis, daemon);
-    }
-
-    private StreamsHandler getEffectiveStreamsHandler() {
-        StreamsHandler effectiveHandler;
-        if (this.streamsHandler != null) {
-            effectiveHandler = this.streamsHandler;
-        } else {
-            boolean shouldReadErrorStream = !redirectErrorStream;
-            effectiveHandler = new StreamsForwarder(standardOutput, errorOutput, input, shouldReadErrorStream);
-        }
-        return effectiveHandler;
     }
 
     public AbstractExecHandleBuilder streamsHandler(StreamsHandler streamsHandler) {
-        this.streamsHandler = streamsHandler;
+        delegate.streamsHandler(streamsHandler);
         return this;
     }
 
+    /**
+     * Merge the process' error stream into its output stream
+     */
     public AbstractExecHandleBuilder redirectErrorStream() {
-        this.redirectErrorStream = true;
+        delegate.redirectErrorStream();
         return this;
     }
 
     public AbstractExecHandleBuilder setTimeout(int timeoutMillis) {
-        this.timeoutMillis = timeoutMillis;
+        delegate.setTimeout(timeoutMillis);
         return this;
+    }
+
+    public ExecHandle build() {
+        return delegate.build();
     }
 }

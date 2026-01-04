@@ -16,10 +16,14 @@
 
 package org.gradle.api
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
+import spock.lang.Issue
 
-import static org.hamcrest.Matchers.containsString
+import static org.hamcrest.CoreMatchers.containsString
 
-public class BuildScriptErrorIntegrationTest extends AbstractIntegrationSpec {
+class BuildScriptErrorIntegrationTest extends AbstractIntegrationSpec {
 
     def "setup"() {
         settingsFile << "rootProject.name = 'ProjectError'"
@@ -70,7 +74,10 @@ public class BuildScriptErrorIntegrationTest extends AbstractIntegrationSpec {
                 .assertHasLineNumber(2)
     }
 
+    @Issue("https://github.com/gradle/gradle/issues/29159")
+    @ToBeFixedForIsolatedProjects(because = "evaluationDependsOn is not IP compatible")
     def "produces reasonable error message when nested buildFile evaluation fails"() {
+        createDirs("child")
         settingsFile << """
 include 'child'
 """
@@ -96,7 +103,12 @@ include 'child'
                 .assertHasLineNumber(3)
     }
 
+    @Requires(
+        value = IntegTestPreconditions.NotIsolatedProjects,
+        reason = "Exercises IP incompatible behavior: Groovy method inheritance"
+    )
     def "produces reasonable error message from a method inherited from a script containing only methods"() {
+        createDirs("child")
         settingsFile << """
 include 'child'
 """
@@ -123,5 +135,46 @@ def doSomething() {
                 .assertHasCause("failure")
                 .assertHasFileName("Build file '$buildFile'")
                 .assertHasLineNumber(4)
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/14984")
+    def "referencing a non-existing closure-taking method yields a helpful error message"() {
+        buildFile << """
+            plugins {
+                id("java")
+            }
+
+            java {
+                toolchains { // should be toolchain
+                }
+            }
+        """
+
+        expect:
+        fails()
+        failure.assertThatCause(containsNormalizedString("Could not find method toolchains() for arguments"))
+        failure.assertThatCause(containsNormalizedString(" on extension 'java' of type org.gradle.api.plugins.internal.DefaultJavaPluginExtension."))
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/19282")
+    def "referencing non-existing method within a closure yields a helpful error message"() {
+        buildFile << """
+            plugins {
+                id("java")
+            }
+            testing {
+                suites {
+                    test {
+                        dependencies {
+                            implementation(iDontExist('foo-bar'))
+                        }
+                    }
+                }
+            }
+        """
+
+        expect:
+        fails()
+        failure.assertHasCause("Could not find method iDontExist() for arguments [foo-bar] on property 'dependencies' of type java.lang.Object.")
     }
 }

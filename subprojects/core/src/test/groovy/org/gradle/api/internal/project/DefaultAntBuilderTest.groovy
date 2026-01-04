@@ -25,13 +25,12 @@ import org.gradle.api.internal.project.ant.AntLoggingAdapter
 import org.gradle.api.tasks.ant.AntTarget
 import org.gradle.test.fixtures.AbstractProjectBuilderSpec
 import spock.lang.Issue
-import spock.lang.Unroll
 
 import java.lang.reflect.Field
 
-import static org.hamcrest.Matchers.not
-import static org.hamcrest.Matchers.sameInstance
-import static org.junit.Assert.assertThat
+import static org.hamcrest.CoreMatchers.not
+import static org.hamcrest.CoreMatchers.sameInstance
+import static org.hamcrest.MatcherAssert.assertThat
 
 class DefaultAntBuilderTest extends AbstractProjectBuilderSpec {
     private final AntLoggingAdapter loggingAdapter = Mock(AntLoggingAdapter)
@@ -164,7 +163,7 @@ class DefaultAntBuilderTest extends AbstractProjectBuilderSpec {
         ant.antProject.targets.size() == 0
 
         when:
-        Field field = groovy.util.AntBuilder.class.getDeclaredField('collectorTarget')
+        Field field = groovy.ant.AntBuilder.class.getDeclaredField('collectorTarget')
         field.accessible = true
         Target target = field.get(ant)
         field = target.class.getDeclaredField('children')
@@ -233,7 +232,6 @@ class DefaultAntBuilderTest extends AbstractProjectBuilderSpec {
         level == AntMessagePriority.DEBUG
     }
 
-    @Unroll
     @Issue('GRADLE-3511')
     def 'Filename #filename is properly masked when adding it as #antType to an ant task'(String filename, antType) {
         given:
@@ -242,7 +240,7 @@ class DefaultAntBuilderTest extends AbstractProjectBuilderSpec {
         project.file(dirname).mkdir()
         File fileWithDollars = project.file(dirAndFile)
         fileWithDollars << "Some Text"
-        FileCollection files = project.files(dirAndFile)
+        FileCollection files = project.getLayout().files(dirAndFile)
 
         when:
         ant.property(name: "my.property", value: "doesNotExist")

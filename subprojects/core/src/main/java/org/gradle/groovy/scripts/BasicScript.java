@@ -20,26 +20,30 @@ import groovy.lang.Binding;
 import groovy.lang.MissingMethodException;
 import groovy.lang.MissingPropertyException;
 import org.gradle.api.internal.DynamicObjectAware;
-import org.gradle.api.internal.DynamicObjectUtil;
-import org.gradle.api.internal.ProcessOperations;
-import org.gradle.api.internal.file.FileOperations;
+import org.gradle.api.internal.project.DynamicLookupRoutine;
 import org.gradle.internal.logging.StandardOutputCapture;
 import org.gradle.internal.metaobject.AbstractDynamicObject;
 import org.gradle.internal.metaobject.BeanDynamicObject;
 import org.gradle.internal.metaobject.DynamicInvokeResult;
 import org.gradle.internal.metaobject.DynamicObject;
+import org.gradle.internal.metaobject.DynamicObjectUtil;
+import org.gradle.internal.scripts.GradleScript;
 import org.gradle.internal.service.ServiceRegistry;
+import org.jspecify.annotations.Nullable;
 
 import java.io.PrintStream;
 import java.util.Map;
 
-public abstract class BasicScript extends org.gradle.groovy.scripts.Script implements org.gradle.api.Script, FileOperations, ProcessOperations, DynamicObjectAware {
+public abstract class BasicScript extends org.gradle.groovy.scripts.Script implements org.gradle.api.Script, DynamicObjectAware, GradleScript {
     private StandardOutputCapture standardOutputCapture;
     private Object target;
-    private ScriptDynamicObject dynamicObject = new ScriptDynamicObject(this);
+    private final ScriptDynamicObject dynamicObject = new ScriptDynamicObject(this);
+    private DynamicLookupRoutine dynamicLookupRoutine;
 
+    @Override
     public void init(Object target, ServiceRegistry services) {
         standardOutputCapture = services.get(StandardOutputCapture.class);
+        dynamicLookupRoutine = services.get(DynamicLookupRoutine.class);
         setScriptTarget(target);
     }
 
@@ -52,6 +56,7 @@ public abstract class BasicScript extends org.gradle.groovy.scripts.Script imple
         this.dynamicObject.setTarget(target);
     }
 
+    @Override
     public StandardOutputCapture getStandardOutputCapture() {
         return standardOutputCapture;
     }
@@ -62,25 +67,25 @@ public abstract class BasicScript extends org.gradle.groovy.scripts.Script imple
 
     @Override
     public Object getProperty(String property) {
-        return dynamicObject.getProperty(property);
+        return dynamicLookupRoutine.property(dynamicObject, property);
     }
 
     @Override
     public void setProperty(String property, Object newValue) {
-        dynamicObject.setProperty(property, newValue);
+        dynamicLookupRoutine.setProperty(dynamicObject, property, newValue);
     }
 
-    public Map<String, ?> getProperties() {
-        return dynamicObject.getProperties();
+    public Map<String, ? extends @Nullable Object> getProperties() {
+        return dynamicLookupRoutine.getProperties(dynamicObject);
     }
 
     public boolean hasProperty(String property) {
-        return dynamicObject.hasProperty(property);
+        return dynamicLookupRoutine.hasProperty(dynamicObject, property);
     }
 
     @Override
     public Object invokeMethod(String name, Object args) {
-        return dynamicObject.invokeMethod(name, (Object[]) args);
+        return dynamicLookupRoutine.invokeMethod(dynamicObject, name, (Object[]) args);
     }
 
     @Override
@@ -111,7 +116,7 @@ public abstract class BasicScript extends org.gradle.groovy.scripts.Script imple
         }
 
         @Override
-        public Map<String, ?> getProperties() {
+        public Map<String, ? extends @Nullable Object> getProperties() {
             return dynamicTarget.getProperties();
         }
 
@@ -149,6 +154,11 @@ public abstract class BasicScript extends org.gradle.groovy.scripts.Script imple
         @Override
         public DynamicInvokeResult trySetProperty(String property, Object newValue) {
             return dynamicTarget.trySetProperty(property, newValue);
+        }
+
+        @Override
+        public DynamicInvokeResult trySetPropertyWithoutInstrumentation(String name, Object value) {
+            return dynamicTarget.trySetPropertyWithoutInstrumentation(name, value);
         }
 
         @Override

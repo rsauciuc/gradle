@@ -16,21 +16,23 @@
 
 package org.gradle.process.internal.worker;
 
-import org.gradle.api.Nullable;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.concurrent.AsyncStoppable;
 import org.gradle.internal.concurrent.CompositeStoppable;
+import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.remote.ConnectionAcceptor;
 import org.gradle.internal.remote.ObjectConnection;
+import org.gradle.process.ProcessExecutionException;
 import org.gradle.process.ExecResult;
-import org.gradle.process.internal.ExecException;
 import org.gradle.process.internal.ExecHandle;
 import org.gradle.process.internal.ExecHandleListener;
 import org.gradle.process.internal.health.memory.JvmMemoryStatus;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Date;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -46,6 +48,7 @@ public class DefaultWorkerProcess implements WorkerProcess {
     private ConnectionAcceptor acceptor;
     private ExecHandle execHandle;
     private boolean running;
+    private boolean aborted;
     private Throwable processFailure;
     private final long connectTimeout;
     private final JvmMemoryStatus jvmMemoryStatus;
@@ -64,12 +67,34 @@ public class DefaultWorkerProcess implements WorkerProcess {
         }
     }
 
+    @Override
+    public void stopNow() {
+        lock.lock();
+        try {
+            aborted = true;
+            if (connection != null) {
+                connection.abort();
+            }
+        } finally {
+            lock.unlock();
+
+            // cleanup() will abort the process as desired
+            cleanup();
+        }
+    }
+
     public void setExecHandle(ExecHandle execHandle) {
         this.execHandle = execHandle;
         execHandle.addListener(new ExecHandleListener() {
+            @Override
+            public void beforeExecutionStarted(ExecHandle execHandle) {
+            }
+
+            @Override
             public void executionStarted(ExecHandle execHandle) {
             }
 
+            @Override
             public void executionFinished(ExecHandle execHandle, ExecResult execResult) {
                 onProcessStop(execResult);
             }
@@ -94,12 +119,15 @@ public class DefaultWorkerProcess implements WorkerProcess {
         lock.lock();
         try {
             LOGGER.debug("Received connection {} from {}", connection, execHandle);
-            
+
             if (connectionHandler != null && running) {
                 connectionHandler.run();
             }
 
             this.connection = connection;
+            if (aborted) {
+                connection.abort();
+            }
             condition.signalAll();
             stoppable = acceptor;
         } finally {
@@ -127,6 +155,11 @@ public class DefaultWorkerProcess implements WorkerProcess {
     }
 
     @Override
+    public String getDisplayName() {
+        return execHandle.getDisplayName();
+    }
+
+    @Override
     public String toString() {
         return "DefaultWorkerProcess{"
                 + "running=" + running
@@ -134,10 +167,12 @@ public class DefaultWorkerProcess implements WorkerProcess {
                 + '}';
     }
 
+    @Override
     public ObjectConnection getConnection() {
         return connection;
     }
 
+    @Override
     public WorkerProcess start() {
         try {
             doStart();
@@ -164,7 +199,7 @@ public class DefaultWorkerProcess implements WorkerProcess {
             while (connection == null && running) {
                 try {
                     if (!condition.awaitUntil(connectExpiry)) {
-                        throw new ExecException(format("Unable to connect to the child process '%s'.\n"
+                        throw new ProcessExecutionException(format("Unable to connect to the child process '%s'.\n"
                                 + "It is likely that the child process have crashed - please find the stack trace in the build log.\n"
                                 + "This exception might occur when the build machine is extremely loaded.\n"
                                 + "The connection attempt hit a timeout after %.1f seconds (last known process state: %s, running: %s).", execHandle, ((double) connectTimeout) / 1000, execHandle.getState(), running));
@@ -177,14 +212,19 @@ public class DefaultWorkerProcess implements WorkerProcess {
                 if (processFailure != null) {
                     throw UncheckedException.throwAsUncheckedException(processFailure);
                 } else {
-                    throw new ExecException(format("Never received a connection from %s.", execHandle));
+                    throw new ProcessExecutionException(format("Never received a connection from %s.", execHandle));
                 }
             }
         } finally {
             lock.unlock();
         }
+
+        // Inform the exec handle to clear the startup context, so that it can be garbage collected
+        // This may contain references to tasks, projects, and builds which we don't want to keep around
+        execHandle.removeStartupContext();
     }
 
+    @Override
     public ExecResult waitForStop() {
         try {
             return execHandle.waitForFinish().assertNormalExitValue();
@@ -193,12 +233,21 @@ public class DefaultWorkerProcess implements WorkerProcess {
         }
     }
 
+    @Override
+    public Optional<ExecResult> getExecResult() {
+        return Optional.ofNullable(execHandle.getExecResult());
+    }
+
     private void cleanup() {
         CompositeStoppable stoppable;
-        execHandle.abort();
         lock.lock();
         try {
-            stoppable = CompositeStoppable.stoppable(acceptor, connection);
+            stoppable = CompositeStoppable.stoppable(connection, new Stoppable() {
+                @Override
+                public void stop() {
+                    execHandle.abort();
+                }
+            }, acceptor);
         } finally {
             this.connection = null;
             this.acceptor = null;

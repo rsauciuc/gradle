@@ -17,28 +17,32 @@
 package org.gradle.composite.internal;
 
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
 import org.gradle.api.Action;
-import org.gradle.api.Transformer;
 import org.gradle.api.artifacts.DependencySubstitution;
 import org.gradle.api.artifacts.ModuleIdentifier;
 import org.gradle.api.artifacts.ModuleVersionIdentifier;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
 import org.gradle.api.artifacts.component.ComponentSelector;
 import org.gradle.api.artifacts.component.ModuleComponentSelector;
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
+import org.gradle.api.artifacts.component.ProjectComponentSelector;
 import org.gradle.api.internal.artifacts.DependencySubstitutionInternal;
-import org.gradle.api.internal.artifacts.ImmutableModuleIdentifierFactory;
-import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.VersionSelectionReasons;
+import org.gradle.api.internal.artifacts.ProjectComponentIdentifierInternal;
+import org.gradle.api.internal.artifacts.ivyservice.resolveengine.result.ComponentSelectionReasons;
+import org.gradle.api.internal.attributes.AttributeContainerInternal;
 import org.gradle.internal.Pair;
 import org.gradle.internal.component.local.model.DefaultProjectComponentSelector;
 import org.gradle.internal.resolve.ModuleVersionResolveException;
-import org.gradle.util.CollectionUtils;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * Provides a dependency substitution rule for composite build,
@@ -47,11 +51,9 @@ import java.util.SortedSet;
 public class CompositeBuildDependencySubstitutions implements Action<DependencySubstitution> {
     private static final Logger LOGGER = LoggerFactory.getLogger(CompositeBuildDependencySubstitutions.class);
 
-    private final ImmutableModuleIdentifierFactory moduleIdentifierFactory;
     private final Multimap<ModuleIdentifier, ProjectComponentIdentifier> replacementMap = ArrayListMultimap.create();
 
-    public CompositeBuildDependencySubstitutions(Collection<Pair<ModuleVersionIdentifier, ProjectComponentIdentifier>> replacements, ImmutableModuleIdentifierFactory moduleIdentifierFactory) {
-        this.moduleIdentifierFactory = moduleIdentifierFactory;
+    public CompositeBuildDependencySubstitutions(Collection<Pair<ModuleVersionIdentifier, ProjectComponentIdentifier>> replacements) {
         for (Pair<ModuleVersionIdentifier, ProjectComponentIdentifier> replacement : replacements) {
             replacementMap.put(replacement.getLeft().getModule(), replacement.getRight());
         }
@@ -64,34 +66,39 @@ public class CompositeBuildDependencySubstitutions implements Action<DependencyS
         ComponentSelector requested = dependencySubstitution.getTarget();
         if (requested instanceof ModuleComponentSelector) {
             ModuleComponentSelector selector = (ModuleComponentSelector) requested;
-            ProjectComponentIdentifier replacement = getReplacementFor(selector);
+            ProjectComponentIdentifierInternal replacement = getReplacementFor(selector);
             if (replacement != null) {
+                ProjectComponentSelector targetProject = new DefaultProjectComponentSelector(
+                    replacement.getProjectIdentity(),
+                    ((AttributeContainerInternal)requested.getAttributes()).asImmutable(),
+                    ImmutableSet.copyOf(requested.getCapabilitySelectors())
+                );
                 dependencySubstitution.useTarget(
-                    DefaultProjectComponentSelector.newSelector(replacement),
-                    VersionSelectionReasons.COMPOSITE_BUILD);
+                    targetProject,
+                    ComponentSelectionReasons.COMPOSITE_BUILD);
             }
         }
     }
 
-    private ProjectComponentIdentifier getReplacementFor(ModuleComponentSelector selector) {
-        ModuleIdentifier candidateId = moduleIdentifierFactory.module(selector.getGroup(), selector.getModule());
+    @Nullable
+    private ProjectComponentIdentifierInternal getReplacementFor(ModuleComponentSelector selector) {
+        ModuleIdentifier candidateId = selector.getModuleIdentifier();
         Collection<ProjectComponentIdentifier> providingProjects = replacementMap.get(candidateId);
         if (providingProjects.isEmpty()) {
-            LOGGER.info("Found no composite build substitute for module '" + candidateId + "'.");
+            LOGGER.debug("Found no composite build substitute for module '{}'.", candidateId);
             return null;
         }
         if (providingProjects.size() == 1) {
             ProjectComponentIdentifier match = providingProjects.iterator().next();
-            LOGGER.info("Found project '" + match + "' as substitute for module '" + candidateId + "'.");
-            return match;
+            LOGGER.info("Found project '{}' as substitute for module '{}'.", match, candidateId);
+            return (ProjectComponentIdentifierInternal) match;
         }
-        SortedSet<String> sortedProjects = Sets.newTreeSet(CollectionUtils.collect(providingProjects, new Transformer<String, ProjectComponentIdentifier>() {
-            @Override
-            public String transform(ProjectComponentIdentifier projectComponentIdentifier) {
-                return projectComponentIdentifier.getDisplayName();
-            }
-        }));
-        String failureMessage = String.format("Module version '%s' is not unique in composite: can be provided by %s.", selector.getDisplayName(), sortedProjects);
-        throw new ModuleVersionResolveException(selector, failureMessage);
+        throw new ModuleVersionResolveException(selector, () -> {
+            SortedSet<String> sortedProjects =
+                providingProjects.stream()
+                .map(ComponentIdentifier::getDisplayName)
+                .collect(Collectors.toCollection(TreeSet::new));
+            return String.format("Module version '%s' is not unique in composite: can be provided by %s.", selector.getDisplayName(), sortedProjects);
+        });
     }
 }

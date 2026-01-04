@@ -11,17 +11,18 @@ class MyTask extends DefaultTask {
     }
 }
 
-task generateConfigFile {
-    outputs.file "config.txt"
+def generateConfigFile = tasks.register("generateConfigFile") {
+    def outputFile = file("config.txt")
+    outputs.file outputFile
     doLast {
-        file("config.txt").text = "my config"
+        outputFile.text = "my config"
     }
 }
 
 task generateConfigZip(type: Zip) {
-    destinationDir = projectDir
-    archiveName = "config.zip"
-    from generateConfigFile
+    destinationDirectory = projectDir
+    archiveFileName = "config.zip"
+    from generateConfigFile.get()
 }
 
 configurations {
@@ -43,6 +44,11 @@ task fileText(type: MyTask) {
 }
 
 task fileCollectionText(type: MyTask) {
+    config = resources.text.fromFile(generateConfigFile.get())
+    output = project.file("output.txt")
+}
+
+task fileCollectionTextUsingTaskProvider(type: MyTask) {
     config = resources.text.fromFile(generateConfigFile)
     output = project.file("output.txt")
 }

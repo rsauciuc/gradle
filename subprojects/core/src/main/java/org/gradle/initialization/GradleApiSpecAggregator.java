@@ -18,7 +18,7 @@ package org.gradle.initialization;
 
 import com.google.common.collect.ImmutableSet;
 import org.gradle.initialization.GradleApiSpecProvider.Spec;
-import org.gradle.internal.reflect.DirectInstantiator;
+import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.DefaultServiceLocator;
 
 import java.util.List;
@@ -27,9 +27,11 @@ import java.util.Set;
 class GradleApiSpecAggregator {
 
     private final ClassLoader classLoader;
+    private final Instantiator instantiator;
 
-    public GradleApiSpecAggregator(ClassLoader classLoader) {
+    public GradleApiSpecAggregator(ClassLoader classLoader, Instantiator instantiator) {
         this.classLoader = classLoader;
+        this.instantiator = instantiator;
     }
 
     public Spec aggregate() {
@@ -54,14 +56,26 @@ class GradleApiSpecAggregator {
     }
 
     private Spec mergeSpecsOf(List<Class<? extends GradleApiSpecProvider>> providers) {
+        final ImmutableSet.Builder<Class<?>> exportedClasses = ImmutableSet.builder();
         final ImmutableSet.Builder<String> exportedPackages = ImmutableSet.builder();
+        final ImmutableSet.Builder<String> exportedResources = ImmutableSet.builder();
         final ImmutableSet.Builder<String> exportedResourcePrefixes = ImmutableSet.builder();
+        final ImmutableSet.Builder<String> unexportedPackages = ImmutableSet.builder();
         for (Class<? extends GradleApiSpecProvider> provider : providers) {
             Spec spec = specFrom(provider);
+            exportedClasses.addAll(spec.getExportedClasses());
             exportedPackages.addAll(spec.getExportedPackages());
+            exportedResources.addAll(spec.getExportedResources());
             exportedResourcePrefixes.addAll(spec.getExportedResourcePrefixes());
+            unexportedPackages.addAll(spec.getUnexportedPackages());
         }
-        return new DefaultSpec(exportedPackages.build(), exportedResourcePrefixes.build());
+        return new DefaultSpec(
+            exportedClasses.build(),
+            exportedPackages.build(),
+            exportedResources.build(),
+            exportedResourcePrefixes.build(),
+            unexportedPackages.build()
+        );
     }
 
     private List<Class<? extends GradleApiSpecProvider>> providers() {
@@ -69,17 +83,34 @@ class GradleApiSpecAggregator {
     }
 
     private GradleApiSpecProvider instantiate(Class<? extends GradleApiSpecProvider> providerClass) {
-        return DirectInstantiator.INSTANCE.newInstance(providerClass);
+        return instantiator.newInstance(providerClass);
     }
 
     static class DefaultSpec implements Spec {
 
+        private final ImmutableSet<Class<?>> exportedClasses;
         private final ImmutableSet<String> exportedPackages;
+        private final ImmutableSet<String> exportedResources;
         private final ImmutableSet<String> exportedResourcePrefixes;
+        private final ImmutableSet<String> unexportedPackages;
 
-        DefaultSpec(ImmutableSet<String> exportedPackages, ImmutableSet<String> exportedResourcePrefixes) {
+        DefaultSpec(
+            ImmutableSet<Class<?>> exportedClasses,
+            ImmutableSet<String> exportedPackages,
+            ImmutableSet<String> exportedResources,
+            ImmutableSet<String> exportedResourcePrefixes,
+            ImmutableSet<String> unexportedPackages
+        ) {
+            this.exportedClasses = exportedClasses;
             this.exportedPackages = exportedPackages;
+            this.exportedResources = exportedResources;
             this.exportedResourcePrefixes = exportedResourcePrefixes;
+            this.unexportedPackages = unexportedPackages;
+        }
+
+        @Override
+        public Set<Class<?>> getExportedClasses() {
+            return exportedClasses;
         }
 
         @Override
@@ -88,8 +119,18 @@ class GradleApiSpecAggregator {
         }
 
         @Override
+        public Set<String> getExportedResources() {
+            return exportedResources;
+        }
+
+        @Override
         public Set<String> getExportedResourcePrefixes() {
             return exportedResourcePrefixes;
+        }
+
+        @Override
+        public ImmutableSet<String> getUnexportedPackages() {
+            return unexportedPackages;
         }
     }
 }

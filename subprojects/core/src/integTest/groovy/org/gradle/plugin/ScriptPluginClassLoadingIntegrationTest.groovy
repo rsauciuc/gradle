@@ -17,7 +17,10 @@
 package org.gradle.plugin
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
 import org.gradle.test.fixtures.plugin.PluginBuilder
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
 import spock.lang.Issue
 
 import static org.gradle.util.Matchers.containsText
@@ -27,7 +30,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
     def pluginBuilder = new PluginBuilder(file("plugin"))
 
     @Issue("https://issues.gradle.org/browse/GRADLE-3069")
-    def "second level and beyond script plugins have same class loader scope as original target"() {
+    def "second level and beyond script plugins have same base class loader scope as caller"() {
         when:
         file("buildSrc/src/main/java/pkg/Thing.java") << """
             package pkg;
@@ -50,7 +53,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
             task sayMessageFrom3 { doLast { println new pkg.Thing().getMessage() } }
         """
 
-        buildScript "apply from: 'plugin1.gradle'"
+        buildFile "apply from: 'plugin1.gradle'"
 
         then:
         succeeds "sayMessageFrom1", "sayMessageFrom2", "sayMessageFrom3"
@@ -60,7 +63,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
     @Issue("https://issues.gradle.org/browse/GRADLE-3079")
     def "methods defined in script are available to used script plugins"() {
         given:
-        buildScript """
+        buildFile """
           def addTask(project) {
             project.tasks.create("hello").doLast { println "hello from method" }
           }
@@ -79,7 +82,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
 
     def "methods defined in script plugin are not inherited by applied script plugin"() {
         given:
-        buildScript """
+        buildFile """
             apply from: "script1.gradle"
         """
 
@@ -93,7 +96,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
         """
 
         when:
-        fails "tasks"
+        fails "help"
 
         then:
         failure.assertHasFileName("Script '${file("script2.gradle").absolutePath}'")
@@ -106,12 +109,12 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
             def someMethod() {}
         """
 
-        buildScript """
+        buildFile """
             someMethod()
         """
 
         when:
-        fails "tasks"
+        fails "help"
 
         then:
         failure.assertHasFileName("Build file '${buildFile.absolutePath}'")
@@ -124,23 +127,27 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
             def someMethod() {}
         """
 
-        buildScript """
+        buildFile """
             someMethod()
         """
 
         when:
-        fails "tasks", "-I", file("init.gradle").absolutePath
+        fails "help", "-I", file("init.gradle").absolutePath
 
         then:
         failure.assertHasFileName("Build file '${buildFile.absolutePath}'")
         failure.assertThatCause(containsText("Could not find method someMethod()"))
     }
 
+    @Requires(
+        value = IntegTestPreconditions.NotIsolatedProjects,
+        reason = "Exercises IP incompatible behavior"
+    )
     def "methods defined in a build script are visible to scripts applied to sub projects"() {
         given:
         settingsFile << "include 'sub'"
 
-        buildScript """
+        buildFile """
             def someMethod() {
                 println "from some method"
             }
@@ -150,7 +157,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
         file("sub/script.gradle") << "someMethod()"
 
         when:
-        run "tasks"
+        run "help"
 
         then:
         output.contains("from some method")
@@ -159,7 +166,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
     @Issue("https://issues.gradle.org/browse/GRADLE-3082")
     def "can use apply block syntax to apply multiple scripts"() {
         given:
-        buildScript """
+        buildFile """
           apply {
             from "script1.gradle"
             from "script2.gradle"
@@ -179,7 +186,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
 
     def "separate classloaders are used when using multi apply syntax"() {
         given:
-        buildScript """
+        buildFile """
           apply {
             from "script1.gradle"
             from "script2.gradle"
@@ -190,13 +197,14 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
         file("script2.gradle") << "new Foo()"
 
         when:
-        fails "tasks"
+        fails "help"
 
         then:
         failure.assertHasFileName("Script '${file("script2.gradle").absolutePath}'")
         failure.assertThatCause(containsText("unable to resolve class Foo"))
     }
 
+    @ToBeFixedForIsolatedProjects(because = "Investigate")
     def "script plugin buildscript does not affect client"() {
         given:
         def jar = file("plugin.jar")
@@ -205,7 +213,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
 
         settingsFile << "include 'sub'"
 
-        buildScript """
+        buildFile """
             apply from: "script.gradle"
 
             try {
@@ -253,7 +261,7 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
         pluginBuilder.addPlugin("project.task('hello')")
         pluginBuilder.publishTo(executer, jar)
 
-        buildScript """
+        buildFile """
             buildscript {
                 dependencies { classpath files("plugin.jar") }
             }
@@ -280,5 +288,68 @@ class ScriptPluginClassLoadingIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         output.contains "not in script"
+    }
+
+    def "second level script plugin cannot access classes added by buildscript in applying script"() {
+        given:
+        def jar = file("plugin.jar")
+        pluginBuilder.addPlugin("project.task('hello')")
+        pluginBuilder.publishTo(executer, jar)
+
+        buildFile """
+            apply from: "script1.gradle"
+        """
+
+        file("script1.gradle") << """
+            buildscript {
+                dependencies { classpath files("plugin.jar") }
+            }
+
+            apply plugin: org.gradle.test.TestPlugin
+            ext.pluginClass = org.gradle.test.TestPlugin
+
+            apply from: "script2.gradle"
+        """
+
+        file("script2.gradle") << """
+            try {
+                getClass().classLoader.loadClass(pluginClass.name)
+                assert false
+            } catch (ClassNotFoundException ignore) {
+                println "not in script"
+            } finally {
+                getClass().classLoader.close()
+            }
+        """
+
+        when:
+        succeeds "hello"
+
+        then:
+        output.contains "not in script"
+    }
+
+    def "Can apply a script plugin to the buildscript block"() {
+        given:
+        def jar = file("plugin.jar")
+        pluginBuilder.addPlugin("project.task('hello')")
+        pluginBuilder.publishTo(executer, jar)
+
+        buildFile """
+            apply from: 'foo.gradle'
+        """
+
+        file("foo.gradle") << """
+            buildscript {
+                apply from: "repositories.gradle", to: buildscript
+                dependencies { classpath files("plugin.jar") }
+            }
+        """
+
+        file("repositories.gradle") << """
+        """
+
+        expect:
+        succeeds "help"
     }
 }

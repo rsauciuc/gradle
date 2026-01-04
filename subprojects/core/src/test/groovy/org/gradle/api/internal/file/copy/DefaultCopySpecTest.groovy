@@ -23,29 +23,27 @@ import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Transformer
 import org.gradle.api.file.CopySpec
 import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.file.UserClassFilePermissions
+import org.gradle.api.file.FilePermissions
 import org.gradle.api.file.RelativePath
-import org.gradle.api.internal.file.FileResolver
+import org.gradle.api.internal.file.DefaultConfigurableFilePermissions
 import org.gradle.api.internal.file.TestFiles
-import org.gradle.api.specs.Spec
+import org.gradle.api.internal.file.pattern.PatternMatcher
 import org.gradle.internal.Actions
-import org.gradle.internal.reflect.DirectInstantiator
-import org.gradle.internal.reflect.Instantiator
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.TestUtil
 import org.junit.Rule
-import spock.lang.Shared
 import spock.lang.Specification
-import spock.lang.Unroll
 
 import java.nio.charset.Charset
 
 class DefaultCopySpecTest extends Specification {
     @Rule
-    public TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider();
-    @Shared
-    private FileResolver fileResolver = [resolve: { it as File }, getPatternSetFactory: { TestFiles.getPatternSetFactory() }] as FileResolver
-    @Shared
-    private Instantiator instantiator = DirectInstantiator.INSTANCE
-    private final DefaultCopySpec spec = new DefaultCopySpec(fileResolver, instantiator)
+    public TestNameTestDirectoryProvider testDir = new TestNameTestDirectoryProvider(getClass())
+    private fileCollectionFactory = TestFiles.fileCollectionFactory(testDir.testDirectory)
+    private propertyFactory = TestUtil.propertyFactory()
+    private instantiator = TestUtil.instantiatorFactory().decorateLenient()
+    private final DefaultCopySpec spec = new DefaultCopySpec(fileCollectionFactory, propertyFactory, instantiator, TestFiles.patternSetFactory)
 
     private List<String> getTestSourceFileNames() {
         ['first', 'second']
@@ -105,8 +103,8 @@ class DefaultCopySpecTest extends Specification {
 
     def 'with Spec'() {
         given:
-        DefaultCopySpec other1 = new DefaultCopySpec(fileResolver, instantiator)
-        DefaultCopySpec other2 = new DefaultCopySpec(fileResolver, instantiator)
+        def other1 = Stub(CopySpecInternal)
+        def other2 = Stub(CopySpecInternal)
 
         when:
         spec.with other1, other2
@@ -182,6 +180,16 @@ class DefaultCopySpecTest extends Specification {
         spec.copyActions.size() == 1
     }
 
+    def 'expand with action'() {
+        when:
+        spec.expand(version: '1.2', skip: 2) {details ->
+            details.escapeBackslash = true
+        }
+
+        then:
+        spec.copyActions.size() == 1
+    }
+
     def 'two filters'() {
         when:
         spec.filter(StripJavaComments)
@@ -233,27 +241,6 @@ class DefaultCopySpecTest extends Specification {
         spec.copyActions.size() == 1
     }
 
-    def 'has no source by default'() {
-        expect:
-        !spec.hasSource()
-    }
-
-    def 'has source when Spec has source'() {
-        when:
-        spec.from 'source'
-
-        then:
-        spec.hasSource()
-    }
-
-    def 'has source when child Spec has source'() {
-        when:
-        spec.from('source') {}
-
-        then:
-        spec.hasSource()
-    }
-
     def 'matching creates appropriate action'() {
         when:
         spec.filesMatching 'root/**/a*', Actions.doNothing()
@@ -262,14 +249,14 @@ class DefaultCopySpecTest extends Specification {
         spec.copyActions.size() == 1
         def (copyAction) = spec.copyActions
         copyAction instanceof MatchingCopyAction
-        Spec<RelativePath> matchSpec = copyAction.matchSpec
+        PatternMatcher matcher = copyAction.matcher
 
         ['/root/folder/abc', '/root/abc'].each {
-            assert matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher, it
         }
 
         ['/notRoot/abc', '/not/root/abc', 'root/bbc', 'notRoot/bbc'].each {
-            assert !matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher.negate(), it
         }
     }
 
@@ -281,14 +268,14 @@ class DefaultCopySpecTest extends Specification {
         spec.copyActions.size() == 1
         def (copyAction) = spec.copyActions
         copyAction instanceof MatchingCopyAction
-        Spec<RelativePath> matchSpec = copyAction.matchSpec
+        PatternMatcher matcher = copyAction.matcher
 
         ['/root/folder/abc', '/root/abc', 'special/foo', 'banner.txt'].each {
-            assert matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher, it
         }
 
         ['/notRoot/abc', '/not/root/abc', 'root/bbc', 'notRoot/bbc', 'not/special/bar'].each {
-            assert !matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher.negate(), it
         }
     }
 
@@ -300,14 +287,14 @@ class DefaultCopySpecTest extends Specification {
         spec.copyActions.size() == 1
         def (copyAction) = spec.copyActions
         copyAction instanceof MatchingCopyAction
-        Spec<RelativePath> matchSpec = copyAction.matchSpec
+        PatternMatcher matcher = copyAction.matcher
 
         ['root/folder1/folder2', 'modules/project1'].each {
-            assert matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher, it
         }
 
         ['archive/folder/file', 'root/archives/file', 'root/folder/abc'].each {
-            assert !matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher.negate(), it
         }
     }
 
@@ -319,17 +306,22 @@ class DefaultCopySpecTest extends Specification {
         spec.copyActions.size() == 1
         def (copyAction) = spec.copyActions
         copyAction instanceof MatchingCopyAction
-        Spec<RelativePath> matchSpec = copyAction.matchSpec
+        PatternMatcher matcher = copyAction.matcher
 
         ['root/folder1/folder2', 'modules/project1'].each {
-            assert matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher, it
         }
 
         ['archive/folder/file', 'root/archives/file', 'root/folder/abc',
          'collections/folder/file', 'root/collections/file', 'archives/collections/file',
          'root/folder/cde'].each {
-            assert !matchSpec.isSatisfiedBy(relativeFile(it))
+            assertMatches matcher.negate(), it
         }
+    }
+
+    private static void assertMatches(PatternMatcher matcher, String path) {
+        def file = relativeFile(path)
+        assert matcher.test(file.segments, file.isFile())
     }
 
     def 'add Spec as first child'() {
@@ -384,7 +376,7 @@ class DefaultCopySpecTest extends Specification {
         spec.children == [child1, child2, child3]
 
         where:
-        notContainedChild << [null, new DefaultCopySpec(fileResolver, instantiator)]
+        notContainedChild << [null, Stub(CopySpecInternal)]
     }
 
     def 'properties accessed directly have defaults'() {
@@ -392,65 +384,84 @@ class DefaultCopySpecTest extends Specification {
         spec.caseSensitive
         spec.includeEmptyDirs
         spec.duplicatesStrategy == DuplicatesStrategy.INCLUDE
-        spec.fileMode == null
-        spec.dirMode == null
+        !spec.filePermissions.isPresent()
+        !spec.dirPermissions.isPresent()
         spec.filteringCharset == Charset.defaultCharset().name()
+    }
 
+    def 'file permissions can be set via #method'(String method, Closure setter) {
         when:
         spec.caseSensitive = false
         spec.includeEmptyDirs = false
         spec.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        spec.fileMode = 1
-        spec.dirMode = 2
+        setter.call(spec)
         spec.filteringCharset = 'UTF8'
 
         then:
         !spec.caseSensitive
         !spec.includeEmptyDirs
         spec.duplicatesStrategy == DuplicatesStrategy.EXCLUDE
-        spec.fileMode == 1
-        spec.dirMode == 2
+        toPermissionString(spec.filePermissions.get()) == "r--r--r--"
+        toPermissionString(spec.dirPermissions.get()) == "rw-r-xr-x"
         spec.filteringCharset == 'UTF8'
+
+        where:
+        method             | setter
+        "property"              | { DefaultCopySpec spec ->
+            spec.filePermissions.value(new DefaultConfigurableFilePermissions(0444))
+            spec.dirPermissions.value(new DefaultConfigurableFilePermissions(0655))
+        }
+        "configuration block"   | { DefaultCopySpec spec ->
+            spec.filePermissions {
+                it.user.write = false
+            }
+            spec.dirPermissions {
+                it.user.execute = false
+            }
+        }
     }
 
-    @Unroll
     def 'properties accessed directly on specs created using #method inherit from parents'() {
         when: //set non defaults on root
         spec.caseSensitive = false
         spec.includeEmptyDirs = false
         spec.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        spec.fileMode = 1
-        spec.dirMode = 2
+        spec.filePermissions { it.unix(1) }
+        spec.dirPermissions { it.unix(2) }
         spec.filteringCharset = "ISO_8859_1"
 
         DefaultCopySpec child = unpackWrapper(spec."${method}"("child") {})
 
         then: //children still have these non defaults
-        !child.caseSensitive;
-        !child.includeEmptyDirs;
+        !child.caseSensitive
+        !child.includeEmptyDirs
         child.duplicatesStrategy == DuplicatesStrategy.EXCLUDE
-        child.fileMode == 1
-        child.dirMode == 2
+        child.filePermissions.get().toUnixNumeric() == 1
+        child.dirPermissions.get().toUnixNumeric() == 2
         child.filteringCharset == "ISO_8859_1"
 
         where:
         method << ['from', 'into']
     }
 
-    @Unroll
-    def 'setting the filteringCharset to #invalidFilteringCharset throws an exception'(invalidFilteringCharset) {
+    def 'setting the filteringCharset to invalid value throws an exception'() {
+        when:
+        spec.filteringCharset = "THAT_SURE_IS_AN_INVALID_CHARSET"
+
+        then:
+        thrown(InvalidUserDataException)
+    }
+
+    def 'setting the filteringCharset to null throws an exception'() {
         when:
         spec.filteringCharset = null
 
         then:
-        thrown(InvalidUserDataException)
-
-        where:
-        invalidFilteringCharset << [null, "THAT_SURE_IS_AN_INVALID_CHARSET"]
+        thrown(NullPointerException)
     }
 
     def 'can add spec hierarchy as child'() {
-        CopySpec otherSpec = new DefaultCopySpec(fileResolver, instantiator)
+        CopySpec otherSpec = new DefaultCopySpec(fileCollectionFactory, propertyFactory, instantiator, TestFiles.patternSetFactory)
         otherSpec.addChild()
         def added = []
 
@@ -479,15 +490,30 @@ class DefaultCopySpecTest extends Specification {
         added == ['$2$2', '$2$2$1']
     }
 
-    private DefaultCopySpec unpackWrapper(CopySpec copySpec) {
+    private static DefaultCopySpec unpackWrapper(CopySpec copySpec) {
         (copySpec as CopySpecWrapper).delegate as DefaultCopySpec
     }
 
-    private RelativePath relativeDirectory(String... segments) {
+    private static RelativePath relativeDirectory(String... segments) {
         new RelativePath(false, segments)
     }
 
-    private RelativePath relativeFile(String segments) {
+    private static RelativePath relativeFile(String segments) {
         RelativePath.parse(true, segments)
     }
+
+    static String toPermissionString(FilePermissions permissions) {
+        def user = toPermissionString(permissions.user)
+        def group = toPermissionString(permissions.group)
+        def other = toPermissionString(permissions.other)
+        return user + group  + other
+    }
+
+    static String toPermissionString(UserClassFilePermissions permission) {
+        def read = permission.read ? "r" : "-"
+        def write = permission.write ? "w" : "-"
+        def execute = permission.execute ? "x" : "-"
+        return read + write + execute
+    }
+
 }

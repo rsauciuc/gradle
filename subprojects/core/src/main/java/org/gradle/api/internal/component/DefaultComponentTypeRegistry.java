@@ -16,15 +16,16 @@
 
 package org.gradle.api.internal.component;
 
-import com.google.common.collect.Maps;
 import org.gradle.api.component.Artifact;
 import org.gradle.api.component.Component;
 
+import java.util.HashMap;
 import java.util.Map;
 
 public class DefaultComponentTypeRegistry implements ComponentTypeRegistry {
-    private final Map<Class<? extends Component>, ComponentTypeRegistration> componentRegistrations = Maps.newHashMap();
+    private final Map<Class<? extends Component>, ComponentTypeRegistration> componentRegistrations = new HashMap<>();
 
+    @Override
     public ComponentTypeRegistration maybeRegisterComponentType(Class<? extends Component> componentType) {
         ComponentTypeRegistration registration = componentRegistrations.get(componentType);
         if (registration == null) {
@@ -34,6 +35,7 @@ public class DefaultComponentTypeRegistry implements ComponentTypeRegistry {
         return registration;
     }
 
+    @Override
     public ComponentTypeRegistration getComponentRegistration(Class<? extends Component> componentType) {
         ComponentTypeRegistration registration = componentRegistrations.get(componentType);
         if (registration == null) {
@@ -44,12 +46,13 @@ public class DefaultComponentTypeRegistry implements ComponentTypeRegistry {
 
     private static class DefaultComponentTypeRegistration implements ComponentTypeRegistration {
         private final Class<? extends Component> componentType;
-        private final Map<Class<? extends Artifact>, ArtifactType> typeRegistrations = Maps.newHashMap();
+        private final Map<Class<? extends Artifact>, ArtifactType> typeRegistrations = new HashMap<>();
 
         private DefaultComponentTypeRegistration(Class<? extends Component> componentType) {
             this.componentType = componentType;
         }
 
+        @Override
         public ArtifactType getArtifactType(Class<? extends Artifact> artifact) {
             ArtifactType type = typeRegistrations.get(artifact);
             if (type == null) {
@@ -58,6 +61,7 @@ public class DefaultComponentTypeRegistry implements ComponentTypeRegistry {
             return type;
         }
 
+        @Override
         public ComponentTypeRegistration registerArtifactType(Class<? extends Artifact> artifact, ArtifactType artifactType) {
             if (typeRegistrations.containsKey(artifact)) {
                 throw new IllegalStateException(String.format("Artifact type %s is already registered for component type %s.", artifact.getName(), componentType.getName()));

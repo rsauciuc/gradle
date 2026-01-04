@@ -25,13 +25,9 @@ class ProjectSpecs {
 
     static ProjectSpec forStartParameter(StartParameter startParameter, SettingsInternal settings) {
         File explicitProjectDir = startParameter.getProjectDir();
-        File explicitBuildFile = startParameter.getBuildFile();
-        if (explicitBuildFile != null) {
-            return new BuildFileProjectSpec(explicitBuildFile);
-        }
         if (explicitProjectDir != null) {
             return new ProjectDirectoryProjectSpec(explicitProjectDir);
         }
-        return new DefaultProjectSpec(startParameter.getCurrentDir(), settings);
+        return new CurrentDirectoryProjectSpec(startParameter.getCurrentDir(), settings);
     }
 }

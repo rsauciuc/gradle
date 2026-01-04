@@ -16,41 +16,48 @@
 
 package org.gradle.api.internal.tasks.options;
 
+import org.gradle.api.file.FileSystemLocation;
 import org.gradle.internal.Cast;
 import org.gradle.internal.exceptions.DiagnosticsVisitor;
+import org.gradle.internal.typeconversion.DoubleFromCharSequenceNotationConverter;
 import org.gradle.internal.typeconversion.EnumFromCharSequenceNotationParser;
+import org.gradle.internal.typeconversion.IntegerFromCharSequenceNotationConverter;
+import org.gradle.internal.typeconversion.JavaVersionFromCharSequenceNotationConverter;
+import org.gradle.internal.typeconversion.JvmVendorSpecFromCharSequenceNotationConverter;
+import org.gradle.internal.typeconversion.LongFromCharSequenceNotationConverter;
 import org.gradle.internal.typeconversion.NotationConverter;
 import org.gradle.internal.typeconversion.NotationConverterToNotationParserAdapter;
 import org.gradle.internal.typeconversion.NotationParser;
+import org.gradle.jvm.toolchain.JavaLanguageVersion;
+import org.gradle.jvm.toolchain.JvmVendorSpec;
 
 public class OptionValueNotationParserFactory {
     public <T> NotationParser<CharSequence, T> toComposite(Class<T> targetType) throws OptionValidationException {
-        assert targetType != null : "resultingType cannot be null";
-        if (targetType == Void.TYPE) {
-            return new UnsupportedNotationParser<T>();
-        } else if (targetType.isAssignableFrom(String.class) || targetType == java.util.List.class) {
+        if (targetType.isAssignableFrom(String.class) || targetType.isAssignableFrom(FileSystemLocation.class)) {
             return Cast.uncheckedCast(new NoDescriptionValuesJustReturningParser());
+        } else if (targetType.isAssignableFrom(JavaLanguageVersion.class)) {
+            NotationConverter<CharSequence, JavaLanguageVersion> converter = new JavaVersionFromCharSequenceNotationConverter();
+            return Cast.uncheckedCast(new NotationConverterToNotationParserAdapter<>(converter));
+        } else if (targetType.isAssignableFrom(JvmVendorSpec.class)) {
+            NotationConverter<CharSequence, JvmVendorSpec> converter = new JvmVendorSpecFromCharSequenceNotationConverter();
+            return Cast.uncheckedCast(new NotationConverterToNotationParserAdapter<>(converter));
         } else if (targetType.isEnum()) {
-            NotationConverter<CharSequence, T> converter = Cast.uncheckedCast(new EnumFromCharSequenceNotationParser<Enum>(targetType.asSubclass(Enum.class)));
-            return new NotationConverterToNotationParserAdapter<CharSequence, T>(converter);
+            @SuppressWarnings({"rawtypes", "unchecked"})
+            NotationConverter<CharSequence, T> converter = new EnumFromCharSequenceNotationParser(targetType.asSubclass(Enum.class));
+            return new NotationConverterToNotationParserAdapter<>(converter);
+        } else if (targetType.isAssignableFrom(Double.class)) {
+            return new NotationConverterToNotationParserAdapter<>(Cast.uncheckedCast(new DoubleFromCharSequenceNotationConverter()));
+        } else if (targetType.isAssignableFrom(Integer.class)) {
+            return new NotationConverterToNotationParserAdapter<>(Cast.uncheckedCast(new IntegerFromCharSequenceNotationConverter()));
+        } else if (targetType.isAssignableFrom(Long.class)) {
+            return new NotationConverterToNotationParserAdapter<>(Cast.uncheckedCast(new LongFromCharSequenceNotationConverter()));
         }
 
         throw new OptionValidationException(String.format("Don't know how to convert strings to type '%s'.", targetType.getName()));
     }
 
-    private static class UnsupportedNotationParser<T> implements NotationParser<CharSequence, T> {
-
-        public T parseNotation(CharSequence notation) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void describe(DiagnosticsVisitor visitor) {
-        }
-
-    }
-
     private static class NoDescriptionValuesJustReturningParser implements NotationParser<CharSequence, String> {
+        @Override
         public String parseNotation(CharSequence notation) {
             return notation.toString();
         }
@@ -59,6 +66,5 @@ public class OptionValueNotationParserFactory {
         public void describe(DiagnosticsVisitor visitor) {
             visitor.candidate("Instances of String or CharSequence.");
         }
-
     }
 }

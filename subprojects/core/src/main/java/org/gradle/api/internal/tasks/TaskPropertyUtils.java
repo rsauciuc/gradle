@@ -16,38 +16,45 @@
 
 package org.gradle.api.internal.tasks;
 
-import com.google.common.collect.ImmutableSortedSet;
-import com.google.common.collect.Sets;
-import org.gradle.api.tasks.TaskPropertyBuilder;
+import com.google.common.annotations.VisibleForTesting;
+import org.gradle.api.internal.TaskInternal;
+import org.gradle.internal.properties.PropertyVisitor;
+import org.gradle.internal.properties.bean.PropertyWalker;
+import org.gradle.internal.reflect.validation.TypeValidationContext;
+import org.jspecify.annotations.NullMarked;
 
-import java.util.Iterator;
-import java.util.Set;
-
+@NullMarked
 public class TaskPropertyUtils {
-
-    // Note: sorted set used to keep order of properties consistent
-    public static <T extends TaskFilePropertySpec> ImmutableSortedSet<T> collectFileProperties(String displayName, Iterator<? extends T> fileProperties) {
-        Set<String> names = Sets.newHashSet();
-        ImmutableSortedSet.Builder<T> builder = ImmutableSortedSet.naturalOrder();
-        while (fileProperties.hasNext()) {
-            T propertySpec = fileProperties.next();
-            String propertyName = propertySpec.getPropertyName();
-            if (!names.add(propertyName)) {
-                throw new IllegalArgumentException(String.format("Multiple %s file properties with name '%s'", displayName, propertyName));
-            }
-            builder.add(propertySpec);
-        }
-        return builder.build();
+    /**
+     * Visits both properties declared via annotations on the properties of the task type as well as
+     * properties declared via the runtime API ({@link org.gradle.api.tasks.TaskInputs} etc.).
+     */
+    // TODO Move this to some test fixture like TaskPropertyTestUtils
+    @VisibleForTesting
+    public static void visitProperties(PropertyWalker propertyWalker, TaskInternal task, PropertyVisitor visitor) {
+        visitProperties(propertyWalker, task, TypeValidationContext.NOOP, visitor);
     }
 
-    public static <T extends TaskPropertySpec & TaskPropertyBuilder> void ensurePropertiesHaveNames(Iterable<T> properties) {
-        int unnamedPropertyCounter = 0;
-        for (T propertySpec : properties) {
-            String propertyName = propertySpec.getPropertyName();
-            if (propertyName == null) {
-                propertyName = "$" + (++unnamedPropertyCounter);
-                propertySpec.withPropertyName(propertyName);
-            }
-        }
+    /**
+     * Visits both properties declared via annotations on the properties of the task type as well as
+     * properties declared via the runtime API ({@link org.gradle.api.tasks.TaskInputs} etc.).
+     *
+     * Reports errors and warnings to the given validation context.
+     */
+    public static void visitProperties(PropertyWalker propertyWalker, TaskInternal task, TypeValidationContext validationContext, PropertyVisitor visitor) {
+        visitAnnotatedProperties(propertyWalker, task, validationContext, visitor);
+        visitRegisteredProperties(task, visitor);
+    }
+
+    private static void visitRegisteredProperties(TaskInternal task, PropertyVisitor visitor) {
+        task.getInputs().visitRegisteredProperties(visitor);
+        task.getOutputs().visitRegisteredProperties(visitor);
+        ((TaskDestroyablesInternal) task.getDestroyables()).visitRegisteredProperties(visitor);
+        ((TaskLocalStateInternal) task.getLocalState()).visitRegisteredProperties(visitor);
+        // build services declared via Task#usesService are not visited as there is no use case for that
+    }
+
+    static void visitAnnotatedProperties(PropertyWalker propertyWalker, TaskInternal task, TypeValidationContext validationContext, PropertyVisitor visitor) {
+        propertyWalker.visitProperties(task, validationContext, visitor);
     }
 }

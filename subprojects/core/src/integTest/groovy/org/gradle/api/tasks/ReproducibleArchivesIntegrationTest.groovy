@@ -17,16 +17,17 @@
 package org.gradle.api.tasks
 
 import org.apache.commons.io.FilenameUtils
+import org.gradle.api.JavaVersion
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.test.fixtures.archive.ArchiveTestFixture
 import org.gradle.test.fixtures.archive.TarTestFixture
 import org.gradle.test.fixtures.archive.ZipTestFixture
 import org.gradle.test.fixtures.file.TestFile
-import spock.lang.Unroll
+import spock.lang.Issue
 
-@Unroll
 class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
 
+    @Issue("https://github.com/gradle/gradle/issues/8051")
     def "reproducible #taskName for directory - #files"() {
         given:
         files.each {
@@ -37,8 +38,10 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
                 reproducibleFileOrder = true
                 preserveFileTimestamps = false
                 from 'src'
-                destinationDir = buildDir
-                archiveName = 'test.${fileExtension}'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.${fileExtension}'
+                filePermissions {}
+                dirPermissions {}
             }
             """
 
@@ -50,14 +53,14 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
 
         where:
         input << [
-            ['dir1/file11.txt', 'dir2/file22.txt', 'dir3/file33.txt'].permutations(),
+            ['DIR1/FILE11.txt', 'dir2/file22.txt', 'DIR3/file33.txt'].permutations(),
             ['zip', 'tar']
         ].combinations()
         files = input[0]
         taskName = input[1]
         taskType = taskName.capitalize()
         fileExtension = taskName
-        expectedHash = taskName == 'tar' ? 'b99ef9e1ce3d2f85334a4a23a2620932' : 'cecc57bfa8747b4f39fa4a5e1c0dbd31'
+        expectedHash = taskName == 'tar' ? 'e700ead57290d37d0950a9c87689e6e4' : '002ed122f6f71124e244151251037162'
     }
 
     def "timestamps are ignored in #taskName"() {
@@ -68,8 +71,10 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
                 reproducibleFileOrder = true
                 preserveFileTimestamps = false
                 from 'dir1'
-                destinationDir = buildDir
-                archiveName = 'test.${fileExtension}'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.${fileExtension}'
+                filePermissions {}
+                dirPermissions {}
             }
             """
 
@@ -100,11 +105,13 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
         buildFile << """
             task tar(type: Tar) {
                 reproducibleFileOrder = true
-                preserveFileTimestamps = false  
+                preserveFileTimestamps = false
                 compression = '${compression}'
                 from 'dir1', 'dir2', 'dir3'
-                destinationDir = buildDir
-                archiveName = 'test.tar.${compression}'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.tar.${compression}'
+                filePermissions {}
+                dirPermissions {}
             }
             """
 
@@ -114,10 +121,11 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
         then:
         file("build/test.tar.${compression}").md5Hash == md5
 
+        // Reason for different gzip checksum on JDK16: https://jdk.java.net/16/release-notes#JDK-8244706
         where:
         compression | md5
-        'gzip'      | '9981efce12fd025835922ce0f2961ab9'
-        'bzip2'     | '60f165136a27358d02926f26fb184c86'
+        'gzip'      | (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_16) ? '022ce6c9bfb4705481fafdbe0d3c0334' : '7b86e679a3c6cda52736e1f167cc04f5')
+        'bzip2'     | '54615d3194655da3f7f72c8859f66fa5'
     }
 
     def "#taskName preserves order of child specs"() {
@@ -132,11 +140,13 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
                 }
                 from('dir1') {
                     into 'dir1'
-                }     
+                }
                 from 'dir1/file13.txt'
                 from 'dir1/file11.txt'
-                destinationDir = buildDir
-                archiveName = 'test.${fileExtension}'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.${fileExtension}'
+                filePermissions {}
+                dirPermissions {}
             }
         """
 
@@ -169,25 +179,33 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
             task aTar(type: Tar) {
                 reproducibleFileOrder = true
                 from('dir1')
-                destinationDir = buildDir
-                archiveName = 'test.tar'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.tar'
+                filePermissions {}
+                dirPermissions {}
             }
             task aZip(type: Zip) {
                 reproducibleFileOrder = true
                 from('dir2')
-                destinationDir = buildDir
-                archiveName = 'test.zip'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.zip'
+                filePermissions {}
+                dirPermissions {}
             }
 
             task ${taskName}(type: ${taskType}) {
                 reproducibleFileOrder = true
                 preserveFileTimestamps = false
-                destinationDir = buildDir
-                archiveName = 'combined.${fileExtension}'
+                destinationDirectory = buildDir
+                archiveFileName = 'combined.${fileExtension}'
 
-                from zipTree(aZip.archivePath)
-                from tarTree(aTar.archivePath)
+                from zipTree(aZip.archiveFile)
+                from tarTree(aTar.archiveFile)
+
                 dependsOn aZip, aTar
+
+                filePermissions {}
+                dirPermissions {}
             }
         """
 
@@ -247,7 +265,7 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
         fails taskName
 
         then:
-        failure.assertHasCause('Encountered duplicate path "test.txt" during copy operation configured with DuplicatesStrategy.FAIL')
+        failure.assertHasCause("Cannot copy file '${file('dir1/test.txt')}' to 'test.txt' because file '${file('dir2/test.txt')}' has already been copied there.")
 
         where:
         taskName << ['zip', 'tar']
@@ -263,8 +281,8 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
         task ${taskName}(type: ${taskType}) {
             reproducibleFileOrder = true
             preserveFileTimestamps = false
-            destinationDir = buildDir
-            archiveName = 'test.${fileExtension}'
+            destinationDirectory = buildDir
+            archiveFileName = 'test.${fileExtension}'
 
             from('dir1') {
                 filter { 'Goodbye' }
@@ -295,8 +313,8 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
         task ${taskName}(type: ${taskType}) {
             reproducibleFileOrder = true
             preserveFileTimestamps = false
-            destinationDir = buildDir
-            archiveName = 'test.${fileExtension}'
+            destinationDirectory = buildDir
+            archiveFileName = 'test.${fileExtension}'
 
             from('dir1') {
                 rename { it == 'test1.txt' ? 'test4.txt' : 'test3.txt' }
@@ -327,8 +345,8 @@ class ReproducibleArchivesIntegrationTest extends AbstractIntegrationSpec {
             task ${taskName}(type: ${taskType}) {
                 reproducibleFileOrder = true
                 preserveFileTimestamps = false
-                destinationDir = buildDir
-                archiveName = 'test.${fileExtension}'
+                destinationDirectory = buildDir
+                archiveFileName = 'test.${fileExtension}'
 
                 from 'dir2'
                 from 'dir1'
